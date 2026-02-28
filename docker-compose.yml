@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  kisaanai-streamlit:
+    build: .
+    container_name: kisaanai-streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    restart: unless-stopped

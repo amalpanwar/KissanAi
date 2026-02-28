@@ -1,0 +1,7 @@
+district,season,crop_name,cost_min_inr_per_acre,cost_max_inr_per_acre,market_price_inr_per_qtl,avg_yield_qtl_per_acre,source
+Meerut,Rabi,Wheat,18000,26000,2400,20,synthetic_sample
+Meerut,Rabi,Potato,60000,90000,1400,85,synthetic_sample
+Muzaffarnagar,Annual,Sugarcane,50000,80000,360,350,synthetic_sample
+Baghpat,Rabi,Mustard,12000,19000,6000,7,synthetic_sample
+Saharanpur,Kharif,Maize,15000,23000,2100,22,synthetic_sample
+Bulandshahr,Rabi,Wheat,17000,25000,2350,19,synthetic_sample

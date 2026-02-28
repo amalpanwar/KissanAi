@@ -1,0 +1,4 @@
+farmer_id,district,season,crop_name,recommendation_text,budget_min_inr,budget_max_inr,expected_yield_qtl_per_acre,expected_revenue_inr_per_acre,confidence
+F001,Meerut,Rabi,Wheat,मध्यम बजट में गेहूं स्थिर विकल्प है। समय पर सिंचाई और रोग प्रबंधन रखें।,18000,26000,20,48000,0.78
+F002,Meerut,Rabi,Potato,उच्च बजट और बाजार जोखिम सहन क्षमता हो तो आलू उच्च लाभ दे सकता है।,60000,90000,85,119000,0.65
+F003,Muzaffarnagar,Annual,Sugarcane,लंबी अवधि की नकदी फसल के रूप में गन्ना उपयुक्त है यदि सिंचाई उपलब्ध हो।,50000,80000,350,126000,0.74

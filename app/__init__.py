@@ -1,0 +1,1 @@
+"""KisaanAI core package."""

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Syntax compile check
+        run: |
+          python -m compileall app scripts streamlit_app.py
+
+      - name: Validate required deploy files
+        run: |
+          test -f Dockerfile
+          test -f docker-compose.yml
+          test -f .streamlit/config.toml
+          test -f requirements.txt
