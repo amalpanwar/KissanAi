@@ -31,19 +31,26 @@ class RAGAdvisor:
         self.top_k = cfg.top_k
 
     def answer(self, user_query: str) -> dict:
-        if self._is_greeting(user_query) and not self._has_agri_intent(user_query):
+        context_part, farmer_question = self._split_context_and_question(user_query)
+        if self._is_greeting(farmer_question) and not self._has_agri_intent(farmer_question):
             return {"answer": self._time_based_greeting(), "references": [], "retrieved": []}
 
-        normalized_query = self._normalize_hinglish(user_query)
-        qvec = self.embedder.encode([normalized_query])[0]
+        normalized_question = self._normalize_hinglish(farmer_question)
+        normalized_query = (
+            f"{context_part} किसान का प्रश्न: {normalized_question}".strip()
+            if context_part
+            else normalized_question
+        )
+
+        qvec = self.embedder.encode([normalized_question])[0]
         retrieved = self.retriever.retrieve(qvec, k=self.top_k)
         prompt = build_prompt(normalized_query, retrieved)
         try:
             response = self.generator.generate(prompt)
             if self._is_low_quality_response(response):
-                response = self._fallback_answer(retrieved, normalized_query)
+                response = self._fallback_answer(retrieved, normalized_question)
         except Exception:
-            response = self._fallback_answer(retrieved, normalized_query)
+            response = self._fallback_answer(retrieved, normalized_question)
         return {
             "answer": response,
             "references": [r.get("source_file") for r in retrieved],
@@ -122,6 +129,13 @@ class RAGAdvisor:
         for pattern, replacement in mapping.items():
             out = re.sub(pattern, replacement, out, flags=re.IGNORECASE)
         return out
+
+    def _split_context_and_question(self, text: str) -> tuple[str, str]:
+        marker = "किसान का प्रश्न:"
+        if marker in text:
+            left, right = text.split(marker, 1)
+            return left.strip(), right.strip()
+        return "", text.strip()
 
     def _is_low_quality_response(self, text: str) -> bool:
         t = (text or "").strip()
