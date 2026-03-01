@@ -10,6 +10,7 @@ from app.generator import LocalGenerator
 from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
+from app.weather import get_current_weather_hindi
 
 
 @dataclass
@@ -23,11 +24,10 @@ class AdvisorConfig:
 
 class RAGAdvisor:
     def __init__(self, cfg: AdvisorConfig) -> None:
-        self.embedder = Embedder(cfg.embedding_model)
-        store = NumpyVectorStore(cfg.index_path, cfg.metadata_path)
-        vectors, metadata = store.load()
-        self.retriever = Retriever(vectors=vectors, metadata=metadata)
-        self.generator = LocalGenerator(cfg.generator_model)
+        self.cfg = cfg
+        self.embedder: Embedder | None = None
+        self.retriever: Retriever | None = None
+        self.generator: LocalGenerator | None = None
         self.top_k = cfg.top_k
 
     def answer(self, user_query: str) -> dict:
@@ -36,11 +36,24 @@ class RAGAdvisor:
             return {"answer": self._time_based_greeting(), "references": [], "retrieved": []}
 
         normalized_question = self._normalize_hinglish(farmer_question)
+        if self._is_weather_intent(normalized_question):
+            district = self._extract_district(context_part) or "Meerut"
+            weather = get_current_weather_hindi(district)
+            return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
+
         normalized_query = (
             f"{context_part} किसान का प्रश्न: {normalized_question}".strip()
             if context_part
             else normalized_question
         )
+
+        self._ensure_rag_components()
+        if self.embedder is None or self.retriever is None or self.generator is None:
+            return {
+                "answer": "मॉडल अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।",
+                "references": [],
+                "retrieved": [],
+            }
 
         qvec = self.embedder.encode([normalized_question])[0]
         retrieved = self.retriever.retrieve(qvec, k=self.top_k)
@@ -149,3 +162,41 @@ class RAGAdvisor:
             if unique_ratio < 0.55:
                 return True
         return False
+
+    def _is_weather_intent(self, text: str) -> bool:
+        t = text.strip().lower()
+        weather_words = [
+            "weather",
+            "mausam",
+            "मौसम",
+            "बारिश",
+            "rain",
+            "temperature",
+            "तापमान",
+            "aaj ka mausam",
+            "आज का मौसम",
+            "आर्द्रता",
+            "humidity",
+        ]
+        return any(w in t for w in weather_words)
+
+    def _extract_district(self, context_part: str) -> str | None:
+        if not context_part:
+            return None
+        m_hi = re.search(r"जिला:\s*([^|]+)", context_part, flags=re.IGNORECASE)
+        if m_hi:
+            return m_hi.group(1).strip()
+        m_en = re.search(r"District:\s*([^|]+)", context_part, flags=re.IGNORECASE)
+        if m_en:
+            return m_en.group(1).strip()
+        return None
+
+    def _ensure_rag_components(self) -> None:
+        if self.embedder is None:
+            self.embedder = Embedder(self.cfg.embedding_model)
+        if self.retriever is None:
+            store = NumpyVectorStore(self.cfg.index_path, self.cfg.metadata_path)
+            vectors, metadata = store.load()
+            self.retriever = Retriever(vectors=vectors, metadata=metadata)
+        if self.generator is None:
+            self.generator = LocalGenerator(self.cfg.generator_model)
