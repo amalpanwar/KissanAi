@@ -88,36 +88,52 @@ with st.sidebar:
     preferred_crop = st.text_input("Preferred Crop (optional)", value="Wheat")
 
 st.markdown("Ask in Hindi or English. The assistant will respond in Hindi.")
-query = st.text_area(
-    "Your question",
-    placeholder="उदाहरण: मेरे पास 2 एकड़ जमीन और 50000 बजट है, रबी में कौन सी फसल लाभदायक रहेगी?",
-    height=120,
-)
 
-if st.button("Generate Advisory", type="primary"):
-    if not query.strip():
-        st.warning("Please enter a query.")
-    else:
-        advisor = get_advisor()
-        composed_query = (
-            f"District: {district} | Season: {season} | Preferred crop: {preferred_crop}. "
-            f"Farmer question: {query.strip()}"
-        )
-        with st.spinner("Generating recommendation..."):
-            result = advisor.answer(composed_query)
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-        st.subheader("Recommendation")
+for item in st.session_state.chat_history:
+    with st.chat_message(item["role"]):
+        st.write(item["text"])
+        refs = item.get("references", [])
+        if refs:
+            with st.expander("Sources Used"):
+                for src in refs:
+                    st.write(f"- {src}")
+
+user_query = st.chat_input("अपना सवाल लिखें... (e.g., 2 एकड़, ₹50,000 बजट, रबी में कौन सी फसल बेहतर है?)")
+
+if user_query:
+    st.session_state.chat_history.append({"role": "user", "text": user_query})
+    with st.chat_message("user"):
+        st.write(user_query)
+
+    advisor = get_advisor()
+    composed_query = (
+        f"District: {district} | Season: {season} | Preferred crop: {preferred_crop}. "
+        f"Farmer question: {user_query.strip()}"
+    )
+    with st.spinner("Generating recommendation..."):
+        result = advisor.answer(composed_query)
+
+    st.session_state.chat_history.append(
+        {
+            "role": "assistant",
+            "text": result["answer"],
+            "references": result.get("references", []),
+        }
+    )
+
+    with st.chat_message("assistant"):
         st.write(result["answer"])
+        with st.expander("Sources Used"):
+            for src in result.get("references", []):
+                st.write(f"- {src}")
 
-        st.subheader("Sources Used")
-        for src in result.get("references", []):
-            st.write(f"- {src}")
-
-        save_advisory(
-            farmer_id=farmer_id,
-            district=district,
-            season=season,
-            crop_name=preferred_crop or "unknown",
-            recommendation_text=result["answer"],
-        )
-        st.success("Advisory saved to historical database.")
+    save_advisory(
+        farmer_id=farmer_id,
+        district=district,
+        season=season,
+        crop_name=preferred_crop or "unknown",
+        recommendation_text=result["answer"],
+    )
