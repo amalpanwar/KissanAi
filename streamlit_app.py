@@ -110,8 +110,8 @@ if user_query:
 
     advisor = get_advisor()
     composed_query = (
-        f"District: {district} | Season: {season} | Preferred crop: {preferred_crop}. "
-        f"Farmer question: {user_query.strip()}"
+        f"जिला: {district} | मौसम: {season} | पसंदीदा फसल: {preferred_crop or 'कोई नहीं'} | "
+        f"किसान का प्रश्न: {user_query.strip()}"
     )
     with st.spinner("Generating recommendation..."):
         result = advisor.answer(composed_query)

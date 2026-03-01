@@ -20,8 +20,9 @@ def build_prompt(user_query: str, context_chunks: list[dict]) -> str:
     return (
         f"{SYSTEM_PROMPT}\n\n"
         f"संदर्भ जानकारी:\n{context_text}\n\n"
-        f"किसान का सवाल: {user_query}\n\n"
+        f"किसान का सवाल (हिंदी में समझा गया): {user_query}\n\n"
         "उत्तर संरचना:\n"
+        "0) एक पंक्ति में: समझा गया सवाल (हिंदी)\n"
         "1) सबसे उपयुक्त फसल विकल्प\n"
         "2) अपेक्षित लागत व संभावित लाभ\n"
         "3) सर्वोत्तम उत्पादन के लिए जरूरी शर्तें\n"
