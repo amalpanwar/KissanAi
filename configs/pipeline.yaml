@@ -3,12 +3,12 @@ language:
   primary: hindi
   secondary: english
 embedding_model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-generator_model: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+generator_model: Qwen/Qwen2.5-0.5B-Instruct
 chunking:
   chunk_size: 800
   overlap: 120
 retrieval:
-  top_k: 6
+  top_k: 3
 paths:
   sqlite_db: data/processed/kisaanai.db
   vector_store: data/processed/vector_index.npz

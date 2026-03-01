@@ -10,10 +10,11 @@ SYSTEM_PROMPT = """
 
 
 def build_prompt(user_query: str, context_chunks: list[dict]) -> str:
+    trimmed_context = context_chunks[:3]
     context_text = "\n\n".join(
         [
-            f"[Source: {c.get('source_file', 'unknown')}]\n{c.get('text', '')}"
-            for c in context_chunks
+            f"[Source: {c.get('source_file', 'unknown')}]\n{(c.get('text', '') or '')[:350]}"
+            for c in trimmed_context
         ]
     )
     return (
