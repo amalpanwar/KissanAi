@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from dataclasses import dataclass
 import re
+import sqlite3
 from zoneinfo import ZoneInfo
 
 from app.embeddings import Embedder
@@ -20,6 +21,7 @@ class AdvisorConfig:
     index_path: str
     metadata_path: str
     top_k: int
+    db_path: str | None = None
 
 
 class RAGAdvisor:
@@ -40,6 +42,14 @@ class RAGAdvisor:
             district = self._extract_district(context_part) or "Meerut"
             weather = get_current_weather_hindi(district)
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
+        if self._is_crop_choice_intent(normalized_question):
+            structured = self._structured_crop_recommendation(context_part, normalized_question)
+            if structured:
+                return {
+                    "answer": structured,
+                    "references": ["crop_economics (SQLite)"],
+                    "retrieved": [],
+                }
 
         normalized_query = (
             f"{context_part} किसान का प्रश्न: {normalized_question}".strip()
@@ -137,6 +147,11 @@ class RAGAdvisor:
             r"\bgehun\b": "गेहूं",
             r"\baloo\b": "आलू",
             r"\bsarso\b": "सरसों",
+            r"\bwhat crop should i grow\b": "मुझे कौन सी फसल उगानी चाहिए",
+            r"\bgrow\b": "उगानी",
+            r"\bmausam\b": "मौसम",
+            r"\baaj\b": "आज",
+            r"\bjankari\b": "जानकारी",
         }
         out = text
         for pattern, replacement in mapping.items():
@@ -190,6 +205,119 @@ class RAGAdvisor:
         if m_en:
             return m_en.group(1).strip()
         return None
+
+    def _extract_season(self, context_part: str) -> str | None:
+        if not context_part:
+            return None
+        m_hi = re.search(r"मौसम:\s*([^|]+)", context_part, flags=re.IGNORECASE)
+        if m_hi:
+            return m_hi.group(1).strip()
+        m_en = re.search(r"Season:\s*([^|]+)", context_part, flags=re.IGNORECASE)
+        if m_en:
+            return m_en.group(1).strip()
+        return None
+
+    def _extract_budget(self, text: str) -> float | None:
+        m = re.search(r"(?:₹|rs\.?|inr)?\s*([0-9][0-9,]{3,})", text, flags=re.IGNORECASE)
+        if not m:
+            return None
+        val = m.group(1).replace(",", "")
+        try:
+            return float(val)
+        except ValueError:
+            return None
+
+    def _is_crop_choice_intent(self, text: str) -> bool:
+        t = text.strip().lower()
+        keys = [
+            "what crop should i grow",
+            "कौन सी फसल",
+            "फसल बेहतर",
+            "best crop",
+            "which crop",
+            "crop to grow",
+            "फसल उगानी",
+        ]
+        return any(k in t for k in keys)
+
+    def _structured_crop_recommendation(self, context_part: str, question: str) -> str | None:
+        if not self.cfg.db_path:
+            return None
+
+        district = self._extract_district(context_part) or "Meerut"
+        season = self._extract_season(context_part) or "Rabi"
+        budget = self._extract_budget(question)
+
+        conn = sqlite3.connect(self.cfg.db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                """
+                SELECT crop_name, cost_min_inr_per_acre, cost_max_inr_per_acre,
+                       market_price_inr_per_qtl, avg_yield_qtl_per_acre
+                FROM crop_economics
+                WHERE lower(district) = lower(?) AND lower(season) = lower(?)
+                """,
+                (district, season),
+            ).fetchall()
+            if not rows:
+                rows = conn.execute(
+                    """
+                    SELECT crop_name, cost_min_inr_per_acre, cost_max_inr_per_acre,
+                           market_price_inr_per_qtl, avg_yield_qtl_per_acre
+                    FROM crop_economics
+                    WHERE lower(district) = lower(?)
+                    """,
+                    (district,),
+                ).fetchall()
+        finally:
+            conn.close()
+
+        if not rows:
+            return None
+
+        scored: list[dict] = []
+        for r in rows:
+            rev = float(r["market_price_inr_per_qtl"]) * float(r["avg_yield_qtl_per_acre"])
+            pmin = rev - float(r["cost_max_inr_per_acre"])
+            pmax = rev - float(r["cost_min_inr_per_acre"])
+            if budget is not None and float(r["cost_max_inr_per_acre"]) > budget:
+                continue
+            scored.append(
+                {
+                    "crop": r["crop_name"],
+                    "cost_min": float(r["cost_min_inr_per_acre"]),
+                    "cost_max": float(r["cost_max_inr_per_acre"]),
+                    "revenue": rev,
+                    "profit_min": pmin,
+                    "profit_max": pmax,
+                }
+            )
+
+        if not scored:
+            return (
+                f"समझा गया सवाल (हिंदी): {question}\n\n"
+                f"{district} ({season}) में आपके बजट के अंदर कोई स्पष्ट फसल विकल्प नहीं मिला। "
+                "कृपया बजट बढ़ाएँ या फसल विकल्प बताकर फिर पूछें।"
+            )
+
+        scored = sorted(scored, key=lambda x: x["profit_min"], reverse=True)[:3]
+        lines = []
+        for i, s in enumerate(scored, start=1):
+            lines.append(
+                f"{i}) {s['crop']}: लागत ₹{int(s['cost_min'])}-₹{int(s['cost_max'])}/एकड़, "
+                f"अनुमानित आय ₹{int(s['revenue'])}/एकड़, "
+                f"संभावित लाभ ₹{int(s['profit_min'])}-₹{int(s['profit_max'])}/एकड़"
+            )
+
+        budget_line = f"बजट: ₹{int(budget)} प्रति एकड़" if budget is not None else "बजट: उपलब्ध नहीं"
+        return (
+            f"समझा गया सवाल (हिंदी): {question}\n\n"
+            f"जिला: {district} | मौसम: {season} | {budget_line}\n"
+            "उपलब्ध अर्थशास्त्रीय डेटा के आधार पर सर्वोत्तम फसल विकल्प:\n"
+            + "\n".join(lines)
+            + "\n\nनोट: अंतिम निर्णय से पहले स्थानीय मंडी भाव, पानी उपलब्धता और मिट्टी की स्थिति जरूर देखें।"
+        )
 
     def _ensure_rag_components(self) -> None:
         if self.embedder is None:

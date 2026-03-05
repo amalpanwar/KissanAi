@@ -40,6 +40,7 @@ def get_advisor() -> RAGAdvisor:
             index_path=cfg.paths["vector_store"],
             metadata_path=cfg.paths["metadata_store"],
             top_k=cfg.top_k,
+            db_path=cfg.paths["sqlite_db"],
         )
     )
 

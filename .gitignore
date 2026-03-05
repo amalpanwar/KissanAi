@@ -5,3 +5,4 @@ __pycache__/
 data/processed/*.db
 data/processed/*.npz
 data/processed/*.csv
+data/raw/live/*.csv

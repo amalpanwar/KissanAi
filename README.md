@@ -146,6 +146,36 @@ gh auth login
 gh repo create <your-repo-name> --public --source=. --remote=origin --push
 ```
 
+## Data.gov.in + 15-Day LSTM Forecast
+Use these scripts to fetch commodity data from Data.gov.in and forecast 15 days ahead.
+
+1. Fetch dataset records
+   ```bash
+   export DATA_GOV_API_KEY="YOUR_DATA_GOV_API_KEY"
+   python scripts/fetch_datagov_commodity.py \
+     --resource_id "<RESOURCE_ID>" \
+     --state "Uttar Pradesh" \
+     --district "Meerut" \
+     --commodity "Wheat" \
+     --timeout 45 \
+     --out data/raw/live/datagov_commodity.csv
+   ```
+
+2. Train LSTM and predict 15 days
+   ```bash
+   python scripts/lstm_forecast_15d.py \
+     --input data/raw/live/datagov_commodity.csv \
+     --commodity Wheat \
+     --state Uttar Pradesh \
+     --district Meerut \
+     --horizon 15 \
+     --out data/processed/forecast_15d.csv
+   ```
+
+Notes:
+- If date/value column names differ, pass `--date_col` and `--value_col`.
+- Default LSTM settings: `lookback=30`, `epochs=120`.
+
 ## Notes
 - This scaffold is production-oriented but intentionally lightweight.
 - Replace sample datasets with verified district-level data for deployment.
