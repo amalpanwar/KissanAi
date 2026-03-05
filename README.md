@@ -172,6 +172,7 @@ Notes:
 - Override defaults any time with CLI flags (e.g. `--commodity`, `--district`).
 - If date/value column names differ, pass `--date_col` and `--value_col`.
 - Default LSTM settings: `lookback=30`, `epochs=120`.
+- By default, script auto-broadens scope (`district -> state -> commodity -> all`) if points are too few for stable training (`--min_points`, default 90).
 
 ## Notes
 - This scaffold is production-oriented but intentionally lightweight.

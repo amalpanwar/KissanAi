@@ -33,6 +33,7 @@ def prepare_daily_series(
     commodity: str | None = None,
     state: str | None = None,
     district: str | None = None,
+    dayfirst: bool = True,
 ) -> pd.DataFrame:
     out = df.copy()
     out.columns = [c.strip() for c in out.columns]
@@ -62,7 +63,7 @@ def prepare_daily_series(
     if out.empty:
         raise ValueError("No rows left after applying commodity/state/district filters.")
 
-    out[date_col] = pd.to_datetime(out[date_col], errors="coerce")
+    out[date_col] = pd.to_datetime(out[date_col], errors="coerce", dayfirst=dayfirst)
     out[value_col] = pd.to_numeric(out[value_col], errors="coerce")
     out = out.dropna(subset=[date_col, value_col])
 
@@ -76,12 +77,14 @@ def prepare_daily_series(
         .rename(columns={date_col: "date", value_col: "value"})
     )
     series["date"] = pd.to_datetime(series["date"])
-    series = series.sort_values("date")
+    series = series.sort_values("date").drop_duplicates(subset=["date"], keep="last")
 
     # Daily frequency with interpolation for missing days
     series = series.set_index("date").asfreq("D")
     series["value"] = series["value"].interpolate(method="linear").ffill().bfill()
-    series = series.reset_index()
+    series = series.reset_index().sort_values("date").reset_index(drop=True)
+    if not series["date"].is_monotonic_increasing:
+        raise ValueError("Date series is not sorted in ascending order after preprocessing.")
     return series
 
 
