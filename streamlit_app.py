@@ -9,6 +9,7 @@ import streamlit as st
 
 from app.advisor import AdvisorConfig, RAGAdvisor
 from app.config import load_config
+from app.datagov_client import DataGovClient
 from app.lstm_forecast import prepare_daily_series, train_and_forecast
 
 
@@ -50,18 +51,21 @@ def get_advisor() -> RAGAdvisor:
 
 
 @st.cache_data(show_spinner=False)
-def load_market_df(csv_path: str) -> pd.DataFrame:
+def load_market_df(csv_path: str, mtime_ns: int) -> pd.DataFrame:
+    _ = mtime_ns
     return pd.read_csv(csv_path)
 
 
 @st.cache_data(show_spinner=False)
 def build_forecast(
     csv_path: str,
+    mtime_ns: int,
     commodity: str,
     state: str,
     district: str,
     horizon: int = 15,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    _ = mtime_ns
     df = pd.read_csv(csv_path)
     series = prepare_daily_series(
         df=df,
@@ -78,6 +82,19 @@ def build_forecast(
         epochs=80,
     )
     return result.history, result.forecast
+
+
+def load_local_env(env_path: Path) -> dict[str, str]:
+    vals: dict[str, str] = {}
+    if not env_path.exists():
+        return vals
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        vals[k.strip()] = v.strip().strip('"').strip("'")
+    return vals
 
 
 def save_advisory(
@@ -125,11 +142,55 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("Commodity Forecast (15 Days)")
+    env_vals = load_local_env(Path(".env"))
+    api_key = os.getenv("DATA_GOV_API_KEY", "") or env_vals.get("DATA_GOV_API_KEY", "")
+    resource_id = os.getenv("DATA_GOV_RESOURCE_ID", "") or env_vals.get(
+        "DATA_GOV_RESOURCE_ID", "35985678-0d79-46b4-9ed6-6f13308a1d24"
+    )
+
+    fetch_state = st.text_input("Fetch State", value="Uttar Pradesh")
+    fetch_district = st.text_input("Fetch District", value=district)
+    fetch_commodity = st.text_input("Fetch Commodity", value=preferred_crop or "Wheat")
+    fetch_limit = st.number_input("Fetch Limit", min_value=20, max_value=2000, value=200, step=20)
+
+    if st.button("Refresh Market Data", use_container_width=True):
+        if not api_key:
+            st.warning("DATA_GOV_API_KEY not found in .env")
+        elif not resource_id:
+            st.warning("DATA_GOV_RESOURCE_ID not found in .env")
+        else:
+            with st.spinner("Fetching latest market data..."):
+                client = DataGovClient(api_key=api_key, timeout_sec=45, retries=4)
+                params = {}
+                if fetch_state.strip():
+                    params["filters[state]"] = fetch_state.strip()
+                if fetch_district.strip():
+                    params["filters[district]"] = fetch_district.strip()
+                if fetch_commodity.strip():
+                    params["filters[commodity]"] = fetch_commodity.strip()
+                try:
+                    recs = client.fetch_records(
+                        resource_id=resource_id,
+                        limit=int(fetch_limit),
+                        max_records=50000,
+                        extra_params=params,
+                    )
+                    if recs:
+                        LIVE_MARKET_CSV.parent.mkdir(parents=True, exist_ok=True)
+                        pd.DataFrame(recs).to_csv(LIVE_MARKET_CSV, index=False)
+                        st.cache_data.clear()
+                        st.success(f"Market data refreshed: {len(recs)} rows")
+                    else:
+                        st.warning("No records returned for selected filters.")
+                except Exception as e:
+                    st.error(f"Fetch failed: {e}")
+
     if not LIVE_MARKET_CSV.exists():
         st.info("No live commodity CSV found. Run data fetch script first.")
     else:
         try:
-            mdf = load_market_df(str(LIVE_MARKET_CSV))
+            mtime_ns = LIVE_MARKET_CSV.stat().st_mtime_ns
+            mdf = load_market_df(str(LIVE_MARKET_CSV), mtime_ns)
             if mdf.empty:
                 st.info("Live commodity data file is empty.")
             else:
@@ -154,6 +215,7 @@ with st.sidebar:
                     with st.spinner("Training LSTM and generating forecast..."):
                         hist, fc = build_forecast(
                             csv_path=str(LIVE_MARKET_CSV),
+                            mtime_ns=mtime_ns,
                             commodity=selected_commodity,
                             state=selected_state,
                             district=selected_district,
