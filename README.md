@@ -149,30 +149,27 @@ gh repo create <your-repo-name> --public --source=. --remote=origin --push
 ## Data.gov.in + 15-Day LSTM Forecast
 Use these scripts to fetch commodity data from Data.gov.in and forecast 15 days ahead.
 
-1. Fetch dataset records
+1. One-time setup (safe)
    ```bash
-   export DATA_GOV_API_KEY="YOUR_DATA_GOV_API_KEY"
-   python scripts/fetch_datagov_commodity.py \
-     --resource_id "<RESOURCE_ID>" \
-     --state "Uttar Pradesh" \
-     --district "Meerut" \
-     --commodity "Wheat" \
-     --timeout 45 \
-     --out data/raw/live/datagov_commodity.csv
+   cp .env.example .env
+   ```
+   Edit `.env` and set:
+   - `DATA_GOV_API_KEY`
+   - `DATA_GOV_RESOURCE_ID` (default already set)
+   - optional default filters (`DATA_GOV_STATE`, `DATA_GOV_DISTRICT`, `DATA_GOV_COMMODITY`)
+
+2. Fetch dataset records (no repeated API/resource args)
+   ```bash
+   python scripts/fetch_datagov_commodity.py
    ```
 
-2. Train LSTM and predict 15 days
+3. Train LSTM and predict 15 days
    ```bash
-   python scripts/lstm_forecast_15d.py \
-     --input data/raw/live/datagov_commodity.csv \
-     --commodity Wheat \
-     --state Uttar Pradesh \
-     --district Meerut \
-     --horizon 15 \
-     --out data/processed/forecast_15d.csv
+   python scripts/lstm_forecast_15d.py --horizon 15
    ```
 
 Notes:
+- Override defaults any time with CLI flags (e.g. `--commodity`, `--district`).
 - If date/value column names differ, pass `--date_col` and `--value_col`.
 - Default LSTM settings: `lookback=30`, `epochs=120`.
 

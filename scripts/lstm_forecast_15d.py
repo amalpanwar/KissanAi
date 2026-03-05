@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,20 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.lstm_forecast import prepare_daily_series, train_and_forecast
+
+
+def load_local_env(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
 
 
 def _guess_date_col(df: pd.DataFrame) -> str:
@@ -32,17 +47,26 @@ def _guess_value_col(df: pd.DataFrame) -> str:
 
 
 def main() -> None:
+    load_local_env(ROOT / ".env")
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, help="CSV from data.gov fetch")
-    parser.add_argument("--commodity", default=None)
-    parser.add_argument("--state", default=None)
-    parser.add_argument("--district", default=None)
+    parser.add_argument(
+        "--input",
+        default=os.getenv("DATA_GOV_OUT_CSV", "data/raw/live/datagov_commodity.csv"),
+        help="CSV from data.gov fetch",
+    )
+    parser.add_argument("--commodity", default=os.getenv("DATA_GOV_COMMODITY"))
+    parser.add_argument("--state", default=os.getenv("DATA_GOV_STATE"))
+    parser.add_argument("--district", default=os.getenv("DATA_GOV_DISTRICT"))
     parser.add_argument("--date_col", default=None)
     parser.add_argument("--value_col", default=None)
     parser.add_argument("--lookback", type=int, default=30)
     parser.add_argument("--epochs", type=int, default=120)
     parser.add_argument("--horizon", type=int, default=15)
-    parser.add_argument("--out", default="data/processed/forecast_15d.csv")
+    parser.add_argument(
+        "--out",
+        default=os.getenv("FORECAST_OUT_CSV", "data/processed/forecast_15d.csv"),
+    )
     args = parser.parse_args()
 
     df = pd.read_csv(args.input)
