@@ -21,6 +21,8 @@ st.caption("RAG + SLM based local-language advisory for crop, budget, and yield 
 
 cfg = load_config()
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
+FETCH_PAGE_LIMIT = 500
+FETCH_MAX_RECORDS = 100000
 
 
 def check_ready() -> tuple[bool, str]:
@@ -98,6 +100,34 @@ def load_local_env(env_path: Path) -> dict[str, str]:
     return vals
 
 
+def merge_market_data(existing_path: Path, new_df: pd.DataFrame) -> pd.DataFrame:
+    if existing_path.exists():
+        try:
+            old_df = pd.read_csv(existing_path)
+            merged = pd.concat([old_df, new_df], ignore_index=True)
+        except Exception:
+            merged = new_df.copy()
+    else:
+        merged = new_df.copy()
+    key_cols = [
+        c
+        for c in [
+            "State",
+            "District",
+            "Market",
+            "Commodity",
+            "Variety",
+            "Grade",
+            "Arrival_Date",
+            "Modal_Price",
+        ]
+        if c in merged.columns
+    ]
+    if key_cols:
+        merged = merged.drop_duplicates(subset=key_cols, keep="last")
+    return merged
+
+
 def filter_market_rows(
     df: pd.DataFrame,
     commodity: str,
@@ -165,10 +195,72 @@ with st.sidebar:
         "DATA_GOV_RESOURCE_ID", "35985678-0d79-46b4-9ed6-6f13308a1d24"
     )
 
-    fetch_state = st.text_input("Fetch State", value="Uttar Pradesh")
-    fetch_district = st.text_input("Fetch District", value="")
-    fetch_commodity = st.text_input("Fetch Commodity", value="")
-    fetch_limit = st.number_input("Fetch Limit", min_value=20, max_value=5000, value=500, step=20)
+    if LIVE_MARKET_CSV.exists():
+        try:
+            _init_df = pd.read_csv(LIVE_MARKET_CSV)
+            _init_df.columns = [c.strip() for c in _init_df.columns]
+        except Exception:
+            _init_df = pd.DataFrame(columns=["State", "District", "Commodity"])
+    else:
+        _init_df = pd.DataFrame(columns=["State", "District", "Commodity"])
+
+    state_options = (
+        sorted(_init_df["State"].dropna().astype(str).unique().tolist())
+        if "State" in _init_df.columns
+        else []
+    )
+    if not state_options:
+        state_options = ["Uttar Pradesh"]
+    selected_state = st.selectbox("State", state_options, index=0, key="fc_state")
+
+    district_options = (
+        sorted(
+            _init_df[_init_df["State"].astype(str) == selected_state]["District"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+        if ("State" in _init_df.columns and "District" in _init_df.columns)
+        else []
+    )
+    if not district_options:
+        district_options = [district]
+    selected_district = st.selectbox("District", district_options, index=0, key="fc_district")
+
+    commodity_options = (
+        sorted(
+            _init_df[
+                (_init_df["State"].astype(str) == selected_state)
+                & (_init_df["District"].astype(str) == selected_district)
+            ]["Commodity"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+        if (
+            "State" in _init_df.columns
+            and "District" in _init_df.columns
+            and "Commodity" in _init_df.columns
+        )
+        else []
+    )
+    if not commodity_options:
+        commodity_options = [preferred_crop or "Wheat"]
+    selected_commodity_from_dropdown = st.selectbox(
+        "Commodity (from data)",
+        commodity_options,
+        index=0,
+        key="fc_commodity_dropdown",
+    )
+    commodity_text_override = st.text_input(
+        "Commodity (type override, optional)",
+        value="",
+        key="fc_commodity_override",
+    )
+    selected_commodity = commodity_text_override.strip() or selected_commodity_from_dropdown
+
     min_raw_points = st.number_input("Min Raw Date Points", min_value=30, max_value=365, value=90, step=10)
     max_stale_days = st.number_input("Max Stale Days", min_value=0, max_value=30, value=0, step=1)
 
@@ -181,24 +273,28 @@ with st.sidebar:
             with st.spinner("Fetching latest market data..."):
                 client = DataGovClient(api_key=api_key, timeout_sec=45, retries=4)
                 params = {}
-                if fetch_state.strip():
-                    params["filters[state]"] = fetch_state.strip()
-                if fetch_district.strip():
-                    params["filters[district]"] = fetch_district.strip()
-                if fetch_commodity.strip():
-                    params["filters[commodity]"] = fetch_commodity.strip()
+                if selected_state.strip():
+                    params["filters[state]"] = selected_state.strip()
+                if selected_district.strip():
+                    params["filters[district]"] = selected_district.strip()
+                if selected_commodity.strip():
+                    params["filters[commodity]"] = selected_commodity.strip()
                 try:
                     recs = client.fetch_records(
                         resource_id=resource_id,
-                        limit=int(fetch_limit),
-                        max_records=50000,
+                        limit=FETCH_PAGE_LIMIT,
+                        max_records=FETCH_MAX_RECORDS,
                         extra_params=params,
                     )
                     if recs:
                         LIVE_MARKET_CSV.parent.mkdir(parents=True, exist_ok=True)
-                        pd.DataFrame(recs).to_csv(LIVE_MARKET_CSV, index=False)
+                        new_df = pd.DataFrame(recs)
+                        merged = merge_market_data(LIVE_MARKET_CSV, new_df)
+                        merged.to_csv(LIVE_MARKET_CSV, index=False)
                         st.cache_data.clear()
-                        st.success(f"Market data refreshed: {len(recs)} rows")
+                        st.success(
+                            f"Market data refreshed: fetched {len(new_df)} rows, stored {len(merged)} unique rows."
+                        )
                     else:
                         st.warning("No records returned for selected filters.")
                 except Exception as e:
@@ -214,22 +310,6 @@ with st.sidebar:
                 st.info("Live commodity data file is empty.")
             else:
                 mdf.columns = [c.strip() for c in mdf.columns]
-                commodities = sorted(mdf["Commodity"].dropna().astype(str).unique().tolist())
-                states = sorted(mdf["State"].dropna().astype(str).unique().tolist())
-
-                selected_commodity = st.selectbox("Commodity", commodities, index=0)
-                selected_state = st.selectbox("State", states, index=0)
-
-                district_choices = (
-                    mdf[mdf["State"].astype(str) == selected_state]["District"]
-                    .dropna()
-                    .astype(str)
-                    .unique()
-                    .tolist()
-                )
-                district_choices = sorted(district_choices) or ["Meerut"]
-                selected_district = st.selectbox("District (Market Data)", district_choices, index=0)
-
                 if st.button("Show 15-Day Forecast", use_container_width=True):
                     filtered = filter_market_rows(mdf, selected_commodity, selected_state, selected_district)
                     raw_points = int(filtered["Arrival_Date_dt"].dt.date.nunique()) if not filtered.empty else 0
