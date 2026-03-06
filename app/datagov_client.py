@@ -26,6 +26,7 @@ class DataGovClient:
         offset = 0
         all_records: list[dict[str, Any]] = []
         extras = extra_params or {}
+        total_hint: int | None = None
 
         while True:
             params = {
@@ -52,13 +53,24 @@ class DataGovClient:
                 break
 
             records = payload.get("records", [])
+            # data.gov sometimes reports one of these as total available row count.
+            if total_hint is None:
+                for key in ("total", "count"):
+                    val = payload.get(key)
+                    if isinstance(val, int) and val > 0:
+                        total_hint = val
+                        break
             if not records:
                 break
 
             all_records.extend(records)
             offset += len(records)
 
-            if len(records) < limit:
+            # Primary stop condition: reached server-reported total.
+            if total_hint is not None and offset >= total_hint:
+                break
+            # Secondary stop condition when server gives fewer than requested and no total hint.
+            if total_hint is None and len(records) < limit:
                 break
             if len(all_records) >= max_records:
                 all_records = all_records[:max_records]

@@ -59,11 +59,11 @@ def main() -> None:
     client = DataGovClient(api_key=args.api_key, timeout_sec=args.timeout, retries=args.retries)
     extra_params: dict[str, str] = {}
     if args.state:
-        extra_params["filters[state]"] = args.state
+        extra_params["filters[State]"] = args.state
     if args.district:
-        extra_params["filters[district]"] = args.district
+        extra_params["filters[District]"] = args.district
     if args.commodity:
-        extra_params["filters[commodity]"] = args.commodity
+        extra_params["filters[Commodity]"] = args.commodity
     records = client.fetch_records(
         resource_id=args.resource_id,
         limit=args.limit,

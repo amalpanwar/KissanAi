@@ -175,6 +175,7 @@ Notes:
 - By default, script auto-broadens scope (`district -> state -> commodity -> all`) if points are too few for stable training (`--min_points`, default 90).
 - In Streamlit sidebar, use `Refresh Market Data` to fetch fresh rows; forecast uses latest CSV immediately.
 - Streamlit forecast now blocks prediction when raw date points are below threshold or data is stale beyond configured days.
+- Data.gov filters are case-sensitive on field names; scripts use `filters[State]`, `filters[District]`, `filters[Commodity]`.
 
 ## Notes
 - This scaffold is production-oriented but intentionally lightweight.

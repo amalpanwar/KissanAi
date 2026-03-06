@@ -274,11 +274,11 @@ with st.sidebar:
                 client = DataGovClient(api_key=api_key, timeout_sec=45, retries=4)
                 params = {}
                 if selected_state.strip():
-                    params["filters[state]"] = selected_state.strip()
+                    params["filters[State]"] = selected_state.strip()
                 if selected_district.strip():
-                    params["filters[district]"] = selected_district.strip()
+                    params["filters[District]"] = selected_district.strip()
                 if selected_commodity.strip():
-                    params["filters[commodity]"] = selected_commodity.strip()
+                    params["filters[Commodity]"] = selected_commodity.strip()
                 try:
                     recs = client.fetch_records(
                         resource_id=resource_id,
