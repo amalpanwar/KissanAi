@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -97,6 +98,22 @@ def load_local_env(env_path: Path) -> dict[str, str]:
     return vals
 
 
+def filter_market_rows(
+    df: pd.DataFrame,
+    commodity: str,
+    state: str,
+    district: str,
+) -> pd.DataFrame:
+    out = df.copy()
+    out.columns = [c.strip() for c in out.columns]
+    out = out[out["Commodity"].astype(str).str.lower() == commodity.lower()]
+    out = out[out["State"].astype(str).str.lower() == state.lower()]
+    out = out[out["District"].astype(str).str.lower() == district.lower()]
+    out["Arrival_Date_dt"] = pd.to_datetime(out["Arrival_Date"], errors="coerce", dayfirst=True)
+    out = out.dropna(subset=["Arrival_Date_dt", "Modal_Price"])
+    return out
+
+
 def save_advisory(
     farmer_id: str,
     district: str,
@@ -149,9 +166,11 @@ with st.sidebar:
     )
 
     fetch_state = st.text_input("Fetch State", value="Uttar Pradesh")
-    fetch_district = st.text_input("Fetch District", value=district)
-    fetch_commodity = st.text_input("Fetch Commodity", value=preferred_crop or "Wheat")
-    fetch_limit = st.number_input("Fetch Limit", min_value=20, max_value=2000, value=200, step=20)
+    fetch_district = st.text_input("Fetch District", value="")
+    fetch_commodity = st.text_input("Fetch Commodity", value="")
+    fetch_limit = st.number_input("Fetch Limit", min_value=20, max_value=5000, value=500, step=20)
+    min_raw_points = st.number_input("Min Raw Date Points", min_value=30, max_value=365, value=90, step=10)
+    max_stale_days = st.number_input("Max Stale Days", min_value=0, max_value=30, value=0, step=1)
 
     if st.button("Refresh Market Data", use_container_width=True):
         if not api_key:
@@ -212,31 +231,51 @@ with st.sidebar:
                 selected_district = st.selectbox("District (Market Data)", district_choices, index=0)
 
                 if st.button("Show 15-Day Forecast", use_container_width=True):
-                    with st.spinner("Training LSTM and generating forecast..."):
-                        hist, fc = build_forecast(
-                            csv_path=str(LIVE_MARKET_CSV),
-                            mtime_ns=mtime_ns,
-                            commodity=selected_commodity,
-                            state=selected_state,
-                            district=selected_district,
-                            horizon=15,
+                    filtered = filter_market_rows(mdf, selected_commodity, selected_state, selected_district)
+                    raw_points = int(filtered["Arrival_Date_dt"].dt.date.nunique()) if not filtered.empty else 0
+                    latest_dt = filtered["Arrival_Date_dt"].max().date() if raw_points > 0 else None
+                    st.caption(
+                        f"Raw points: {raw_points} | Latest arrival date: {latest_dt if latest_dt else 'N/A'}"
+                    )
+
+                    if raw_points < int(min_raw_points):
+                        st.error(
+                            f"Insufficient raw history for reliable LSTM forecast ({raw_points} < {int(min_raw_points)}). "
+                            "Refresh data with broader filters or choose another commodity/district."
                         )
+                    elif latest_dt is None:
+                        st.error("Latest arrival date is missing after date parsing.")
+                    elif (date.today() - latest_dt).days > int(max_stale_days):
+                        st.error(
+                            f"Data is stale by {(date.today() - latest_dt).days} days. "
+                            "Refresh market data before forecasting."
+                        )
+                    else:
+                        with st.spinner("Training LSTM and generating forecast..."):
+                            hist, fc = build_forecast(
+                                csv_path=str(LIVE_MARKET_CSV),
+                                mtime_ns=mtime_ns,
+                                commodity=selected_commodity,
+                                state=selected_state,
+                                district=selected_district,
+                                horizon=15,
+                            )
 
-                    history_tail = hist.tail(90).copy()
-                    history_tail = history_tail.rename(columns={"value": "History"})
-                    fc2 = fc.rename(columns={"predicted_value": "Forecast"})
+                        history_tail = hist.tail(90).copy()
+                        history_tail = history_tail.rename(columns={"value": "History"})
+                        fc2 = fc.rename(columns={"predicted_value": "Forecast"})
 
-                    chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
-                    chart_df["History"] = history_tail["History"].values
-                    chart_df = chart_df.set_index("date")
+                        chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
+                        chart_df["History"] = history_tail["History"].values
+                        chart_df = chart_df.set_index("date")
 
-                    fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
-                    fc_chart["Forecast"] = fc2["Forecast"].values
-                    fc_chart = fc_chart.set_index("date")
+                        fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
+                        fc_chart["Forecast"] = fc2["Forecast"].values
+                        fc_chart = fc_chart.set_index("date")
 
-                    joined = chart_df.join(fc_chart, how="outer")
-                    st.line_chart(joined, use_container_width=True)
-                    st.dataframe(fc2, use_container_width=True, height=240)
+                        joined = chart_df.join(fc_chart, how="outer")
+                        st.line_chart(joined, use_container_width=True)
+                        st.dataframe(fc2, use_container_width=True, height=240)
         except Exception as e:
             st.warning(f"Forecast unavailable: {e}")
 
