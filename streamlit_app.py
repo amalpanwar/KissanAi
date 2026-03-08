@@ -211,43 +211,46 @@ with st.sidebar:
     )
     if not state_options:
         state_options = ["Uttar Pradesh"]
+    if "All States" not in state_options:
+        state_options = ["All States"] + state_options
     selected_state = st.selectbox("State", state_options, index=0, key="fc_state")
 
-    district_options = (
-        sorted(
-            _init_df[_init_df["State"].astype(str) == selected_state]["District"]
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist()
-        )
-        if ("State" in _init_df.columns and "District" in _init_df.columns)
-        else []
-    )
+    if ("State" in _init_df.columns and "District" in _init_df.columns):
+        if selected_state == "All States":
+            district_options = sorted(_init_df["District"].dropna().astype(str).unique().tolist())
+        else:
+            district_options = sorted(
+                _init_df[_init_df["State"].astype(str) == selected_state]["District"]
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+    else:
+        district_options = []
     if not district_options:
-        district_options = [district]
+        district_options = [district, "All Districts"]
+    elif "All Districts" not in district_options:
+        district_options = ["All Districts"] + district_options
     selected_district = st.selectbox("District", district_options, index=0, key="fc_district")
 
-    commodity_options = (
-        sorted(
-            _init_df[
-                (_init_df["State"].astype(str) == selected_state)
-                & (_init_df["District"].astype(str) == selected_district)
-            ]["Commodity"]
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist()
-        )
-        if (
-            "State" in _init_df.columns
-            and "District" in _init_df.columns
-            and "Commodity" in _init_df.columns
-        )
-        else []
-    )
+    if (
+        "State" in _init_df.columns
+        and "District" in _init_df.columns
+        and "Commodity" in _init_df.columns
+    ):
+        temp = _init_df.copy()
+        if selected_state != "All States":
+            temp = temp[temp["State"].astype(str) == selected_state]
+        if selected_district != "All Districts":
+            temp = temp[temp["District"].astype(str) == selected_district]
+        commodity_options = sorted(temp["Commodity"].dropna().astype(str).unique().tolist())
+    else:
+        commodity_options = []
     if not commodity_options:
-        commodity_options = [preferred_crop or "Wheat"]
+        commodity_options = [preferred_crop or "Wheat", "All Commodities"]
+    elif "All Commodities" not in commodity_options:
+        commodity_options = ["All Commodities"] + commodity_options
     selected_commodity_from_dropdown = st.selectbox(
         "Commodity (from data)",
         commodity_options,
@@ -273,11 +276,11 @@ with st.sidebar:
             with st.spinner("Fetching latest market data..."):
                 client = DataGovClient(api_key=api_key, timeout_sec=45, retries=4)
                 params = {}
-                if selected_state.strip():
+                if selected_state.strip() and selected_state != "All States":
                     params["filters[State]"] = selected_state.strip()
-                if selected_district.strip():
+                if selected_district.strip() and selected_district != "All Districts":
                     params["filters[District]"] = selected_district.strip()
-                if selected_commodity.strip():
+                if selected_commodity.strip() and selected_commodity != "All Commodities":
                     params["filters[Commodity]"] = selected_commodity.strip()
                 try:
                     recs = client.fetch_records(

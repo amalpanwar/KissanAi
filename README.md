@@ -147,11 +147,31 @@ gh repo create <your-repo-name> --public --source=. --remote=origin --push
 ```
 
 ## Data.gov.in + 15-Day LSTM Forecast
+Primary workflow is through Streamlit UI (recommended). CLI scripts below are optional for admin/debug/batch backfill.
+
+### Streamlit-first workflow (recommended)
+1. One-time setup:
+   ```bash
+   cp -n .env.example .env
+   ```
+   Edit `.env` and set:
+   - `DATA_GOV_API_KEY`
+   - `DATA_GOV_RESOURCE_ID`
+2. Run app:
+   ```bash
+   streamlit run streamlit_app.py
+   ```
+3. In sidebar:
+   - Select `State`, `District`, `Commodity` (or type commodity override)
+   - Click `Refresh Market Data`
+   - Click `Show 15-Day Forecast`
+
+### CLI workflow (optional admin/debug)
 Use these scripts to fetch commodity data from Data.gov.in and forecast 15 days ahead.
 
 1. One-time setup (safe)
    ```bash
-   cp .env.example .env
+   cp -n .env.example .env
    ```
    Edit `.env` and set:
    - `DATA_GOV_API_KEY`
