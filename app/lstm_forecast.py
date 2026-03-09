@@ -103,11 +103,20 @@ def train_and_forecast(
     epochs: int = 120,
     lr: float = 0.001,
     seed: int = 42,
+    train_window_days: int = 1095,
+    max_daily_change_pct: float = 0.08,
 ) -> ForecastResult:
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    values = series_df["value"].values.astype(np.float32)
+    data = series_df.sort_values("date").reset_index(drop=True).copy()
+    if train_window_days > 0 and len(data) > 0:
+        cutoff = data["date"].max() - pd.Timedelta(days=int(train_window_days))
+        recent = data[data["date"] >= cutoff].copy()
+        if len(recent) > lookback + 5:
+            data = recent
+
+    values = data["value"].values.astype(np.float32)
     if len(values) <= lookback + 5:
         raise ValueError(
             f"Not enough history for lookback={lookback}. Need > {lookback + 5} daily points."
@@ -146,8 +155,20 @@ def train_and_forecast(
         window = np.concatenate([window[1:], np.array([nxt], dtype=np.float32)])
 
     preds = np.array(preds_scaled) * denom + vmin
-    start = series_df["date"].max() + pd.Timedelta(days=1)
+    # Keep predictions anchored to current regime by capping daily jump.
+    anchored_preds: list[float] = []
+    prev = float(values[-1])
+    max_pct = max(0.0, float(max_daily_change_pct))
+    for p in preds.tolist():
+        low = prev * (1.0 - max_pct)
+        high = prev * (1.0 + max_pct)
+        clipped = min(max(float(p), low), high)
+        anchored_preds.append(clipped)
+        prev = clipped
+
+    preds = np.array(anchored_preds, dtype=np.float32)
+    start = data["date"].max() + pd.Timedelta(days=1)
     f_dates = pd.date_range(start=start, periods=horizon_days, freq="D")
 
     forecast_df = pd.DataFrame({"date": f_dates, "predicted_value": preds})
-    return ForecastResult(history=series_df, forecast=forecast_df)
+    return ForecastResult(history=data, forecast=forecast_df)
