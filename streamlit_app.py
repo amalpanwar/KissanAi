@@ -211,28 +211,23 @@ with st.sidebar:
     )
     if not state_options:
         state_options = ["Uttar Pradesh"]
-    if "All States" not in state_options:
-        state_options = ["All States"] + state_options
-    selected_state = st.selectbox("State", state_options, index=0, key="fc_state")
+    state_default = state_options.index("Uttar Pradesh") if "Uttar Pradesh" in state_options else 0
+    selected_state = st.selectbox("State", state_options, index=state_default, key="fc_state")
 
     if ("State" in _init_df.columns and "District" in _init_df.columns):
-        if selected_state == "All States":
-            district_options = sorted(_init_df["District"].dropna().astype(str).unique().tolist())
-        else:
-            district_options = sorted(
-                _init_df[_init_df["State"].astype(str) == selected_state]["District"]
-                .dropna()
-                .astype(str)
-                .unique()
-                .tolist()
-            )
+        district_options = sorted(
+            _init_df[_init_df["State"].astype(str) == selected_state]["District"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
     else:
         district_options = []
     if not district_options:
-        district_options = [district, "All Districts"]
-    elif "All Districts" not in district_options:
-        district_options = ["All Districts"] + district_options
-    selected_district = st.selectbox("District", district_options, index=0, key="fc_district")
+        district_options = [district]
+    district_default = district_options.index("Meerut") if "Meerut" in district_options else 0
+    selected_district = st.selectbox("District", district_options, index=district_default, key="fc_district")
 
     if (
         "State" in _init_df.columns
@@ -240,21 +235,18 @@ with st.sidebar:
         and "Commodity" in _init_df.columns
     ):
         temp = _init_df.copy()
-        if selected_state != "All States":
-            temp = temp[temp["State"].astype(str) == selected_state]
-        if selected_district != "All Districts":
-            temp = temp[temp["District"].astype(str) == selected_district]
+        temp = temp[temp["State"].astype(str) == selected_state]
+        temp = temp[temp["District"].astype(str) == selected_district]
         commodity_options = sorted(temp["Commodity"].dropna().astype(str).unique().tolist())
     else:
         commodity_options = []
     if not commodity_options:
-        commodity_options = [preferred_crop or "Wheat", "All Commodities"]
-    elif "All Commodities" not in commodity_options:
-        commodity_options = ["All Commodities"] + commodity_options
+        commodity_options = [preferred_crop or "Wheat"]
+    commodity_default = commodity_options.index("Wheat") if "Wheat" in commodity_options else 0
     selected_commodity_from_dropdown = st.selectbox(
         "Commodity (from data)",
         commodity_options,
-        index=0,
+        index=commodity_default,
         key="fc_commodity_dropdown",
     )
     commodity_text_override = st.text_input(
@@ -265,43 +257,91 @@ with st.sidebar:
     selected_commodity = commodity_text_override.strip() or selected_commodity_from_dropdown
 
     min_raw_points = st.number_input("Min Raw Date Points", min_value=30, max_value=365, value=90, step=10)
-    max_stale_days = st.number_input("Max Stale Days", min_value=0, max_value=30, value=0, step=1)
+    max_stale_days = st.number_input("Max Stale Days", min_value=0, max_value=30, value=15, step=1)
 
-    if st.button("Refresh Market Data", use_container_width=True):
+    def run_fetch(use_state_only: bool = False) -> tuple[int, int]:
         if not api_key:
             st.warning("DATA_GOV_API_KEY not found in .env")
-        elif not resource_id:
+            return 0, 0
+        if not resource_id:
             st.warning("DATA_GOV_RESOURCE_ID not found in .env")
-        else:
-            with st.spinner("Fetching latest market data..."):
-                client = DataGovClient(api_key=api_key, timeout_sec=45, retries=4)
-                params = {}
-                if selected_state.strip() and selected_state != "All States":
-                    params["filters[State]"] = selected_state.strip()
-                if selected_district.strip() and selected_district != "All Districts":
-                    params["filters[District]"] = selected_district.strip()
-                if selected_commodity.strip() and selected_commodity != "All Commodities":
-                    params["filters[Commodity]"] = selected_commodity.strip()
-                try:
-                    recs = client.fetch_records(
-                        resource_id=resource_id,
-                        limit=FETCH_PAGE_LIMIT,
-                        max_records=FETCH_MAX_RECORDS,
-                        extra_params=params,
-                    )
-                    if recs:
-                        LIVE_MARKET_CSV.parent.mkdir(parents=True, exist_ok=True)
-                        new_df = pd.DataFrame(recs)
-                        merged = merge_market_data(LIVE_MARKET_CSV, new_df)
-                        merged.to_csv(LIVE_MARKET_CSV, index=False)
-                        st.cache_data.clear()
-                        st.success(
-                            f"Market data refreshed: fetched {len(new_df)} rows, stored {len(merged)} unique rows."
-                        )
-                    else:
-                        st.warning("No records returned for selected filters.")
-                except Exception as e:
-                    st.error(f"Fetch failed: {e}")
+            return 0, 0
+
+        client = DataGovClient(api_key=api_key, timeout_sec=45, retries=4)
+        params = {}
+        if selected_state.strip():
+            params["filters[State]"] = selected_state.strip()
+        if not use_state_only:
+            if selected_district.strip():
+                params["filters[District]"] = selected_district.strip()
+            if selected_commodity.strip():
+                params["filters[Commodity]"] = selected_commodity.strip()
+        recs = client.fetch_records(
+            resource_id=resource_id,
+            limit=FETCH_PAGE_LIMIT,
+            max_records=FETCH_MAX_RECORDS,
+            extra_params=params,
+        )
+        if recs:
+            LIVE_MARKET_CSV.parent.mkdir(parents=True, exist_ok=True)
+            new_df = pd.DataFrame(recs)
+            merged = merge_market_data(LIVE_MARKET_CSV, new_df)
+            merged.to_csv(LIVE_MARKET_CSV, index=False)
+            st.cache_data.clear()
+            return len(new_df), len(merged)
+        return 0, 0
+
+    # If dropdowns are too narrow (e.g., only Meerut/Wheat), auto-backfill state catalog once.
+    state_catalog_key = f"state_catalog_loaded::{selected_state}"
+    if (
+        len(district_options) <= 1
+        and api_key
+        and resource_id
+        and not st.session_state.get(state_catalog_key, False)
+    ):
+        with st.spinner(f"Loading full district/commodity catalog for {selected_state}..."):
+            try:
+                fetched, stored = run_fetch(use_state_only=True)
+                st.session_state[state_catalog_key] = True
+                if fetched > 0:
+                    st.caption(f"Catalog loaded for {selected_state}: fetched {fetched}, stored {stored}")
+                    st.rerun()
+            except Exception as e:
+                st.session_state[state_catalog_key] = True
+                st.warning(f"Catalog auto-load failed: {e}")
+
+    combo_key = f"{selected_state}|{selected_district}|{selected_commodity}".lower()
+    if st.session_state.get("last_combo_key") != combo_key and api_key and resource_id:
+        with st.spinner("Updating data for selected combination..."):
+            try:
+                fetched, stored = run_fetch(use_state_only=False)
+                if fetched > 0:
+                    st.caption(f"Auto-updated selection data: fetched {fetched}, stored {stored}")
+                st.session_state["last_combo_key"] = combo_key
+            except Exception as e:
+                st.warning(f"Auto refresh failed: {e}")
+
+    if st.button("Refresh Selected Combination", use_container_width=True):
+        with st.spinner("Fetching selected combination..."):
+            try:
+                fetched, stored = run_fetch(use_state_only=False)
+                if fetched > 0:
+                    st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                else:
+                    st.warning("No records returned for selected combination.")
+            except Exception as e:
+                st.error(f"Fetch failed: {e}")
+
+    if st.button("Refresh State Catalog", use_container_width=True):
+        with st.spinner("Fetching all districts/commodities for selected state..."):
+            try:
+                fetched, stored = run_fetch(use_state_only=True)
+                if fetched > 0:
+                    st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                else:
+                    st.warning("No records returned for selected state.")
+            except Exception as e:
+                st.error(f"Fetch failed: {e}")
 
     if not LIVE_MARKET_CSV.exists():
         st.info("No live commodity CSV found. Run data fetch script first.")
@@ -328,12 +368,13 @@ with st.sidebar:
                         )
                     elif latest_dt is None:
                         st.error("Latest arrival date is missing after date parsing.")
-                    elif (date.today() - latest_dt).days > int(max_stale_days):
-                        st.error(
-                            f"Data is stale by {(date.today() - latest_dt).days} days. "
-                            "Refresh market data before forecasting."
-                        )
                     else:
+                        stale_days = (date.today() - latest_dt).days
+                        if stale_days > int(max_stale_days):
+                            st.warning(
+                                f"Data is stale by {stale_days} days. Forecast is generated on last available market data."
+                            )
+
                         with st.spinner("Training LSTM and generating forecast..."):
                             hist, fc = build_forecast(
                                 csv_path=str(LIVE_MARKET_CSV),
