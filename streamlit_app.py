@@ -21,8 +21,9 @@ st.caption("RAG + SLM based local-language advisory for crop, budget, and yield 
 
 cfg = load_config()
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
-FETCH_PAGE_LIMIT = 500
-FETCH_MAX_RECORDS = 100000
+FETCH_PAGE_LIMIT = 100
+FETCH_MAX_RECORDS_COMBO = 20000
+FETCH_MAX_RECORDS_STATE = 30000
 
 
 def check_ready() -> tuple[bool, str]:
@@ -82,7 +83,7 @@ def build_forecast(
         series_df=series,
         horizon_days=horizon,
         lookback=30,
-        epochs=80,
+        epochs=40,
     )
     return result.history, result.forecast
 
@@ -213,6 +214,7 @@ with st.sidebar:
         state_options = ["Uttar Pradesh"]
     state_default = state_options.index("Uttar Pradesh") if "Uttar Pradesh" in state_options else 0
     selected_state = st.selectbox("State", state_options, index=state_default, key="fc_state")
+    state_override = st.text_input("State (type override, optional)", value="", key="fc_state_override")
 
     if ("State" in _init_df.columns and "District" in _init_df.columns):
         district_options = sorted(
@@ -228,6 +230,11 @@ with st.sidebar:
         district_options = [district]
     district_default = district_options.index("Meerut") if "Meerut" in district_options else 0
     selected_district = st.selectbox("District", district_options, index=district_default, key="fc_district")
+    district_override = st.text_input(
+        "District (type override, optional)",
+        value="",
+        key="fc_district_override",
+    )
 
     if (
         "State" in _init_df.columns
@@ -255,6 +262,9 @@ with st.sidebar:
         key="fc_commodity_override",
     )
     selected_commodity = commodity_text_override.strip() or selected_commodity_from_dropdown
+    active_state = state_override.strip() or selected_state
+    active_district = district_override.strip() or selected_district
+    active_commodity = selected_commodity
 
     min_raw_points = st.number_input("Min Raw Date Points", min_value=30, max_value=365, value=90, step=10)
     max_stale_days = st.number_input("Max Stale Days", min_value=0, max_value=30, value=15, step=1)
@@ -267,19 +277,19 @@ with st.sidebar:
             st.warning("DATA_GOV_RESOURCE_ID not found in .env")
             return 0, 0
 
-        client = DataGovClient(api_key=api_key, timeout_sec=45, retries=4)
+        client = DataGovClient(api_key=api_key, timeout_sec=30, retries=5)
         params = {}
-        if selected_state.strip():
-            params["filters[State]"] = selected_state.strip()
+        if active_state.strip():
+            params["filters[State]"] = active_state.strip()
         if not use_state_only:
-            if selected_district.strip():
-                params["filters[District]"] = selected_district.strip()
-            if selected_commodity.strip():
-                params["filters[Commodity]"] = selected_commodity.strip()
+            if active_district.strip():
+                params["filters[District]"] = active_district.strip()
+            if active_commodity.strip():
+                params["filters[Commodity]"] = active_commodity.strip()
         recs = client.fetch_records(
             resource_id=resource_id,
             limit=FETCH_PAGE_LIMIT,
-            max_records=FETCH_MAX_RECORDS,
+            max_records=FETCH_MAX_RECORDS_STATE if use_state_only else FETCH_MAX_RECORDS_COMBO,
             extra_params=params,
         )
         if recs:
@@ -291,36 +301,6 @@ with st.sidebar:
             return len(new_df), len(merged)
         return 0, 0
 
-    # If dropdowns are too narrow (e.g., only Meerut/Wheat), auto-backfill state catalog once.
-    state_catalog_key = f"state_catalog_loaded::{selected_state}"
-    if (
-        len(district_options) <= 1
-        and api_key
-        and resource_id
-        and not st.session_state.get(state_catalog_key, False)
-    ):
-        with st.spinner(f"Loading full district/commodity catalog for {selected_state}..."):
-            try:
-                fetched, stored = run_fetch(use_state_only=True)
-                st.session_state[state_catalog_key] = True
-                if fetched > 0:
-                    st.caption(f"Catalog loaded for {selected_state}: fetched {fetched}, stored {stored}")
-                    st.rerun()
-            except Exception as e:
-                st.session_state[state_catalog_key] = True
-                st.warning(f"Catalog auto-load failed: {e}")
-
-    combo_key = f"{selected_state}|{selected_district}|{selected_commodity}".lower()
-    if st.session_state.get("last_combo_key") != combo_key and api_key and resource_id:
-        with st.spinner("Updating data for selected combination..."):
-            try:
-                fetched, stored = run_fetch(use_state_only=False)
-                if fetched > 0:
-                    st.caption(f"Auto-updated selection data: fetched {fetched}, stored {stored}")
-                st.session_state["last_combo_key"] = combo_key
-            except Exception as e:
-                st.warning(f"Auto refresh failed: {e}")
-
     if st.button("Refresh Selected Combination", use_container_width=True):
         with st.spinner("Fetching selected combination..."):
             try:
@@ -330,7 +310,8 @@ with st.sidebar:
                 else:
                     st.warning("No records returned for selected combination.")
             except Exception as e:
-                st.error(f"Fetch failed: {e}")
+                st.error(f"Fetch timed out/failed: {e}")
+                st.info("Retry once, or use 'Refresh State Catalog' first and then narrow the selection.")
 
     if st.button("Refresh State Catalog", use_container_width=True):
         with st.spinner("Fetching all districts/commodities for selected state..."):
@@ -341,7 +322,8 @@ with st.sidebar:
                 else:
                     st.warning("No records returned for selected state.")
             except Exception as e:
-                st.error(f"Fetch failed: {e}")
+                st.error(f"Fetch timed out/failed: {e}")
+                st.info("API is slow right now. Retry after 10-20 seconds.")
 
     if not LIVE_MARKET_CSV.exists():
         st.info("No live commodity CSV found. Run data fetch script first.")
@@ -354,14 +336,21 @@ with st.sidebar:
             else:
                 mdf.columns = [c.strip() for c in mdf.columns]
                 if st.button("Show 15-Day Forecast", use_container_width=True):
-                    filtered = filter_market_rows(mdf, selected_commodity, selected_state, selected_district)
+                    filtered = filter_market_rows(mdf, active_commodity, active_state, active_district)
                     raw_points = int(filtered["Arrival_Date_dt"].dt.date.nunique()) if not filtered.empty else 0
                     latest_dt = filtered["Arrival_Date_dt"].max().date() if raw_points > 0 else None
                     st.caption(
+                        "Selection: "
+                        f"{active_state} / {active_district} / {active_commodity} | "
                         f"Raw points: {raw_points} | Latest arrival date: {latest_dt if latest_dt else 'N/A'}"
                     )
 
-                    if raw_points < int(min_raw_points):
+                    if raw_points == 0:
+                        st.error(
+                            "No rows found for selected state/district/commodity. "
+                            "Click 'Refresh Selected Combination' first."
+                        )
+                    elif raw_points < int(min_raw_points):
                         st.error(
                             f"Insufficient raw history for reliable LSTM forecast ({raw_points} < {int(min_raw_points)}). "
                             "Refresh data with broader filters or choose another commodity/district."
@@ -379,9 +368,9 @@ with st.sidebar:
                             hist, fc = build_forecast(
                                 csv_path=str(LIVE_MARKET_CSV),
                                 mtime_ns=mtime_ns,
-                                commodity=selected_commodity,
-                                state=selected_state,
-                                district=selected_district,
+                                commodity=active_commodity,
+                                state=active_state,
+                                district=active_district,
                                 horizon=15,
                             )
 
