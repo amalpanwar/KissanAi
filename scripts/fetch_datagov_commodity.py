@@ -52,6 +52,7 @@ def main() -> None:
         help="Comma-separated districts for Western UP",
     )
     parser.add_argument("--use_env_filters", action="store_true", default=False)
+    parser.add_argument("--state_only", action="store_true", default=False)
     parser.add_argument("--no_timeout", action="store_true", default=True)
     parser.add_argument("--keep_years", type=int, default=3)
     parser.add_argument("--recent_only", action="store_true", default=True)
@@ -86,6 +87,9 @@ def main() -> None:
         district_list = [args.district]
 
     if not district_list:
+        district_list = [""]
+
+    if args.state_only:
         district_list = [""]
 
     for d in district_list:
