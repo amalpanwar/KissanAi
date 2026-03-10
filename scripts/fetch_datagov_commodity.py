@@ -39,13 +39,19 @@ def main() -> None:
         help="Data.gov.in resource id (or set DATA_GOV_RESOURCE_ID in .env)",
     )
     parser.add_argument("--api_key", default=os.getenv("DATA_GOV_API_KEY", ""))
-    parser.add_argument("--limit", type=int, default=200)
-    parser.add_argument("--max_records", type=int, default=5000)
-    parser.add_argument("--timeout", type=int, default=90)
-    parser.add_argument("--retries", type=int, default=6)
-    parser.add_argument("--state", default=os.getenv("DATA_GOV_STATE"))
+    parser.add_argument("--limit", type=int, default=500)
+    parser.add_argument("--max_records", type=int, default=50000)
+    parser.add_argument("--timeout", type=int, default=None)
+    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--state", default=os.getenv("DATA_GOV_STATE", "Uttar Pradesh"))
     parser.add_argument("--district", default=os.getenv("DATA_GOV_DISTRICT"))
     parser.add_argument("--commodity", default=os.getenv("DATA_GOV_COMMODITY"))
+    parser.add_argument(
+        "--districts",
+        default="Meerut,Muzaffarnagar,Baghpat,Saharanpur,Shamli,Bulandshahr,Aligarh,Greater Noida,Gautam Buddha Nagar",
+        help="Comma-separated districts for Western UP",
+    )
+    parser.add_argument("--no_timeout", action="store_true", default=True)
     parser.add_argument("--keep_years", type=int, default=3)
     parser.add_argument("--recent_only", action="store_true", default=True)
     parser.add_argument(
@@ -59,35 +65,49 @@ def main() -> None:
     if not args.resource_id:
         raise ValueError("Provide --resource_id or set DATA_GOV_RESOURCE_ID env var.")
 
-    client = DataGovClient(api_key=args.api_key, timeout_sec=args.timeout, retries=args.retries)
-    extra_params: dict[str, str] = {}
-    if args.state:
-        extra_params["filters[State]"] = args.state
-    if args.district:
-        extra_params["filters[District]"] = args.district
-    if args.commodity:
-        extra_params["filters[Commodity]"] = args.commodity
-    extra_params["sort[Arrival_Date]"] = "desc"
+    timeout_val = None if args.no_timeout else args.timeout
+    client = DataGovClient(api_key=args.api_key, timeout_sec=timeout_val, retries=args.retries)
+
     cutoff_date = None
     if args.keep_years > 0:
         cutoff_date = date.today() - timedelta(days=365 * args.keep_years)
 
-    records = client.fetch_records(
-        resource_id=args.resource_id,
-        limit=args.limit,
-        max_records=args.max_records,
-        extra_params=extra_params,
-        stop_date=cutoff_date,
-        date_field="Arrival_Date",
-        dayfirst=True,
-    )
-    if not records:
+    district_list = [d.strip() for d in (args.districts or "").split(",") if d.strip()]
+
+    all_records: list[dict] = []
+    if args.district:
+        district_list = [args.district]
+
+    if not district_list:
+        district_list = [""]
+
+    for d in district_list:
+        extra_params: dict[str, str] = {}
+        if args.state:
+            extra_params["filters[State]"] = args.state
+        if d:
+            extra_params["filters[District]"] = d
+        if args.commodity:
+            extra_params["filters[Commodity]"] = args.commodity
+        extra_params["sort[Arrival_Date]"] = "desc"
+
+        records = client.fetch_records(
+            resource_id=args.resource_id,
+            limit=args.limit,
+            max_records=args.max_records,
+            extra_params=extra_params,
+            stop_date=cutoff_date,
+            date_field="Arrival_Date",
+            dayfirst=True,
+        )
+        all_records.extend(records)
+    if not all_records:
         print("No records returned.")
         return
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    new_df = pd.DataFrame(records)
+    new_df = pd.DataFrame(all_records)
 
     if out_path.exists():
         try:

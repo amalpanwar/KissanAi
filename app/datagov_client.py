@@ -12,7 +12,7 @@ API_BASE = "https://api.data.gov.in/resource"
 
 
 class DataGovClient:
-    def __init__(self, api_key: str, timeout_sec: int = 20, retries: int = 3) -> None:
+    def __init__(self, api_key: str, timeout_sec: int | None = 20, retries: int = 3) -> None:
         self.api_key = api_key
         self.timeout_sec = timeout_sec
         self.retries = retries
@@ -47,7 +47,11 @@ class DataGovClient:
             last_error: Exception | None = None
             for attempt in range(1, self.retries + 1):
                 try:
-                    with urlopen(url, timeout=self.timeout_sec) as resp:
+                    if self.timeout_sec is None:
+                        resp_ctx = urlopen(url)
+                    else:
+                        resp_ctx = urlopen(url, timeout=self.timeout_sec)
+                    with resp_ctx as resp:
                         payload = json.loads(resp.read().decode("utf-8"))
                     break
                 except Exception as exc:
