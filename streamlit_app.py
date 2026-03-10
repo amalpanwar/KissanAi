@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from datetime import date
+from time import time
 from pathlib import Path
 
 import pandas as pd
@@ -22,8 +23,9 @@ st.caption("RAG + SLM based local-language advisory for crop, budget, and yield 
 cfg = load_config()
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 FETCH_PAGE_LIMIT = 100
-FETCH_MAX_RECORDS_COMBO = 20000
-FETCH_MAX_RECORDS_STATE = 30000
+FETCH_MAX_RECORDS_COMBO = 2000
+FETCH_MAX_RECORDS_STATE = 15000
+FETCH_COOLDOWN_SEC = 600
 
 
 def check_ready() -> tuple[bool, str]:
@@ -286,6 +288,8 @@ with st.sidebar:
                 params["filters[District]"] = active_district.strip()
             if active_commodity.strip():
                 params["filters[Commodity]"] = active_commodity.strip()
+        # Favor recent data to reduce payload and timeouts.
+        params["sort[Arrival_Date]"] = "desc"
         recs = client.fetch_records(
             resource_id=resource_id,
             limit=FETCH_PAGE_LIMIT,
@@ -304,11 +308,17 @@ with st.sidebar:
     if st.button("Refresh Selected Combination", use_container_width=True):
         with st.spinner("Fetching selected combination..."):
             try:
-                fetched, stored = run_fetch(use_state_only=False)
-                if fetched > 0:
-                    st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                combo_key = f"{active_state}|{active_district}|{active_commodity}".lower()
+                last_ts = st.session_state.get(f"last_fetch_ts::{combo_key}", 0)
+                if time() - last_ts < FETCH_COOLDOWN_SEC:
+                    st.info("Using recent cached data; skip fetch to avoid timeout.")
                 else:
-                    st.warning("No records returned for selected combination.")
+                    fetched, stored = run_fetch(use_state_only=False)
+                    st.session_state[f"last_fetch_ts::{combo_key}"] = time()
+                    if fetched > 0:
+                        st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                    else:
+                        st.warning("No records returned for selected combination.")
             except Exception as e:
                 st.error(f"Fetch timed out/failed: {e}")
                 st.info("Retry once, or use 'Refresh State Catalog' first and then narrow the selection.")
@@ -316,11 +326,17 @@ with st.sidebar:
     if st.button("Refresh State Catalog", use_container_width=True):
         with st.spinner("Fetching all districts/commodities for selected state..."):
             try:
-                fetched, stored = run_fetch(use_state_only=True)
-                if fetched > 0:
-                    st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                state_key = f"last_fetch_state::{active_state}".lower()
+                last_ts = st.session_state.get(state_key, 0)
+                if time() - last_ts < FETCH_COOLDOWN_SEC:
+                    st.info("Using recent cached data; skip fetch to avoid timeout.")
                 else:
-                    st.warning("No records returned for selected state.")
+                    fetched, stored = run_fetch(use_state_only=True)
+                    st.session_state[state_key] = time()
+                    if fetched > 0:
+                        st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                    else:
+                        st.warning("No records returned for selected state.")
             except Exception as e:
                 st.error(f"Fetch timed out/failed: {e}")
                 st.info("API is slow right now. Retry after 10-20 seconds.")
