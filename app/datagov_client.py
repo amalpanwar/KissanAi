@@ -44,14 +44,17 @@ class DataGovClient:
             url = f"{API_BASE}/{resource_id}?{query}"
 
             payload = None
+            last_error: Exception | None = None
             for attempt in range(1, self.retries + 1):
                 try:
                     with urlopen(url, timeout=self.timeout_sec) as resp:
                         payload = json.loads(resp.read().decode("utf-8"))
                     break
-                except Exception:
+                except Exception as exc:
+                    last_error = exc
                     if attempt == self.retries:
-                        raise
+                        # Return what we have so far instead of hard-failing.
+                        return all_records
                     time.sleep(1.5 * attempt)
             if payload is None:
                 break

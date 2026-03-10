@@ -39,10 +39,10 @@ def main() -> None:
         help="Data.gov.in resource id (or set DATA_GOV_RESOURCE_ID in .env)",
     )
     parser.add_argument("--api_key", default=os.getenv("DATA_GOV_API_KEY", ""))
-    parser.add_argument("--limit", type=int, default=500)
+    parser.add_argument("--limit", type=int, default=200)
     parser.add_argument("--max_records", type=int, default=5000)
-    parser.add_argument("--timeout", type=int, default=30)
-    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--timeout", type=int, default=90)
+    parser.add_argument("--retries", type=int, default=6)
     parser.add_argument("--state", default=os.getenv("DATA_GOV_STATE"))
     parser.add_argument("--district", default=os.getenv("DATA_GOV_DISTRICT"))
     parser.add_argument("--commodity", default=os.getenv("DATA_GOV_COMMODITY"))
