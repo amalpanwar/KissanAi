@@ -22,10 +22,11 @@ st.caption("RAG + SLM based local-language advisory for crop, budget, and yield 
 
 cfg = load_config()
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
-FETCH_PAGE_LIMIT = 100
-FETCH_MAX_RECORDS_COMBO = 2000
-FETCH_MAX_RECORDS_STATE = 15000
+FETCH_PAGE_LIMIT = 200
+FETCH_MAX_RECORDS_COMBO = 50000
+FETCH_MAX_RECORDS_STATE = 50000
 FETCH_COOLDOWN_SEC = 600
+FAST_FETCH_LIMIT = 500
 
 
 def check_ready() -> tuple[bool, str]:
@@ -73,6 +74,30 @@ def build_forecast(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     _ = mtime_ns
     df = pd.read_csv(csv_path)
+    series = prepare_daily_series(
+        df=df,
+        date_col="Arrival_Date",
+        value_col="Modal_Price",
+        commodity=commodity,
+        state=state,
+        district=district,
+    )
+    result = train_and_forecast(
+        series_df=series,
+        horizon_days=horizon,
+        lookback=30,
+        epochs=40,
+    )
+    return result.history, result.forecast
+
+
+def build_forecast_from_df(
+    df: pd.DataFrame,
+    commodity: str,
+    state: str,
+    district: str,
+    horizon: int = 15,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     series = prepare_daily_series(
         df=df,
         date_col="Arrival_Date",
@@ -145,6 +170,32 @@ def filter_market_rows(
     out["Arrival_Date_dt"] = pd.to_datetime(out["Arrival_Date"], errors="coerce", dayfirst=True)
     out = out.dropna(subset=["Arrival_Date_dt", "Modal_Price"])
     return out
+
+
+def fetch_live_df(
+    api_key: str,
+    resource_id: str,
+    state: str,
+    district: str,
+    commodity: str,
+    limit: int = FAST_FETCH_LIMIT,
+) -> pd.DataFrame:
+    client = DataGovClient(api_key=api_key, timeout_sec=20, retries=3)
+    params = {}
+    if state.strip():
+        params["filters[State]"] = state.strip()
+    if district.strip():
+        params["filters[District]"] = district.strip()
+    if commodity.strip():
+        params["filters[Commodity]"] = commodity.strip()
+    params["sort[Arrival_Date]"] = "desc"
+    recs = client.fetch_records(
+        resource_id=resource_id,
+        limit=limit,
+        max_records=limit,
+        extra_params=params,
+    )
+    return pd.DataFrame(recs) if recs else pd.DataFrame()
 
 
 def save_advisory(
@@ -268,8 +319,9 @@ with st.sidebar:
     active_district = district_override.strip() or selected_district
     active_commodity = selected_commodity
 
-    min_raw_points = st.number_input("Min Raw Date Points", min_value=30, max_value=365, value=90, step=10)
+    min_raw_points = st.number_input("Min Raw Date Points", min_value=100, max_value=5000, value=1000, step=50)
     max_stale_days = st.number_input("Max Stale Days", min_value=0, max_value=30, value=15, step=1)
+    fast_mode = st.checkbox("Fast Forecast (no download)", value=True)
 
     def run_fetch(use_state_only: bool = False) -> tuple[int, int]:
         if not api_key:
@@ -341,70 +393,94 @@ with st.sidebar:
                 st.error(f"Fetch timed out/failed: {e}")
                 st.info("API is slow right now. Retry after 10-20 seconds.")
 
-    if not LIVE_MARKET_CSV.exists():
-        st.info("No live commodity CSV found. Run data fetch script first.")
-    else:
+    if st.button("Show 15-Day Forecast", use_container_width=True):
         try:
-            mtime_ns = LIVE_MARKET_CSV.stat().st_mtime_ns
-            mdf = load_market_df(str(LIVE_MARKET_CSV), mtime_ns)
-            if mdf.empty:
-                st.info("Live commodity data file is empty.")
+            if fast_mode:
+                with st.spinner("Fetching recent data (fast mode)..."):
+                    live_df = fetch_live_df(
+                        api_key=api_key,
+                        resource_id=resource_id,
+                        state=active_state,
+                        district=active_district,
+                        commodity=active_commodity,
+                    )
+                if live_df.empty:
+                    st.error("No rows returned in fast mode. Try Refresh Selected Combination instead.")
+                    st.stop()
+                mdf = live_df
             else:
-                mdf.columns = [c.strip() for c in mdf.columns]
-                if st.button("Show 15-Day Forecast", use_container_width=True):
-                    filtered = filter_market_rows(mdf, active_commodity, active_state, active_district)
-                    raw_points = int(filtered["Arrival_Date_dt"].dt.date.nunique()) if not filtered.empty else 0
-                    latest_dt = filtered["Arrival_Date_dt"].max().date() if raw_points > 0 else None
-                    st.caption(
-                        "Selection: "
-                        f"{active_state} / {active_district} / {active_commodity} | "
-                        f"Raw points: {raw_points} | Latest arrival date: {latest_dt if latest_dt else 'N/A'}"
+                if not LIVE_MARKET_CSV.exists():
+                    st.info("No live commodity CSV found. Run data fetch script first.")
+                    st.stop()
+                mtime_ns = LIVE_MARKET_CSV.stat().st_mtime_ns
+                mdf = load_market_df(str(LIVE_MARKET_CSV), mtime_ns)
+                if mdf.empty:
+                    st.info("Live commodity data file is empty.")
+                    st.stop()
+
+            mdf.columns = [c.strip() for c in mdf.columns]
+            filtered = filter_market_rows(mdf, active_commodity, active_state, active_district)
+            raw_points = int(filtered["Arrival_Date_dt"].dt.date.nunique()) if not filtered.empty else 0
+            latest_dt = filtered["Arrival_Date_dt"].max().date() if raw_points > 0 else None
+            st.caption(
+                "Selection: "
+                f"{active_state} / {active_district} / {active_commodity} | "
+                f"Raw points: {raw_points} | Latest arrival date: {latest_dt if latest_dt else 'N/A'}"
+            )
+
+            if raw_points == 0:
+                st.error(
+                    "No rows found for selected state/district/commodity. "
+                    "Click 'Refresh Selected Combination' first."
+                )
+            elif raw_points < int(min_raw_points):
+                st.error(
+                    f"Insufficient raw history for reliable LSTM forecast ({raw_points} < {int(min_raw_points)}). "
+                    "Disable fast mode and refresh selected combination to pull full history."
+                )
+            elif latest_dt is None:
+                st.error("Latest arrival date is missing after date parsing.")
+            else:
+                stale_days = (date.today() - latest_dt).days
+                if stale_days > int(max_stale_days):
+                    st.warning(
+                        f"Data is stale by {stale_days} days. Forecast is generated on last available market data."
                     )
 
-                    if raw_points == 0:
-                        st.error(
-                            "No rows found for selected state/district/commodity. "
-                            "Click 'Refresh Selected Combination' first."
+                with st.spinner("Training LSTM and generating forecast..."):
+                    if fast_mode:
+                        hist, fc = build_forecast_from_df(
+                            df=mdf,
+                            commodity=active_commodity,
+                            state=active_state,
+                            district=active_district,
+                            horizon=15,
                         )
-                    elif raw_points < int(min_raw_points):
-                        st.error(
-                            f"Insufficient raw history for reliable LSTM forecast ({raw_points} < {int(min_raw_points)}). "
-                            "Refresh data with broader filters or choose another commodity/district."
-                        )
-                    elif latest_dt is None:
-                        st.error("Latest arrival date is missing after date parsing.")
                     else:
-                        stale_days = (date.today() - latest_dt).days
-                        if stale_days > int(max_stale_days):
-                            st.warning(
-                                f"Data is stale by {stale_days} days. Forecast is generated on last available market data."
-                            )
+                        hist, fc = build_forecast(
+                            csv_path=str(LIVE_MARKET_CSV),
+                            mtime_ns=mtime_ns,
+                            commodity=active_commodity,
+                            state=active_state,
+                            district=active_district,
+                            horizon=15,
+                        )
 
-                        with st.spinner("Training LSTM and generating forecast..."):
-                            hist, fc = build_forecast(
-                                csv_path=str(LIVE_MARKET_CSV),
-                                mtime_ns=mtime_ns,
-                                commodity=active_commodity,
-                                state=active_state,
-                                district=active_district,
-                                horizon=15,
-                            )
+                history_tail = hist.tail(90).copy()
+                history_tail = history_tail.rename(columns={"value": "History"})
+                fc2 = fc.rename(columns={"predicted_value": "Forecast"})
 
-                        history_tail = hist.tail(90).copy()
-                        history_tail = history_tail.rename(columns={"value": "History"})
-                        fc2 = fc.rename(columns={"predicted_value": "Forecast"})
+                chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
+                chart_df["History"] = history_tail["History"].values
+                chart_df = chart_df.set_index("date")
 
-                        chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
-                        chart_df["History"] = history_tail["History"].values
-                        chart_df = chart_df.set_index("date")
+                fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
+                fc_chart["Forecast"] = fc2["Forecast"].values
+                fc_chart = fc_chart.set_index("date")
 
-                        fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
-                        fc_chart["Forecast"] = fc2["Forecast"].values
-                        fc_chart = fc_chart.set_index("date")
-
-                        joined = chart_df.join(fc_chart, how="outer")
-                        st.line_chart(joined, use_container_width=True)
-                        st.dataframe(fc2, use_container_width=True, height=240)
+                joined = chart_df.join(fc_chart, how="outer")
+                st.line_chart(joined, use_container_width=True)
+                st.dataframe(fc2, use_container_width=True, height=240)
         except Exception as e:
             st.warning(f"Forecast unavailable: {e}")
 
