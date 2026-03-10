@@ -166,8 +166,8 @@ Primary workflow is through Streamlit UI (recommended). CLI scripts below are op
    - Click `Refresh Market Data`
    - Click `Show 15-Day Forecast`
 
-### CLI workflow (optional admin/debug)
-Use these scripts to fetch commodity data from Data.gov.in and forecast 15 days ahead.
+### CLI workflow (optional admin/debug or scheduled refresh)
+Use these scripts to fetch commodity data from Data.gov.in and keep a rolling 3-year window.
 
 1. One-time setup (safe)
    ```bash
@@ -178,7 +178,7 @@ Use these scripts to fetch commodity data from Data.gov.in and forecast 15 days 
    - `DATA_GOV_RESOURCE_ID` (default already set)
    - optional default filters (`DATA_GOV_STATE`, `DATA_GOV_DISTRICT`, `DATA_GOV_COMMODITY`)
 
-2. Fetch dataset records (no repeated API/resource args)
+2. Fetch dataset records (rolling 3-year window)
    ```bash
    python scripts/fetch_datagov_commodity.py
    ```
@@ -196,6 +196,7 @@ Notes:
 - In Streamlit sidebar, use `Refresh Market Data` to fetch fresh rows; forecast uses latest CSV immediately.
 - Streamlit forecast now blocks prediction when raw date points are below threshold or data is stale beyond configured days.
 - Data.gov filters are case-sensitive on field names; scripts use `filters[State]`, `filters[District]`, `filters[Commodity]`.
+- `fetch_datagov_commodity.py` merges new rows and keeps only the latest 3 years by default (`--keep_years 3`).
 
 ## Notes
 - This scaffold is production-oriented but intentionally lightweight.
