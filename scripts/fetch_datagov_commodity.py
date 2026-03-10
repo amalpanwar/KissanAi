@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+from datetime import date, timedelta
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -67,11 +68,18 @@ def main() -> None:
     if args.commodity:
         extra_params["filters[Commodity]"] = args.commodity
     extra_params["sort[Arrival_Date]"] = "desc"
+    cutoff_date = None
+    if args.keep_years > 0:
+        cutoff_date = date.today() - timedelta(days=365 * args.keep_years)
+
     records = client.fetch_records(
         resource_id=args.resource_id,
         limit=args.limit,
         max_records=args.max_records,
         extra_params=extra_params,
+        stop_date=cutoff_date,
+        date_field="Arrival_Date",
+        dayfirst=True,
     )
     if not records:
         print("No records returned.")

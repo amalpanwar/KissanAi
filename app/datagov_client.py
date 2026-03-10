@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import date, datetime
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -22,6 +23,9 @@ class DataGovClient:
         limit: int = 1000,
         max_records: int = 100000,
         extra_params: dict[str, Any] | None = None,
+        stop_date: date | None = None,
+        date_field: str = "Arrival_Date",
+        dayfirst: bool = True,
     ) -> list[dict[str, Any]]:
         offset = 0
         all_records: list[dict[str, Any]] = []
@@ -63,6 +67,24 @@ class DataGovClient:
             if not records:
                 break
 
+            if stop_date:
+                filtered: list[dict[str, Any]] = []
+                min_dt: date | None = None
+                for r in records:
+                    dt = _parse_date(r.get(date_field), dayfirst=dayfirst)
+                    if dt:
+                        if min_dt is None or dt < min_dt:
+                            min_dt = dt
+                        if dt >= stop_date:
+                            filtered.append(r)
+                    else:
+                        # Keep rows without dates to avoid losing data.
+                        filtered.append(r)
+                records = filtered
+                if min_dt is not None and min_dt < stop_date:
+                    all_records.extend(records)
+                    break
+
             all_records.extend(records)
             offset += len(records)
 
@@ -77,3 +99,32 @@ class DataGovClient:
                 break
 
         return all_records
+
+
+def _parse_date(val: Any, dayfirst: bool = True) -> date | None:
+    if not val:
+        return None
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        if "/" in s:
+            parts = s.split("/")
+            if len(parts) == 3:
+                if dayfirst:
+                    d, m, y = parts
+                else:
+                    m, d, y = parts
+                return date(int(y), int(m), int(d))
+        if "-" in s:
+            parts = s.split("-")
+            if len(parts) == 3:
+                y, m, d = parts
+                return date(int(y), int(m), int(d))
+    except Exception:
+        return None
+    return None
