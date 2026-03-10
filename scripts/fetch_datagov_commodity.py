@@ -44,13 +44,14 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=None)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--state", default=os.getenv("DATA_GOV_STATE", "Uttar Pradesh"))
-    parser.add_argument("--district", default=os.getenv("DATA_GOV_DISTRICT"))
-    parser.add_argument("--commodity", default=os.getenv("DATA_GOV_COMMODITY"))
+    parser.add_argument("--district", default=None)
+    parser.add_argument("--commodity", default=None)
     parser.add_argument(
         "--districts",
         default="Meerut,Muzaffarnagar,Baghpat,Saharanpur,Shamli,Bulandshahr,Aligarh,Greater Noida,Gautam Buddha Nagar",
         help="Comma-separated districts for Western UP",
     )
+    parser.add_argument("--use_env_filters", action="store_true", default=False)
     parser.add_argument("--no_timeout", action="store_true", default=True)
     parser.add_argument("--keep_years", type=int, default=3)
     parser.add_argument("--recent_only", action="store_true", default=True)
@@ -71,6 +72,12 @@ def main() -> None:
     cutoff_date = None
     if args.keep_years > 0:
         cutoff_date = date.today() - timedelta(days=365 * args.keep_years)
+
+    if args.use_env_filters:
+        if args.district is None:
+            args.district = os.getenv("DATA_GOV_DISTRICT")
+        if args.commodity is None:
+            args.commodity = os.getenv("DATA_GOV_COMMODITY")
 
     district_list = [d.strip() for d in (args.districts or "").split(",") if d.strip()]
 
@@ -102,8 +109,21 @@ def main() -> None:
         )
         all_records.extend(records)
     if not all_records:
-        print("No records returned.")
-        return
+        # Fallback: try state-only (no district/commodity) once
+        extra_params = {"filters[State]": args.state, "sort[Arrival_Date]": "desc"} if args.state else {}
+        fallback = client.fetch_records(
+            resource_id=args.resource_id,
+            limit=args.limit,
+            max_records=args.max_records,
+            extra_params=extra_params,
+            stop_date=cutoff_date,
+            date_field="Arrival_Date",
+            dayfirst=True,
+        )
+        if not fallback:
+            print("No records returned (even after state-only fallback).")
+            return
+        all_records = fallback
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
