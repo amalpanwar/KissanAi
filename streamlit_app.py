@@ -26,7 +26,7 @@ FETCH_PAGE_LIMIT = 200
 FETCH_MAX_RECORDS_COMBO = 50000
 FETCH_MAX_RECORDS_STATE = 50000
 FETCH_COOLDOWN_SEC = 600
-FAST_FETCH_LIMIT = 500
+FAST_FETCH_LIMIT = 200
 
 
 def check_ready() -> tuple[bool, str]:
@@ -180,7 +180,7 @@ def fetch_live_df(
     commodity: str,
     limit: int = FAST_FETCH_LIMIT,
 ) -> pd.DataFrame:
-    client = DataGovClient(api_key=api_key, timeout_sec=20, retries=3)
+    client = DataGovClient(api_key=api_key, timeout_sec=25, retries=2)
     params = {}
     if state.strip():
         params["filters[State]"] = state.strip()
@@ -189,13 +189,16 @@ def fetch_live_df(
     if commodity.strip():
         params["filters[Commodity]"] = commodity.strip()
     params["sort[Arrival_Date]"] = "desc"
-    recs = client.fetch_records(
-        resource_id=resource_id,
-        limit=limit,
-        max_records=limit,
-        extra_params=params,
-    )
-    return pd.DataFrame(recs) if recs else pd.DataFrame()
+    try:
+        recs = client.fetch_records(
+            resource_id=resource_id,
+            limit=limit,
+            max_records=limit,
+            extra_params=params,
+        )
+        return pd.DataFrame(recs) if recs else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 
 def save_advisory(
@@ -405,9 +408,18 @@ with st.sidebar:
                         commodity=active_commodity,
                     )
                 if live_df.empty:
-                    st.error("No rows returned in fast mode. Try Refresh Selected Combination instead.")
-                    st.stop()
-                mdf = live_df
+                    st.warning(
+                        "Fast mode fetch timed out or returned no rows. "
+                        "Falling back to cached CSV if available."
+                    )
+                    if LIVE_MARKET_CSV.exists():
+                        mtime_ns = LIVE_MARKET_CSV.stat().st_mtime_ns
+                        mdf = load_market_df(str(LIVE_MARKET_CSV), mtime_ns)
+                    else:
+                        st.error("No cached CSV available. Use Refresh Selected Combination.")
+                        st.stop()
+                else:
+                    mdf = live_df
             else:
                 if not LIVE_MARKET_CSV.exists():
                     st.info("No live commodity CSV found. Run data fetch script first.")
