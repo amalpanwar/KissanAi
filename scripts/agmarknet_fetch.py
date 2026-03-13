@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import sys
 import time
@@ -44,6 +45,28 @@ def load_id_list(path: str | None) -> list[str]:
     return [x.strip() for x in text.splitlines() if x.strip()]
 
 
+def load_group_map(path: str | None) -> dict[str, list[str]]:
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        data = p.read_text(encoding="utf-8")
+        raw = json.loads(data)
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, list[str]] = {}
+    for k, v in raw.items():
+        if not isinstance(v, list):
+            continue
+        ids = [str(x).strip() for x in v if str(x).strip()]
+        out[str(k)] = ids
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--from_date", required=True, help="YYYY-MM-DD")
@@ -52,8 +75,14 @@ def main() -> None:
     parser.add_argument("--district_ids", default="", help="Comma list of district IDs")
     parser.add_argument("--district_ids_file", default="", help="File with district IDs, one per line")
     parser.add_argument("--group_ids", required=True, help="Comma list of commodity group IDs")
+    parser.add_argument("--group_ids_file", default="", help="File with group IDs, one per line")
     parser.add_argument("--commodity_ids", default="", help="Comma list of commodity IDs")
     parser.add_argument("--commodity_ids_file", default="", help="File with commodity IDs, one per line")
+    parser.add_argument(
+        "--group_commodities_json",
+        default="",
+        help="JSON map of group_id -> [commodity_id,...]",
+    )
     parser.add_argument("--period", default="date")
     parser.add_argument("--type", default="3")
     parser.add_argument("--msp", default="0")
@@ -66,9 +95,10 @@ def main() -> None:
 
     state_ids = parse_ids(args.state_ids)
     district_ids = parse_ids(args.district_ids) + load_id_list(args.district_ids_file)
-    group_ids = parse_ids(args.group_ids)
+    group_ids = parse_ids(args.group_ids) + load_id_list(args.group_ids_file)
     commodity_ids = parse_ids(args.commodity_ids) + load_id_list(args.commodity_ids_file)
     option_ids = parse_ids(args.options)
+    group_map = load_group_map(args.group_commodities_json)
 
     if not district_ids:
         district_ids = [""]
@@ -80,7 +110,12 @@ def main() -> None:
     for state_id in state_ids:
         for district_id in district_ids:
             for group_id in group_ids:
-                for commodity_id in commodity_ids:
+                per_group_commodities = commodity_ids
+                if group_map:
+                    per_group_commodities = group_map.get(str(group_id), [])
+                if not per_group_commodities:
+                    continue
+                for commodity_id in per_group_commodities:
                     for option in option_ids:
                         page = 1
                         while page <= args.max_pages:
