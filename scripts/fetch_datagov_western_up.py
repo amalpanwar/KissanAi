@@ -14,6 +14,15 @@ if str(ROOT) not in sys.path:
 
 from app.datagov_client import DataGovClient
 
+DISTRICT_ALIASES = {
+    "Baghpat": ["Bagpat"],
+    "Muzaffarnagar": ["Mujaffarnagar", "Muzaffar Nagar"],
+    "Gautam Buddha Nagar": ["Gautam Budh Nagar"],
+    "Greater Noida": ["Gautam Buddha Nagar", "Gautam Budh Nagar"],
+    "Bulandshahr": ["Buland Shahar"],
+    "Saharanpur": ["Saharan Pur"],
+}
+
 
 def load_local_env(env_path: Path) -> None:
     if not env_path.exists():
@@ -92,6 +101,7 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=None)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--keep_years", type=int, default=3)
+    parser.add_argument("--use_aliases", action="store_true", default=False)
     parser.add_argument(
         "--out_dir",
         default="data/raw/live/by_district",
@@ -115,30 +125,42 @@ def main() -> None:
     client = DataGovClient(api_key=args.api_key, timeout_sec=args.timeout, retries=args.retries)
 
     for d in districts:
-        extra_params: dict[str, str] = {
-            "filters[State]": args.state,
-            "filters[District]": d,
-            "sort[Arrival_Date]": "desc",
-        }
-        records = client.fetch_records(
-            resource_id=args.resource_id,
-            limit=args.limit,
-            max_records=args.max_records,
-            extra_params=extra_params,
-            stop_date=cutoff_date,
-            date_field="Arrival_Date",
-            dayfirst=True,
-        )
+        candidates = [d]
+        if args.use_aliases:
+            candidates = [d] + DISTRICT_ALIASES.get(d, [])
+        records = []
+        used_name = d
+        for cand in candidates:
+            extra_params: dict[str, str] = {
+                "filters[State]": args.state,
+                "filters[District]": cand,
+                "sort[Arrival_Date]": "desc",
+            }
+            records = client.fetch_records(
+                resource_id=args.resource_id,
+                limit=args.limit,
+                max_records=args.max_records,
+                extra_params=extra_params,
+                stop_date=cutoff_date,
+                date_field="Arrival_Date",
+                dayfirst=True,
+            )
+            if records:
+                used_name = cand
+                break
 
         if not records:
-            print(f"{d}: no records returned")
+            print(f"{d}: no records returned (candidates tried: {candidates})")
             continue
 
         new_df = pd.DataFrame(records)
         out_path = out_dir / f"datagov_{d.lower().replace(' ', '_')}.csv"
         merged = merge_and_trim(out_path, new_df, args.keep_years)
         merged.to_csv(out_path, index=False)
-        print(f"{d}: fetched {len(new_df)} rows, stored {len(merged)} rows -> {out_path}")
+        print(
+            f"{d}: fetched {len(new_df)} rows (district='{used_name}'), "
+            f"stored {len(merged)} rows -> {out_path}"
+        )
 
 
 if __name__ == "__main__":

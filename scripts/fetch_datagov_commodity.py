@@ -14,6 +14,15 @@ if str(ROOT) not in sys.path:
 
 from app.datagov_client import DataGovClient
 
+DISTRICT_ALIASES = {
+    "Baghpat": ["Bagpat"],
+    "Muzaffarnagar": ["Mujaffarnagar", "Muzaffar Nagar"],
+    "Gautam Buddha Nagar": ["Gautam Budh Nagar"],
+    "Greater Noida": ["Gautam Buddha Nagar", "Gautam Budh Nagar"],
+    "Bulandshahr": ["Buland Shahar"],
+    "Saharanpur": ["Saharan Pur"],
+}
+
 
 def load_local_env(env_path: Path) -> None:
     if not env_path.exists():
@@ -52,6 +61,7 @@ def main() -> None:
         help="Comma-separated districts for Western UP",
     )
     parser.add_argument("--use_env_filters", action="store_true", default=False)
+    parser.add_argument("--use_aliases", action="store_true", default=False)
     parser.add_argument("--state_only", action="store_true", default=False)
     parser.add_argument("--no_timeout", action="store_true", default=True)
     parser.add_argument("--keep_years", type=int, default=3)
@@ -93,25 +103,31 @@ def main() -> None:
         district_list = [""]
 
     for d in district_list:
-        extra_params: dict[str, str] = {}
-        if args.state:
-            extra_params["filters[State]"] = args.state
-        if d:
-            extra_params["filters[District]"] = d
-        if args.commodity:
-            extra_params["filters[Commodity]"] = args.commodity
-        extra_params["sort[Arrival_Date]"] = "desc"
+        candidates = [d]
+        if args.use_aliases:
+            candidates = [d] + DISTRICT_ALIASES.get(d, [])
+        for cand in candidates:
+            extra_params: dict[str, str] = {}
+            if args.state:
+                extra_params["filters[State]"] = args.state
+            if cand:
+                extra_params["filters[District]"] = cand
+            if args.commodity:
+                extra_params["filters[Commodity]"] = args.commodity
+            extra_params["sort[Arrival_Date]"] = "desc"
 
-        records = client.fetch_records(
-            resource_id=args.resource_id,
-            limit=args.limit,
-            max_records=args.max_records,
-            extra_params=extra_params,
-            stop_date=cutoff_date,
-            date_field="Arrival_Date",
-            dayfirst=True,
-        )
-        all_records.extend(records)
+            records = client.fetch_records(
+                resource_id=args.resource_id,
+                limit=args.limit,
+                max_records=args.max_records,
+                extra_params=extra_params,
+                stop_date=cutoff_date,
+                date_field="Arrival_Date",
+                dayfirst=True,
+            )
+            if records:
+                all_records.extend(records)
+                break
     if not all_records:
         # Fallback: try state-only (no district/commodity) once
         extra_params = {"filters[State]": args.state, "sort[Arrival_Date]": "desc"} if args.state else {}
