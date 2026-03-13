@@ -74,7 +74,7 @@ def main() -> None:
     parser.add_argument("--state_ids", required=True, help="Comma list of state IDs")
     parser.add_argument("--district_ids", default="", help="Comma list of district IDs")
     parser.add_argument("--district_ids_file", default="", help="File with district IDs, one per line")
-    parser.add_argument("--group_ids", required=True, help="Comma list of commodity group IDs")
+    parser.add_argument("--group_ids", default="", help="Comma list of commodity group IDs")
     parser.add_argument("--group_ids_file", default="", help="File with group IDs, one per line")
     parser.add_argument("--commodity_ids", default="", help="Comma list of commodity IDs")
     parser.add_argument("--commodity_ids_file", default="", help="File with commodity IDs, one per line")
@@ -96,6 +96,8 @@ def main() -> None:
     state_ids = parse_ids(args.state_ids)
     district_ids = parse_ids(args.district_ids) + load_id_list(args.district_ids_file)
     group_ids = parse_ids(args.group_ids) + load_id_list(args.group_ids_file)
+    if not group_ids:
+        raise SystemExit("Provide --group_ids or --group_ids_file.")
     commodity_ids = parse_ids(args.commodity_ids) + load_id_list(args.commodity_ids_file)
     option_ids = parse_ids(args.options)
     group_map = load_group_map(args.group_commodities_json)
