@@ -16,6 +16,10 @@ def _build_url(params: dict[str, Any]) -> str:
     return f"{API_BASE}?{query}"
 
 
+def build_url(params: dict[str, Any]) -> str:
+    return _build_url(params)
+
+
 def _strip_brackets(params: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k, v in params.items():

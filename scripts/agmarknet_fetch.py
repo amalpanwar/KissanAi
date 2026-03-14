@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.agmarknet_client import extract_rows, fetch_page
+from app.agmarknet_client import build_url, extract_rows, fetch_page
 
 
 def parse_ids(val: str) -> list[str]:
@@ -95,6 +95,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--max_pages", type=int, default=200)
     parser.add_argument("--sleep_sec", type=float, default=0.3)
+    parser.add_argument("--debug", action="store_true", help="Log failed URLs and continue")
     parser.add_argument("--out", default="data/raw/live/agmarknet_report.csv")
     args = parser.parse_args()
 
@@ -144,7 +145,13 @@ def main() -> None:
                                 "options": option,
                                 "limit": args.limit,
                             }
-                            payload = fetch_page(params)
+                            try:
+                                payload = fetch_page(params)
+                            except Exception as exc:
+                                if args.debug:
+                                    url = build_url(params)
+                                    print(f\"Fetch failed: {exc} | {url}\", file=sys.stderr)
+                                break
                             rows = extract_rows(payload)
                             if not rows:
                                 break
