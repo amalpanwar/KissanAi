@@ -4,7 +4,7 @@ import json
 import time
 from typing import Any
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 
 API_BASE = "https://api.agmarknet.gov.in/v1/all-type-report/all-type-report"
@@ -18,9 +18,16 @@ def fetch_page(
     query = urlencode(params, doseq=True)
     url = f"{API_BASE}?{query}"
     last_error: Exception | None = None
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://agmarknet.gov.in/",
+        "Origin": "https://agmarknet.gov.in",
+    }
     for attempt in range(1, retries + 1):
         try:
-            with urlopen(url, timeout=timeout_sec) as resp:
+            req = Request(url, headers=headers)
+            with urlopen(req, timeout=timeout_sec) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
             last_error = exc
