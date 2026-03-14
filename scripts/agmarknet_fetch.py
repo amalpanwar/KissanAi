@@ -150,7 +150,7 @@ def main() -> None:
                             except Exception as exc:
                                 if args.debug:
                                     url = build_url(params)
-                                    print(f\"Fetch failed: {exc} | {url}\", file=sys.stderr)
+                                    print(f"Fetch failed: {exc} | {url}", file=sys.stderr)
                                 break
                             rows = extract_rows(payload)
                             if not rows:
