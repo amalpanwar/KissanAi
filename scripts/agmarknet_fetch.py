@@ -74,6 +74,11 @@ def main() -> None:
     parser.add_argument("--state_ids", required=True, help="Comma list of state IDs")
     parser.add_argument("--district_ids", default="", help="Comma list of district IDs")
     parser.add_argument("--district_ids_file", default="", help="File with district IDs, one per line")
+    parser.add_argument(
+        "--districts_as_list",
+        action="store_true",
+        help="Send all district_ids as a single list param instead of looping each district",
+    )
     parser.add_argument("--group_ids", default="", help="Comma list of commodity group IDs")
     parser.add_argument("--group_ids_file", default="", help="File with group IDs, one per line")
     parser.add_argument("--commodity_ids", default="", help="Comma list of commodity IDs")
@@ -108,6 +113,9 @@ def main() -> None:
         commodity_ids = [""]
 
     all_rows: list[dict[str, Any]] = []
+
+    if args.districts_as_list and district_ids != [""]:
+        district_ids = [",".join(district_ids)]
 
     for state_id in state_ids:
         for district_id in district_ids:
