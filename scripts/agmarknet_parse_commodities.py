@@ -25,6 +25,34 @@ GROUPS = {
     "Vegetables": 6,
 }
 
+GROUP_ALIASES = {
+    "Beverages": ["Beverage", "Beverages"],
+    "Cereals": ["Cereals"],
+    "Drug and Narcotics": ["Drug and Narcotics"],
+    "Dry Fruits": ["Dry Fruits", "Dry fruits", "DryFruits"],
+    "Fibre Crops": ["Fibre Crops", "Fiber Crops"],
+    "Flowers": ["Flowers", "flowers"],
+    "Forest Products": ["Forest Products", "forest product", "forest products"],
+    "Fruits": ["Fruits", "fruits"],
+    "Live Stock,Poultry,Fisheries": [
+        "Live Stock,Poultry,Fisheries",
+        "LiveStock",
+        "Livestock",
+        "Live Stock",
+        "Live Stock Poultry Fisheries",
+    ],
+    "Oil Seeds": ["Oil Seeds", "oil seeds", "OilSeeds"],
+    "Oils and Fats": ["Oils and Fats", "oil and fats", "oil and fat"],
+    "Others": ["Others", "others"],
+    "Pulses": ["Pulses"],
+    "Spices": ["Spices", "spices"],
+    "Vegetables": ["Vegetables", "vegetables"],
+}
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.strip().lower())
+
 
 def _clean_rtf(path: Path) -> str:
     raw = path.read_text(encoding="utf-8", errors="ignore")
@@ -47,26 +75,46 @@ def parse_rtf(path: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
             seen[id_] = name
     seen.pop("99999", None)
 
-    # Build group -> commodity ids by slicing text between group headings.
-    group_ids_map: dict[str, list[str]] = {str(v): [] for v in GROUPS.values()}
-    # Find section boundaries
-    positions: list[tuple[int, str]] = []
-    for name, gid in GROUPS.items():
-        m = re.search(rf"{re.escape(name)}\s*:", raw)
-        if m:
-            positions.append((m.start(), str(gid)))
-    positions.sort()
+    # Build normalized alias map -> group id.
+    alias_to_group: dict[str, str] = {}
+    for group_name, gid in GROUPS.items():
+        for alias in GROUP_ALIASES.get(group_name, []):
+            alias_to_group[_norm(alias)] = str(gid)
 
-    for idx, (start, gid) in enumerate(positions):
-        end = positions[idx + 1][0] if idx + 1 < len(positions) else len(raw)
+    group_ids_map: dict[str, list[str]] = {str(v): [] for v in GROUPS.values()}
+    positions: list[tuple[int, str]] = []
+
+    # Detect headings by line (colon optional), e.g. "Beverage:" or "forest product".
+    offset = 0
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if stripped:
+            name = stripped.rstrip(":").strip()
+            gid = alias_to_group.get(_norm(name))
+            if gid:
+                positions.append((offset, gid))
+        offset += len(line) + 1
+
+    # Dedupe by position and keep order
+    positions.sort()
+    deduped: list[tuple[int, str]] = []
+    seen_pos = set()
+    for pos, gid in positions:
+        if pos in seen_pos:
+            continue
+        seen_pos.add(pos)
+        deduped.append((pos, gid))
+
+    for idx, (start, gid) in enumerate(deduped):
+        end = deduped[idx + 1][0] if idx + 1 < len(deduped) else len(raw)
         section = raw[start:end]
         section_items = _extract_items(section)
-        ids = []
+        ids: list[str] = []
         for id_, _ in section_items:
             if id_ != "99999":
                 ids.append(id_)
         # dedupe keep order
-        seen_ids = []
+        seen_ids: list[str] = []
         for i in ids:
             if i not in seen_ids:
                 seen_ids.append(i)
