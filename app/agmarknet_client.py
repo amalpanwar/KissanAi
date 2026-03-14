@@ -51,6 +51,9 @@ def fetch_page(
                 tried_unbracketed = True
                 url = _build_url(_strip_brackets(params))
                 continue
+            if exc.code == 404:
+                # Treat as empty page (invalid combo) and continue caller loop.
+                return {"rows": []}
             if attempt == retries:
                 raise
         except Exception as exc:
