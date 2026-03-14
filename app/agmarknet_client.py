@@ -15,7 +15,8 @@ def fetch_page(
     timeout_sec: int = 30,
     retries: int = 3,
 ) -> dict[str, Any]:
-    query = urlencode(params, doseq=True)
+    # Keep brackets in list-style params like group=[1] to match browser requests.
+    query = urlencode(params, doseq=True, safe="[],")
     url = f"{API_BASE}?{query}"
     last_error: Exception | None = None
     headers = {
