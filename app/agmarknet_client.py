@@ -30,6 +30,7 @@ def fetch_page(
     params: dict[str, Any],
     timeout_sec: int = 30,
     retries: int = 3,
+    allow_unbracketed: bool = True,
 ) -> dict[str, Any]:
     headers = {
         "User-Agent": "Mozilla/5.0",
@@ -47,11 +48,11 @@ def fetch_page(
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as exc:
             last_error = exc
-            if exc.code == 404 and not tried_unbracketed:
+            if allow_unbracketed and exc.code in {400, 404} and not tried_unbracketed:
                 tried_unbracketed = True
                 url = _build_url(_strip_brackets(params))
                 continue
-            if exc.code == 404:
+            if exc.code in {400, 404}:
                 # Treat as empty page (invalid combo) and continue caller loop.
                 return {"rows": []}
             if attempt == retries:
