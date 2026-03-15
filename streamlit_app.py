@@ -22,6 +22,7 @@ st.caption("RAG + SLM based local-language advisory for crop, budget, and yield 
 
 cfg = load_config()
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
+AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
 FETCH_MAX_RECORDS_COMBO = 50000
 FETCH_MAX_RECORDS_STATE = 50000
@@ -156,6 +157,149 @@ def merge_market_data(existing_path: Path, new_df: pd.DataFrame) -> pd.DataFrame
     return merged
 
 
+def normalize_agmarknet_df(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out.columns = [c.strip() for c in out.columns]
+    col_map = {
+        "state_name": "State",
+        "district_name": "District",
+        "cmdt_name": "Commodity",
+        "rep_date": "Arrival_Date",
+        "model_price_wt": "Modal_Price",
+        "min_price_wt": "Min_Price",
+        "max_price_wt": "Max_Price",
+        "unit_name_price": "Price_Unit",
+        "cumm_arr": "Arrival_Qty",
+        "unit_name_arrival": "Arrival_Unit",
+    }
+    rename = {}
+    for k, v in col_map.items():
+        if k in out.columns and v not in out.columns:
+            rename[k] = v
+    if rename:
+        out = out.rename(columns=rename)
+    return out
+
+
+def load_agmarknet_df() -> pd.DataFrame:
+    if not AGMARKNET_CSV.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(AGMARKNET_CSV)
+        return normalize_agmarknet_df(df)
+    except Exception:
+        return pd.DataFrame()
+
+
+def is_price_query(text: str) -> bool:
+    t = text.lower()
+    keywords = [
+        "price",
+        "rate",
+        "mandi",
+        "bhav",
+        "भाव",
+        "दाम",
+        "कीमत",
+        "मंडी",
+        "forecast",
+        "भविष्य",
+        "अगले",
+        "आने वाले",
+        "15 दिन",
+        "पंद्रह दिन",
+    ]
+    return any(k in t for k in keywords)
+
+
+def _best_match(query: str, options: list[str]) -> str | None:
+    q = query.lower()
+    matches = []
+    for opt in options:
+        if opt and opt.lower() in q:
+            matches.append(opt)
+    if not matches:
+        return None
+    matches.sort(key=lambda x: len(x), reverse=True)
+    return matches[0]
+
+
+HINDI_COMMODITY_MAP = {
+    "गेहूं": "Wheat",
+    "धान": "Rice",
+    "चावल": "Rice",
+    "आलू": "Potato",
+    "गन्ना": "Sugarcane",
+    "सरसों": "Mustard",
+    "मक्का": "Maize",
+    "प्याज": "Onion",
+    "टमाटर": "Tomato",
+}
+
+
+def extract_selection_from_query(
+    query: str,
+    df: pd.DataFrame,
+    fallback_state: str,
+    fallback_district: str,
+    fallback_commodity: str,
+) -> tuple[str, str, str]:
+    q = query.lower()
+    state = fallback_state
+    district = fallback_district
+    commodity = fallback_commodity
+
+    if not df.empty:
+        states = sorted(df["State"].dropna().astype(str).unique().tolist()) if "State" in df.columns else []
+        districts = (
+            sorted(df["District"].dropna().astype(str).unique().tolist())
+            if "District" in df.columns
+            else []
+        )
+        commodities = (
+            sorted(df["Commodity"].dropna().astype(str).unique().tolist())
+            if "Commodity" in df.columns
+            else []
+        )
+        st_match = _best_match(q, states)
+        if st_match:
+            state = st_match
+        dist_match = _best_match(q, districts)
+        if dist_match:
+            district = dist_match
+        # Hindi mapping first
+        for hi, en in HINDI_COMMODITY_MAP.items():
+            if hi in q:
+                commodity = en
+                break
+        else:
+            comm_match = _best_match(q, commodities)
+            if comm_match:
+                commodity = comm_match
+
+    return state, district, commodity
+
+
+def summarize_latest_market(df: pd.DataFrame) -> tuple[str, dict[str, str] | None]:
+    if df.empty:
+        return "चयनित संयोजन के लिए कोई ताज़ा बाजार डेटा नहीं मिला।", None
+    df = df.copy()
+    df["Arrival_Date_dt"] = pd.to_datetime(df["Arrival_Date"], errors="coerce", dayfirst=True)
+    df = df.dropna(subset=["Arrival_Date_dt", "Modal_Price"])
+    if df.empty:
+        return "चयनित संयोजन के लिए वैध तारीख/दाम उपलब्ध नहीं हैं।", None
+    latest = df.loc[df["Arrival_Date_dt"].idxmax()].to_dict()
+    latest_dt = latest.get("Arrival_Date_dt")
+    modal = latest.get("Modal_Price")
+    unit = latest.get("Price_Unit", "Rs./Quintal")
+    qty = latest.get("Arrival_Qty", None)
+    arrival_unit = latest.get("Arrival_Unit", None)
+    line = f"ताज़ा भाव ({latest_dt.date()}): {modal} {unit}"
+    if qty and arrival_unit:
+        line += f", आवक: {qty} {arrival_unit}"
+    return line, latest
+
+
 def filter_market_rows(
     df: pd.DataFrame,
     commodity: str,
@@ -233,6 +377,13 @@ if not ok:
         "`python scripts/ingest_documents.py --input_dir data/raw`, `python scripts/build_index.py`"
     )
     st.stop()
+
+# Apply pending sidebar selection from last query (if any)
+pending = st.session_state.pop("pending_selection", None)
+if isinstance(pending, dict):
+    st.session_state["fc_state"] = pending.get("state", st.session_state.get("fc_state", "Uttar Pradesh"))
+    st.session_state["fc_district"] = pending.get("district", st.session_state.get("fc_district", "Meerut"))
+    st.session_state["fc_commodity_override"] = pending.get("commodity", "")
 
 with st.sidebar:
     st.subheader("Farmer Context")
@@ -496,6 +647,17 @@ with st.sidebar:
         except Exception as e:
             st.warning(f"Forecast unavailable: {e}")
 
+    auto_chart = st.session_state.get("auto_chart")
+    auto_table = st.session_state.get("auto_forecast_table")
+    auto_caption = st.session_state.get("auto_forecast_caption")
+    if auto_chart is not None and auto_table is not None:
+        st.markdown("---")
+        st.subheader("Query Forecast")
+        if auto_caption:
+            st.caption(auto_caption)
+        st.line_chart(auto_chart, use_container_width=True)
+        st.dataframe(auto_table, use_container_width=True, height=240)
+
 st.markdown("Ask in Hindi or English. The assistant will respond in Hindi.")
 
 if "chat_history" not in st.session_state:
@@ -522,27 +684,97 @@ if user_query:
         f"जिला: {district} | मौसम: {season} | पसंदीदा फसल: {preferred_crop or 'कोई नहीं'} | "
         f"किसान का प्रश्न: {user_query.strip()}"
     )
-    with st.spinner("Generating recommendation..."):
-        result = advisor.answer(composed_query)
+
+    market_df = load_agmarknet_df()
+    intent_price = is_price_query(user_query)
+    selected_state, selected_district, selected_commodity = extract_selection_from_query(
+        user_query,
+        market_df,
+        fallback_state=active_state if "active_state" in locals() else "Uttar Pradesh",
+        fallback_district=active_district if "active_district" in locals() else district,
+        fallback_commodity=active_commodity if "active_commodity" in locals() else (preferred_crop or "Wheat"),
+    )
+
+    if intent_price and not market_df.empty:
+        filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
+        latest_line, _latest = summarize_latest_market(filtered)
+        auto_caption = f"{selected_state} / {selected_district} / {selected_commodity}"
+        auto_chart = None
+        auto_table = None
+        try:
+            hist, fc = build_forecast_from_df(
+                df=filtered,
+                commodity=selected_commodity,
+                state=selected_state,
+                district=selected_district,
+                horizon=15,
+            )
+            history_tail = hist.tail(90).copy()
+            history_tail = history_tail.rename(columns={"value": "History"})
+            fc2 = fc.rename(columns={"predicted_value": "Forecast"})
+
+            chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
+            chart_df["History"] = history_tail["History"].values
+            chart_df = chart_df.set_index("date")
+
+            fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
+            fc_chart["Forecast"] = fc2["Forecast"].values
+            fc_chart = fc_chart.set_index("date")
+            auto_chart = chart_df.join(fc_chart, how="outer")
+            auto_table = fc2
+        except Exception:
+            auto_chart = None
+            auto_table = None
+
+        if auto_chart is not None and auto_table is not None:
+            st.session_state["auto_chart"] = auto_chart
+            st.session_state["auto_forecast_table"] = auto_table
+            st.session_state["auto_forecast_caption"] = auto_caption
+        else:
+            st.session_state.pop("auto_chart", None)
+            st.session_state.pop("auto_forecast_table", None)
+            st.session_state.pop("auto_forecast_caption", None)
+
+        market_answer = (
+            f"बाजार जानकारी ({selected_state} / {selected_district} / {selected_commodity}):\n"
+            f"- {latest_line}\n"
+        )
+        if auto_table is not None:
+            avg_7d = float(auto_table["Forecast"].head(7).mean())
+            market_answer += f"- अगले 7 दिन का औसत अनुमानित भाव: {avg_7d:.2f} Rs./Quintal\n"
+        with st.spinner("Generating recommendation..."):
+            result = advisor.answer(composed_query)
+        final_answer = f"{result['answer']}\n\n{market_answer}"
+    else:
+        with st.spinner("Generating recommendation..."):
+            result = advisor.answer(composed_query)
+        final_answer = result["answer"]
 
     st.session_state.chat_history.append(
         {
             "role": "assistant",
-            "text": result["answer"],
+            "text": final_answer,
             "references": result.get("references", []),
         }
     )
 
     with st.chat_message("assistant"):
-        st.write(result["answer"])
+        st.write(final_answer)
         with st.expander("Sources Used"):
             for src in result.get("references", []):
                 st.write(f"- {src}")
+
+    if intent_price:
+        st.session_state["pending_selection"] = {
+            "state": selected_state,
+            "district": selected_district,
+            "commodity": selected_commodity,
+        }
 
     save_advisory(
         farmer_id=farmer_id,
         district=district,
         season=season,
         crop_name=preferred_crop or "unknown",
-        recommendation_text=result["answer"],
+        recommendation_text=final_answer,
     )
