@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -69,8 +70,9 @@ def load_group_map(path: str | None) -> dict[str, list[str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--from_date", required=True, help="YYYY-MM-DD")
-    parser.add_argument("--to_date", required=True, help="YYYY-MM-DD")
+    parser.add_argument("--from_date", default="", help="YYYY-MM-DD (optional if --keep_years set)")
+    parser.add_argument("--to_date", default="", help="YYYY-MM-DD (default: today)")
+    parser.add_argument("--keep_years", type=int, default=0, help="If set, use rolling window ending today")
     parser.add_argument("--state_ids", required=True, help="Comma list of state IDs")
     parser.add_argument("--district_ids", default="", help="Comma list of district IDs")
     parser.add_argument("--district_ids_file", default="", help="File with district IDs, one per line")
@@ -95,9 +97,21 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--max_pages", type=int, default=200)
     parser.add_argument("--sleep_sec", type=float, default=0.3)
+    parser.add_argument("--timeout_sec", type=int, default=30)
+    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument("--fail_log", default="data/raw/live/agmarknet_failures.csv")
     parser.add_argument("--debug", action="store_true", help="Log failed URLs and continue")
     parser.add_argument("--out", default="data/raw/live/agmarknet_report.csv")
     args = parser.parse_args()
+
+    today = date.today().isoformat()
+    to_date = args.to_date.strip() or today
+    if args.keep_years and not args.from_date:
+        from_date = date.today().replace(year=date.today().year - args.keep_years).isoformat()
+    else:
+        from_date = args.from_date.strip()
+    if not from_date:
+        raise SystemExit("Provide --from_date or use --keep_years.")
 
     state_ids = parse_ids(args.state_ids)
     district_ids = parse_ids(args.district_ids) + load_id_list(args.district_ids_file)
@@ -114,6 +128,7 @@ def main() -> None:
         commodity_ids = [""]
 
     all_rows: list[dict[str, Any]] = []
+    failed_rows: list[dict[str, Any]] = []
 
     if args.districts_as_list and district_ids != [""]:
         district_ids = [",".join(district_ids)]
@@ -132,8 +147,8 @@ def main() -> None:
                         while page <= args.max_pages:
                             params = {
                                 "type": args.type,
-                                "from_date": args.from_date,
-                                "to_date": args.to_date,
+                                "from_date": from_date,
+                                "to_date": to_date,
                                 "msp": args.msp,
                                 "period": args.period,
                                 "group": f"[{group_id}]",
@@ -146,11 +161,27 @@ def main() -> None:
                                 "limit": args.limit,
                             }
                             try:
-                                payload = fetch_page(params)
+                                payload = fetch_page(
+                                    params,
+                                    timeout_sec=args.timeout_sec,
+                                    retries=args.retries,
+                                )
                             except Exception as exc:
                                 if args.debug:
                                     url = build_url(params)
                                     print(f"Fetch failed: {exc} | {url}", file=sys.stderr)
+                                failed_rows.append(
+                                    {
+                                        "state_id": state_id,
+                                        "district_id": district_id,
+                                        "group_id": group_id,
+                                        "commodity_id": commodity_id,
+                                        "option": option,
+                                        "page": page,
+                                        "error": str(exc),
+                                        "url": build_url(params),
+                                    }
+                                )
                                 break
                             rows = extract_rows(payload)
                             if not rows:
@@ -170,6 +201,11 @@ def main() -> None:
 
     if not all_rows:
         print("No records returned.")
+        if failed_rows:
+            fail_path = Path(args.fail_log)
+            fail_path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(failed_rows).to_csv(fail_path, index=False)
+            print(f"Wrote failures to {fail_path}")
         return
 
     out_path = Path(args.out)
@@ -177,6 +213,11 @@ def main() -> None:
     df = pd.DataFrame(all_rows)
     df.to_csv(out_path, index=False)
     print(f"Saved {len(df)} rows to {out_path}")
+    if failed_rows:
+        fail_path = Path(args.fail_log)
+        fail_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(failed_rows).to_csv(fail_path, index=False)
+        print(f"Wrote failures to {fail_path}")
 
 
 if __name__ == "__main__":
