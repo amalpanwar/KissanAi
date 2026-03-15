@@ -118,6 +118,51 @@ Notes:
 
 Notes:
 - First startup can take time due to model download.
+
+## Agmarknet Fetch & Scheduler
+
+Generate commodity group/commodity mapping from the RTF:
+
+```bash
+python scripts/agmarknet_parse_commodities.py --input Commodity_json.rtf
+```
+
+Fetch market data (example):
+
+```bash
+python scripts/agmarknet_fetch.py \
+  --from_date 2024-01-01 \
+  --to_date 2026-03-14 \
+  --state_ids 34 \
+  --district_ids 586,595,604,614,615,640,642,649,653,638 \
+  --districts_as_list \
+  --group_ids_file data/raw/agmarknet_group_ids.txt \
+  --group_commodities_json data/raw/agmarknet_group_commodities.json \
+  --options 2 \
+  --limit 200 \
+  --max_pages 2000
+```
+
+Daily refresh (rolling 2 years ending today):
+
+```bash
+python scripts/agmarknet_daily_refresh.py
+```
+
+Override defaults via env vars:
+
+```bash
+export AGMARKNET_KEEP_YEARS=2
+export AGMARKNET_STATE_IDS=34
+export AGMARKNET_DISTRICT_IDS=586,595,604,614,615,640,642,649,653,638
+export AGMARKNET_OPTIONS=2
+export AGMARKNET_LIMIT=200
+export AGMARKNET_MAX_PAGES=2000
+export AGMARKNET_TIMEOUT_SEC=60
+export AGMARKNET_RETRIES=5
+export AGMARKNET_DEBUG=0
+python scripts/agmarknet_daily_refresh.py
+```
 - For faster cold starts, switch to a smaller embedding/generation model in `configs/pipeline.yaml`.
 
 ## GitHub Actions CI
