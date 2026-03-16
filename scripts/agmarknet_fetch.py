@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +73,7 @@ def main() -> None:
     parser.add_argument("--from_date", default="", help="YYYY-MM-DD (optional if --keep_years set)")
     parser.add_argument("--to_date", default="", help="YYYY-MM-DD (default: today)")
     parser.add_argument("--keep_years", type=int, default=0, help="If set, use rolling window ending today")
+    parser.add_argument("--lookback_days", type=int, default=0, help="If set, use N-day window ending today")
     parser.add_argument("--state_ids", required=True, help="Comma list of state IDs")
     parser.add_argument("--district_ids", default="", help="Comma list of district IDs")
     parser.add_argument("--district_ids_file", default="", help="File with district IDs, one per line")
@@ -100,18 +101,22 @@ def main() -> None:
     parser.add_argument("--timeout_sec", type=int, default=30)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--fail_log", default="data/raw/live/agmarknet_failures.csv")
+    parser.add_argument("--merge_existing", action="store_true", help="Merge with existing CSV at --out")
+    parser.add_argument("--trim_years", type=int, default=0, help="After merge, keep last N years only")
     parser.add_argument("--debug", action="store_true", help="Log failed URLs and continue")
     parser.add_argument("--out", default="data/raw/live/agmarknet_report.csv")
     args = parser.parse_args()
 
-    today = date.today().isoformat()
-    to_date = args.to_date.strip() or today
-    if args.keep_years and not args.from_date:
-        from_date = date.today().replace(year=date.today().year - args.keep_years).isoformat()
+    today = date.today()
+    to_date = args.to_date.strip() or today.isoformat()
+    if args.lookback_days and args.lookback_days > 0:
+        from_date = (today - timedelta(days=int(args.lookback_days))).isoformat()
+    elif args.keep_years and not args.from_date:
+        from_date = today.replace(year=today.year - args.keep_years).isoformat()
     else:
         from_date = args.from_date.strip()
     if not from_date:
-        raise SystemExit("Provide --from_date or use --keep_years.")
+        raise SystemExit("Provide --from_date or use --keep_years/--lookback_days.")
 
     state_ids = parse_ids(args.state_ids)
     district_ids = parse_ids(args.district_ids) + load_id_list(args.district_ids_file)
@@ -211,6 +216,32 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(all_rows)
+    if args.merge_existing and out_path.exists():
+        try:
+            old = pd.read_csv(out_path)
+            df = pd.concat([old, df], ignore_index=True)
+        except Exception:
+            pass
+    if not df.empty:
+        # Deduplicate on common key columns if present.
+        key_cols = [
+            c
+            for c in [
+                "state_name",
+                "district_name",
+                "market_name",
+                "cmdt_name",
+                "rep_date",
+                "model_price_wt",
+            ]
+            if c in df.columns
+        ]
+        if key_cols:
+            df = df.drop_duplicates(subset=key_cols, keep="last")
+    if args.trim_years and not df.empty and "rep_date" in df.columns:
+        df["_rep_dt"] = pd.to_datetime(df["rep_date"], errors="coerce", dayfirst=True)
+        cutoff = pd.Timestamp(today) - pd.Timedelta(days=int(args.trim_years) * 365)
+        df = df[df["_rep_dt"] >= cutoff].drop(columns=["_rep_dt"])
     df.to_csv(out_path, index=False)
     print(f"Saved {len(df)} rows to {out_path}")
     if failed_rows:

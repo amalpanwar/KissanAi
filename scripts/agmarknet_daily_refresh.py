@@ -14,6 +14,7 @@ def main() -> int:
     script = ROOT / "scripts" / "agmarknet_fetch.py"
 
     keep_years = os.getenv("AGMARKNET_KEEP_YEARS", "2")
+    lookback_days = os.getenv("AGMARKNET_LOOKBACK_DAYS", "14")
     state_ids = os.getenv("AGMARKNET_STATE_IDS", "34")
     district_ids = os.getenv(
         "AGMARKNET_DISTRICT_IDS",
@@ -37,8 +38,8 @@ def main() -> int:
     cmd = [
         python,
         str(script),
-        "--keep_years",
-        keep_years,
+        "--lookback_days",
+        lookback_days,
         "--state_ids",
         state_ids,
         "--district_ids",
@@ -58,6 +59,9 @@ def main() -> int:
         timeout_sec,
         "--retries",
         retries,
+        "--merge_existing",
+        "--trim_years",
+        keep_years,
     ]
 
     if debug == "1":
