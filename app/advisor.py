@@ -187,6 +187,9 @@ class RAGAdvisor:
         weather_words = [
             "weather",
             "mausam",
+            "maussam",
+            "mausm",
+            "mosam",
             "मौसम",
             "बारिश",
             "rain",
@@ -215,8 +218,8 @@ class RAGAdvisor:
             return None
         # Try explicit location phrases first
         patterns = [
-            r"(?:weather in|mausam in)\s+([a-zA-Z\\s]+)",
-            r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+mausam",
+            r"(?:weather in|mausam in|maussam in|mosam in)\s+([a-zA-Z\\s]+)",
+            r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+(?:mausam|maussam|mosam|mausm)",
             r"([\\u0900-\\u097F\\s]+?)\\s+का\\s+मौसम",
             r"([\\u0900-\\u097F\\s]+?)\\s+की\\s+मौसम",
         ]
