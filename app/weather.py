@@ -12,7 +12,29 @@ DISTRICT_COORDS = {
     "saharanpur": (29.9680, 77.5552),
     "shamli": (29.4497, 77.3153),
     "bulandshahr": (28.4069, 77.8498),
+    "baraut": (29.1028, 77.2587),
 }
+
+LOCATION_ALIASES = {
+    "meerut": ["meerut", "मेरठ"],
+    "muzaffarnagar": ["muzaffarnagar", "मुज़फ्फरनगर", "मुजफ्फरनगर"],
+    "baghpat": ["baghpat", "बागपत"],
+    "saharanpur": ["saharanpur", "सहारनपुर"],
+    "shamli": ["shamli", "शामली"],
+    "bulandshahr": ["bulandshahr", "बुलंदशहर"],
+    "baraut": ["baraut", "बड़ौत", "बरौत", "barot"],
+}
+
+
+def resolve_location_name(text: str) -> str | None:
+    if not text:
+        return None
+    t = text.lower()
+    for key, aliases in LOCATION_ALIASES.items():
+        for alias in aliases:
+            if alias.lower() in t:
+                return key
+    return None
 
 
 def _weather_code_hi(code: int) -> str:
@@ -37,7 +59,7 @@ def _weather_code_hi(code: int) -> str:
 
 
 def get_current_weather_hindi(district: str) -> str:
-    key = district.strip().lower()
+    key = resolve_location_name(district) or district.strip().lower()
     lat_lon = DISTRICT_COORDS.get(key)
     if not lat_lon:
         return (

@@ -11,7 +11,7 @@ from app.generator import LocalGenerator
 from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
-from app.weather import get_current_weather_hindi
+from app.weather import get_current_weather_hindi, resolve_location_name
 
 
 @dataclass
@@ -39,7 +39,11 @@ class RAGAdvisor:
 
         normalized_question = self._normalize_hinglish(farmer_question)
         if self._is_weather_intent(normalized_question):
-            district = self._extract_district(context_part) or "Meerut"
+            district = (
+                self._extract_location_from_question(question)
+                or self._extract_district(context_part)
+                or "Meerut"
+            )
             weather = get_current_weather_hindi(district)
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
         if self._is_crop_choice_intent(normalized_question):
@@ -205,6 +209,11 @@ class RAGAdvisor:
         if m_en:
             return m_en.group(1).strip()
         return None
+
+    def _extract_location_from_question(self, question: str) -> str | None:
+        if not question:
+            return None
+        return resolve_location_name(question)
 
     def _extract_season(self, context_part: str) -> str | None:
         if not context_part:
