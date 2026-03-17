@@ -37,6 +37,37 @@ def resolve_location_name(text: str) -> str | None:
     return None
 
 
+def _geocode_location(name: str) -> tuple[float, float, str] | None:
+    if not name:
+        return None
+    params = urlencode(
+        {
+            "name": name,
+            "count": 1,
+            "language": "hi",
+            "format": "json",
+        }
+    )
+    url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
+    try:
+        with urlopen(url, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    results = payload.get("results") or []
+    if not results:
+        return None
+    top = results[0]
+    try:
+        lat = float(top.get("latitude"))
+        lon = float(top.get("longitude"))
+    except Exception:
+        return None
+    name_parts = [top.get("name"), top.get("admin1"), top.get("country")]
+    display = ", ".join([p for p in name_parts if p])
+    return lat, lon, display
+
+
 def _weather_code_hi(code: int) -> str:
     mapping = {
         0: "आसमान साफ",
@@ -61,13 +92,17 @@ def _weather_code_hi(code: int) -> str:
 def get_current_weather_hindi(district: str) -> str:
     key = resolve_location_name(district) or district.strip().lower()
     lat_lon = DISTRICT_COORDS.get(key)
+    resolved_name = district.strip()
     if not lat_lon:
-        return (
-            "इस जिले के लिए मौसम डेटा उपलब्ध नहीं है। "
-            "कृपया Meerut, Muzaffarnagar, Baghpat, Saharanpur, Shamli या Bulandshahr चुनें।"
-        )
-
-    lat, lon = lat_lon
+        geo = _geocode_location(district.strip())
+        if not geo:
+            return (
+                "इस स्थान के लिए मौसम डेटा उपलब्ध नहीं है। "
+                "कृपया जिला/गाँव का सही नाम लिखें।"
+            )
+        lat, lon, resolved_name = geo
+    else:
+        lat, lon = lat_lon
     params = urlencode(
         {
             "latitude": lat,
@@ -92,7 +127,7 @@ def get_current_weather_hindi(district: str) -> str:
     summary = _weather_code_hi(code)
 
     return (
-        f"आज का मौसम ({district.title()}):\n"
+        f"आज का मौसम ({resolved_name}):\n"
         f"- स्थिति: {summary}\n"
         f"- तापमान: {temp}°C\n"
         f"- आर्द्रता: {humidity}%\n"

@@ -213,6 +213,17 @@ class RAGAdvisor:
     def _extract_location_from_question(self, question: str) -> str | None:
         if not question:
             return None
+        # Try explicit location phrases first
+        patterns = [
+            r"(?:weather in|mausam in)\s+([a-zA-Z\\s]+)",
+            r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+mausam",
+            r"([\\u0900-\\u097F\\s]+?)\\s+का\\s+मौसम",
+            r"([\\u0900-\\u097F\\s]+?)\\s+की\\s+मौसम",
+        ]
+        for pat in patterns:
+            m = re.search(pat, question, flags=re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
         return resolve_location_name(question)
 
     def _extract_season(self, context_part: str) -> str | None:
