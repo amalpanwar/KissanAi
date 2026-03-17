@@ -40,7 +40,7 @@ class RAGAdvisor:
         normalized_question = self._normalize_hinglish(farmer_question)
         if self._is_weather_intent(normalized_question):
             district = (
-                self._extract_location_from_question(question)
+                self._extract_location_from_question(normalized_question)
                 or self._extract_district(context_part)
                 or "Meerut"
             )
