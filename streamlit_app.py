@@ -403,7 +403,10 @@ with st.sidebar:
         "DATA_GOV_RESOURCE_ID", "35985678-0d79-46b4-9ed6-6f13308a1d24"
     )
 
-    if LIVE_MARKET_CSV.exists():
+    _catalog_df = load_agmarknet_df()
+    if not _catalog_df.empty:
+        _init_df = _catalog_df.copy()
+    elif LIVE_MARKET_CSV.exists():
         try:
             _init_df = pd.read_csv(LIVE_MARKET_CSV)
             _init_df.columns = [c.strip() for c in _init_df.columns]
@@ -473,8 +476,8 @@ with st.sidebar:
     active_district = district_override.strip() or selected_district
     active_commodity = selected_commodity
 
-    min_raw_points = st.number_input("Min Raw Date Points", min_value=100, max_value=5000, value=1000, step=50)
-    max_stale_days = st.number_input("Max Stale Days", min_value=0, max_value=30, value=15, step=1)
+    min_raw_points = 60
+    max_stale_days = 30
     fast_mode = st.checkbox("Fast Forecast (no download)", value=True)
 
     def run_fetch(use_state_only: bool = False) -> tuple[int, int]:
@@ -549,7 +552,11 @@ with st.sidebar:
 
     if st.button("Show 15-Day Forecast", use_container_width=True):
         try:
-            if fast_mode:
+            if AGMARKNET_CSV.exists():
+                mtime_ns = AGMARKNET_CSV.stat().st_mtime_ns
+                mdf = load_market_df(str(AGMARKNET_CSV), mtime_ns)
+                mdf = normalize_agmarknet_df(mdf)
+            elif fast_mode:
                 with st.spinner("Fetching recent data (fast mode)..."):
                     live_df = fetch_live_df(
                         api_key=api_key,
@@ -597,9 +604,9 @@ with st.sidebar:
                     "Click 'Refresh Selected Combination' first."
                 )
             elif raw_points < int(min_raw_points):
-                st.error(
-                    f"Insufficient raw history for reliable LSTM forecast ({raw_points} < {int(min_raw_points)}). "
-                    "Disable fast mode and refresh selected combination to pull full history."
+                st.warning(
+                    f"कम डेटा उपलब्ध है ({raw_points} < {int(min_raw_points)}). "
+                    "अनुमान सीमित विश्वसनीय हो सकता है।"
                 )
             elif latest_dt is None:
                 st.error("Latest arrival date is missing after date parsing.")
@@ -620,8 +627,9 @@ with st.sidebar:
                             horizon=15,
                         )
                     else:
+                        csv_path = str(AGMARKNET_CSV if AGMARKNET_CSV.exists() else LIVE_MARKET_CSV)
                         hist, fc = build_forecast(
-                            csv_path=str(LIVE_MARKET_CSV),
+                            csv_path=csv_path,
                             mtime_ns=mtime_ns,
                             commodity=active_commodity,
                             state=active_state,
