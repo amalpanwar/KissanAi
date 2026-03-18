@@ -221,8 +221,12 @@ class RAGAdvisor:
         patterns = [
             r"(?:weather in|mausam in|maussam in|mosam in)\s+([a-zA-Z\\s]+)",
             r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+(?:mausam|maussam|mosam|mausm|मौसम)",
+            r"(?:aaj|aj)?\\s*(?:ka\\s+)?(?:mausam|maussam|mosam|mausm|मौसम)\\s+([a-zA-Z\\s]+?)\\s+(?:me|mein|में)",
+            r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+(?:ka\\s+)?(?:mausam|maussam|mosam|mausm|मौसम)",
             r"([\\u0900-\\u097F\\s]+?)\\s+का\\s+मौसम",
             r"([\\u0900-\\u097F\\s]+?)\\s+की\\s+मौसम",
+            r"(?:आज|अज)?\\s*(?:का\\s+)?मौसम\\s+([\\u0900-\\u097F\\s]+?)\\s+में",
+            r"([\\u0900-\\u097F\\s]+?)\\s+में\\s+(?:का\\s+)?मौसम",
         ]
         for pat in patterns:
             m = re.search(pat, question, flags=re.IGNORECASE)
