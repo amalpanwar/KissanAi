@@ -42,7 +42,6 @@ class RAGAdvisor:
             district = (
                 self._extract_location_from_question(farmer_question)
                 or self._extract_location_from_question(normalized_question)
-                or self._extract_district(context_part)
             )
             if not district:
                 return {
