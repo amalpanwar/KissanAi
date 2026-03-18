@@ -269,6 +269,13 @@ class RAGAdvisor:
                 cand = tokens[idx - 1].strip(" ?!.,")
                 if cand and cand.lower() not in stop:
                     return cand
+            # Handle "X ka mausam" -> pick token before ka/ki/ke
+            if t in {"ka", "ki", "ke"} and idx + 1 < len(tokens):
+                nxt = tokens[idx + 1].strip(" ?!.,").lower()
+                if nxt in {"mausam", "maussam", "mosam", "mausm", "मौसम"} and idx - 1 >= 0:
+                    cand = tokens[idx - 1].strip(" ?!.,")
+                    if cand and cand.lower() not in stop:
+                        return cand
         return resolve_location_name(question)
 
     def _looks_like_location_only(self, question: str) -> bool:
