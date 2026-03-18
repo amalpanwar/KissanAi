@@ -112,6 +112,8 @@ def get_current_weather_hindi(district: str) -> str:
             "latitude": lat,
             "longitude": lon,
             "current": "temperature_2m,relative_humidity_2m,wind_speed_10m,rain,weather_code",
+            "hourly": "precipitation_probability,rain,showers,weather_code,temperature_2m",
+            "forecast_hours": 24,
             "timezone": "Asia/Kolkata",
         }
     )
@@ -123,12 +125,41 @@ def get_current_weather_hindi(district: str) -> str:
         return ""
 
     current = payload.get("current", {})
+    hourly = payload.get("hourly", {})
+    hourly_times = hourly.get("time", []) or []
+    hourly_rain = hourly.get("rain", []) or []
+    hourly_showers = hourly.get("showers", []) or []
+    hourly_prob = hourly.get("precipitation_probability", []) or []
     temp = current.get("temperature_2m", "NA")
     humidity = current.get("relative_humidity_2m", "NA")
     wind = current.get("wind_speed_10m", "NA")
     rain = current.get("rain", "NA")
     code = int(current.get("weather_code", 0))
     summary = _weather_code_hi(code)
+
+    outlook_lines = []
+    try:
+        if current.get("time") and hourly_times:
+            now_idx = 0
+            for i, t in enumerate(hourly_times):
+                if t >= current["time"]:
+                    now_idx = i
+                    break
+            next6 = slice(now_idx, min(now_idx + 6, len(hourly_times)))
+            next24 = slice(now_idx, min(now_idx + 24, len(hourly_times)))
+            if hourly_prob:
+                max_p6 = max(hourly_prob[next6], default=0)
+                max_p24 = max(hourly_prob[next24], default=0)
+                outlook_lines.append(f"- अगले 6 घंटे में बारिश की अधिकतम संभावना: {max_p6}%")
+                outlook_lines.append(f"- अगले 24 घंटे में बारिश की अधिकतम संभावना: {max_p24}%")
+            if hourly_rain or hourly_showers:
+                rain6 = sum((hourly_rain[next6] if hourly_rain else [])) + sum(
+                    (hourly_showers[next6] if hourly_showers else [])
+                )
+                if rain6:
+                    outlook_lines.append(f"- अगले 6 घंटे में अनुमानित वर्षा: {rain6:.1f} mm")
+    except Exception:
+        pass
 
     return (
         f"आज का मौसम ({resolved_name}):\n"
@@ -137,5 +168,7 @@ def get_current_weather_hindi(district: str) -> str:
         f"- आर्द्रता: {humidity}%\n"
         f"- हवा की गति: {wind} km/h\n"
         f"- वर्षा: {rain} mm\n\n"
-        "कृषि सुझाव: अगर वर्षा/हवा अधिक हो तो सिंचाई और स्प्रे शेड्यूल समायोजित करें।"
+        "घंटावार अनुमान:\n"
+        + ("\n".join(outlook_lines) if outlook_lines else "- उपलब्ध नहीं\n")
+        + "\n\nकृषि सुझाव: अगर वर्षा/हवा अधिक हो तो सिंचाई और स्प्रे शेड्यूल समायोजित करें।"
     )
