@@ -261,13 +261,13 @@ class RAGAdvisor:
                 "mausam.",
                 "mausam,",
             }
-            tokens = [t.strip(" ?!.,") for t in re.split(r"\\s+", q) if t.strip()]
+            tokens = [t.strip(" ?!.,") for t in re.split(r"\s+", q) if t.strip()]
             kept = [t for t in tokens if t.strip(" ?!.,").lower() not in drop]
             if kept:
                 return " ".join(kept)
         q_lower = question.lower()
         if "mausam" in q_lower or "मौसम" in question:
-            tokens = [t.strip(" ?!.,") for t in re.split(r"\\s+", question) if t.strip()]
+            tokens = [t.strip(" ?!.,") for t in re.split(r"\s+", question) if t.strip()]
             stop = {
                 "aaj",
                 "aj",
@@ -303,7 +303,7 @@ class RAGAdvisor:
             if m:
                 return m.group(1).strip()
         # Fallback: token after 'mausam/मौसम'
-        tokens = re.split(r"\\s+", question.strip())
+        tokens = re.split(r"\s+", question.strip())
         stop = {
             "aaj",
             "aj",
