@@ -8,6 +8,9 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import json
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from app.advisor import AdvisorConfig, RAGAdvisor
 from app.config import load_config
@@ -179,6 +182,61 @@ def normalize_agmarknet_df(df: pd.DataFrame) -> pd.DataFrame:
     if rename:
         out = out.rename(columns=rename)
     return out
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    from math import radians, sin, cos, asin, sqrt
+
+    r = 6371.0
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    c = 2 * asin(sqrt(a))
+    return r * c
+
+
+def _geocode_cached(name: str, admin: str | None = None) -> tuple[float, float, str] | None:
+    if not name:
+        return None
+    cache_path = Path("data/processed/market_geocode_cache.json")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        cache = {}
+    key = f"{name}|{admin or ''}".lower()
+    if key in cache:
+        lat, lon, label = cache[key]
+        return float(lat), float(lon), label
+    candidates = [name]
+    if admin:
+        candidates.append(f"{name}, {admin}")
+    candidates.append(f"{name}, Uttar Pradesh, India")
+    for cand in candidates:
+        params = urlencode({"name": cand, "count": 1, "language": "en", "format": "json"})
+        url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
+        try:
+            with urlopen(url, timeout=6) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            continue
+        results = payload.get("results") or []
+        if not results:
+            continue
+        top = results[0]
+        try:
+            lat = float(top.get("latitude"))
+            lon = float(top.get("longitude"))
+        except Exception:
+            continue
+        label = ", ".join([p for p in [top.get("name"), top.get("admin1"), top.get("country")] if p])
+        cache[key] = [lat, lon, label]
+        try:
+            cache_path.write_text(json.dumps(cache, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return lat, lon, label
+    return None
 
 
 def load_agmarknet_df() -> pd.DataFrame:
@@ -771,6 +829,40 @@ if user_query:
         if auto_table is not None:
             avg_7d = float(auto_table["Forecast"].head(7).mean())
             market_answer += f"- अगले 7 दिन का औसत अनुमानित भाव: {avg_7d:.2f} Rs./Quintal\n"
+
+        # Nearest market by geocoded distance (best-effort)
+        nearest_line = ""
+        if not filtered.empty and "Market" in filtered.columns:
+            place = None
+            # Try to find a place token in the query (first non-stopword token)
+            tokens = [t.strip(" ?!.,") for t in user_query.split() if t.strip()]
+            stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
+            for tok in tokens:
+                if tok.lower() not in stop and tok.lower() not in {"price", "rate", "mandi", "bhav"}:
+                    place = tok
+                    break
+            if place:
+                place_geo = _geocode_cached(place, f"{selected_district}, Uttar Pradesh")
+                if place_geo:
+                    plat, plon, _ = place_geo
+                    markets = (
+                        filtered["Market"].dropna().astype(str).unique().tolist()
+                        if "Market" in filtered.columns
+                        else []
+                    )
+                    best = None
+                    for m in markets[:30]:
+                        geo = _geocode_cached(m, f"{selected_district}, Uttar Pradesh")
+                        if not geo:
+                            continue
+                        lat, lon, label = geo
+                        dist = haversine_km(plat, plon, lat, lon)
+                        if best is None or dist < best[0]:
+                            best = (dist, label)
+                    if best:
+                        nearest_line = f"- निकटतम मंडी (लगभग): {best[1]} ({best[0]:.1f} km)"
+        if nearest_line:
+            market_answer += f"{nearest_line}\n"
         with st.spinner("Generating recommendation..."):
             result = advisor.answer(composed_query)
         final_answer = f"{result['answer']}\n\n{market_answer}"
