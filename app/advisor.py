@@ -40,7 +40,8 @@ class RAGAdvisor:
         normalized_question = self._normalize_hinglish(farmer_question)
         if self._is_weather_intent(normalized_question):
             district = (
-                self._extract_location_from_question(normalized_question)
+                self._extract_location_from_question(farmer_question)
+                or self._extract_location_from_question(normalized_question)
                 or self._extract_district(context_part)
                 or "Meerut"
             )
@@ -219,7 +220,7 @@ class RAGAdvisor:
         # Try explicit location phrases first
         patterns = [
             r"(?:weather in|mausam in|maussam in|mosam in)\s+([a-zA-Z\\s]+)",
-            r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+(?:mausam|maussam|mosam|mausm)",
+            r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+(?:mausam|maussam|mosam|mausm|मौसम)",
             r"([\\u0900-\\u097F\\s]+?)\\s+का\\s+मौसम",
             r"([\\u0900-\\u097F\\s]+?)\\s+की\\s+मौसम",
         ]
