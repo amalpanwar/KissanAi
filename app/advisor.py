@@ -224,6 +224,28 @@ class RAGAdvisor:
     def _extract_location_from_question(self, question: str) -> str | None:
         if not question:
             return None
+        q_lower = question.lower()
+        if "mausam" in q_lower or "मौसम" in question:
+            tokens = [t.strip(" ?!.,") for t in re.split(r"\\s+", question) if t.strip()]
+            stop = {
+                "aaj",
+                "aj",
+                "ka",
+                "ki",
+                "ke",
+                "me",
+                "mein",
+                "में",
+                "kesa",
+                "kaisa",
+                "hai",
+                "h",
+            }
+            for tok in tokens:
+                t = tok.lower()
+                if t in stop or t in {"mausam", "maussam", "mosam", "mausm", "मौसम"}:
+                    continue
+                return tok
         # Try explicit location phrases first
         patterns = [
             r"(?:weather in|mausam in|maussam in|mosam in)\s+([a-zA-Z\\s]+)",
