@@ -226,6 +226,34 @@ class RAGAdvisor:
     def _extract_location_from_question(self, question: str) -> str | None:
         if not question:
             return None
+        q = question.strip()
+        # Fast path: strip common weather words and stopwords, keep remaining tokens as location.
+        if "mausam" in q.lower() or "मौसम" in q:
+            drop = {
+                "aaj",
+                "aj",
+                "ka",
+                "ki",
+                "ke",
+                "me",
+                "mein",
+                "में",
+                "kesa",
+                "kaisa",
+                "hai",
+                "h",
+                "mausam",
+                "maussam",
+                "mosam",
+                "mausm",
+                "मौसम",
+                "ka",
+                "?",
+            }
+            tokens = [t.strip(" ?!.,") for t in re.split(r"\\s+", q) if t.strip()]
+            kept = [t for t in tokens if t.lower() not in drop]
+            if kept:
+                return " ".join(kept)
         q_lower = question.lower()
         if "mausam" in q_lower or "मौसम" in question:
             tokens = [t.strip(" ?!.,") for t in re.split(r"\\s+", question) if t.strip()]
