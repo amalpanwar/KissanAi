@@ -43,8 +43,13 @@ class RAGAdvisor:
                 self._extract_location_from_question(farmer_question)
                 or self._extract_location_from_question(normalized_question)
                 or self._extract_district(context_part)
-                or "Meerut"
             )
+            if not district:
+                return {
+                    "answer": "कृपया मौसम के लिए स्थान बताएं (जैसे: बड़ौत/डोघाट/मेरठ)।",
+                    "references": [],
+                    "retrieved": [],
+                }
             weather = get_current_weather_hindi(district)
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
         if self._is_crop_choice_intent(normalized_question):
