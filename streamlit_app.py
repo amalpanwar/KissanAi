@@ -236,6 +236,15 @@ HINDI_COMMODITY_MAP = {
     "टमाटर": "Tomato",
 }
 
+LOCATION_DISTRICT_MAP = {
+    "doghat": "Baghpat",
+    "डोघाट": "Baghpat",
+    "दोगहट": "Baghpat",
+    "baraut": "Baghpat",
+    "बड़ौत": "Baghpat",
+    "बरौत": "Baghpat",
+}
+
 
 def extract_selection_from_query(
     query: str,
@@ -267,6 +276,10 @@ def extract_selection_from_query(
         dist_match = _best_match(q, districts)
         if dist_match:
             district = dist_match
+        for loc, dist in LOCATION_DISTRICT_MAP.items():
+            if loc in q:
+                district = dist
+                break
         # Hindi mapping first
         for hi, en in HINDI_COMMODITY_MAP.items():
             if hi in q:
@@ -743,10 +756,18 @@ if user_query:
             st.session_state.pop("auto_forecast_table", None)
             st.session_state.pop("auto_forecast_caption", None)
 
+        market_list = []
+        if "Market" in filtered.columns:
+            market_list = (
+                filtered["Market"].dropna().astype(str).unique().tolist()
+            )
         market_answer = (
             f"बाजार जानकारी ({selected_state} / {selected_district} / {selected_commodity}):\n"
             f"- {latest_line}\n"
         )
+        if market_list:
+            sample_markets = ", ".join(sorted(market_list)[:8])
+            market_answer += f"- उपलब्ध मंडियाँ (नमूना): {sample_markets}\n"
         if auto_table is not None:
             avg_7d = float(auto_table["Forecast"].head(7).mean())
             market_answer += f"- अगले 7 दिन का औसत अनुमानित भाव: {avg_7d:.2f} Rs./Quintal\n"
