@@ -50,8 +50,14 @@ class RAGAdvisor:
                     "retrieved": [],
                 }
             weather = get_current_weather_hindi(district)
-            if "लाइव मौसम डेटा नहीं मिल पाया" in weather and len(district.split()) == 1:
+            if not weather:
                 weather = get_current_weather_hindi(f"{district}, Uttar Pradesh")
+            if not weather:
+                return {
+                    "answer": "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।",
+                    "references": [],
+                    "retrieved": [],
+                }
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
         if self._looks_like_location_only(farmer_question):
             weather = get_current_weather_hindi(farmer_question.strip())

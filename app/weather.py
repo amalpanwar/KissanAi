@@ -103,7 +103,7 @@ def get_current_weather_hindi(district: str) -> str:
     if not lat_lon:
         geo = _geocode_location(district.strip())
         if not geo:
-            return "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+            return ""
         lat, lon, resolved_name = geo
     else:
         lat, lon = lat_lon
@@ -120,7 +120,7 @@ def get_current_weather_hindi(district: str) -> str:
         with urlopen(url, timeout=8) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception:
-        return "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+        return ""
 
     current = payload.get("current", {})
     temp = current.get("temperature_2m", "NA")
