@@ -255,9 +255,14 @@ class RAGAdvisor:
                 "मौसम",
                 "ka",
                 "?",
+                "kesa?",
+                "hai?",
+                "mausam?",
+                "mausam.",
+                "mausam,",
             }
             tokens = [t.strip(" ?!.,") for t in re.split(r"\\s+", q) if t.strip()]
-            kept = [t for t in tokens if t.lower() not in drop]
+            kept = [t for t in tokens if t.strip(" ?!.,").lower() not in drop]
             if kept:
                 return " ".join(kept)
         q_lower = question.lower()
