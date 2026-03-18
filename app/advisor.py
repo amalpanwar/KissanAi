@@ -51,6 +51,9 @@ class RAGAdvisor:
                 }
             weather = get_current_weather_hindi(district)
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
+        if self._looks_like_location_only(farmer_question):
+            weather = get_current_weather_hindi(farmer_question.strip())
+            return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
         if self._is_crop_choice_intent(normalized_question):
             structured = self._structured_crop_recommendation(context_part, normalized_question)
             if structured:
@@ -259,7 +262,30 @@ class RAGAdvisor:
                 cand = tokens[idx + 1].strip(" ?!.,")
                 if cand and cand.lower() not in stop:
                     return cand
+        # Fallback: token before 'mausam/मौसम'
+        for idx, tok in enumerate(tokens):
+            t = tok.strip(" ?!.," ).lower()
+            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम"} and idx - 1 >= 0:
+                cand = tokens[idx - 1].strip(" ?!.,")
+                if cand and cand.lower() not in stop:
+                    return cand
         return resolve_location_name(question)
+
+    def _looks_like_location_only(self, question: str) -> bool:
+        if not question:
+            return False
+        q = question.strip()
+        if self._is_greeting(q):
+            return False
+        if self._has_agri_intent(q) or self._is_crop_choice_intent(q):
+            return False
+        tokens = [t for t in re.split(r"\\s+", q) if t]
+        if len(tokens) > 3:
+            return False
+        # If it contains any weather word, weather intent already handled.
+        if self._is_weather_intent(q):
+            return False
+        return True
 
     def _extract_season(self, context_part: str) -> str | None:
         if not context_part:
