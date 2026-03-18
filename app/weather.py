@@ -40,32 +40,39 @@ def resolve_location_name(text: str) -> str | None:
 def _geocode_location(name: str) -> tuple[float, float, str] | None:
     if not name:
         return None
-    params = urlencode(
-        {
-            "name": name,
-            "count": 1,
-            "language": "hi",
-            "format": "json",
-        }
-    )
-    url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
-    try:
-        with urlopen(url, timeout=8) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-    results = payload.get("results") or []
-    if not results:
-        return None
-    top = results[0]
-    try:
-        lat = float(top.get("latitude"))
-        lon = float(top.get("longitude"))
-    except Exception:
-        return None
-    name_parts = [top.get("name"), top.get("admin1"), top.get("country")]
-    display = ", ".join([p for p in name_parts if p])
-    return lat, lon, display
+    candidates = [
+        name,
+        f"{name}, Uttar Pradesh",
+        f"{name}, Uttar Pradesh, India",
+    ]
+    for cand in candidates:
+        params = urlencode(
+            {
+                "name": cand,
+                "count": 1,
+                "language": "hi",
+                "format": "json",
+            }
+        )
+        url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
+        try:
+            with urlopen(url, timeout=8) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            continue
+        results = payload.get("results") or []
+        if not results:
+            continue
+        top = results[0]
+        try:
+            lat = float(top.get("latitude"))
+            lon = float(top.get("longitude"))
+        except Exception:
+            continue
+        name_parts = [top.get("name"), top.get("admin1"), top.get("country")]
+        display = ", ".join([p for p in name_parts if p])
+        return lat, lon, display
+    return None
 
 
 def _weather_code_hi(code: int) -> str:
@@ -96,10 +103,7 @@ def get_current_weather_hindi(district: str) -> str:
     if not lat_lon:
         geo = _geocode_location(district.strip())
         if not geo:
-            return (
-                "इस स्थान के लिए मौसम डेटा उपलब्ध नहीं है। "
-                "कृपया जिला/गाँव का सही नाम लिखें।"
-            )
+            return "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
         lat, lon, resolved_name = geo
     else:
         lat, lon = lat_lon
