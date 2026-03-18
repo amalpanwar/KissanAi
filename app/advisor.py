@@ -232,6 +232,29 @@ class RAGAdvisor:
             m = re.search(pat, question, flags=re.IGNORECASE)
             if m:
                 return m.group(1).strip()
+        # Fallback: token after 'mausam/मौसम'
+        tokens = re.split(r"\\s+", question.strip())
+        stop = {
+            "aaj",
+            "aj",
+            "ka",
+            "ki",
+            "ke",
+            "me",
+            "mein",
+            "में",
+            "kesa",
+            "kaisa",
+            "hai",
+            "h",
+            "?",
+        }
+        for idx, tok in enumerate(tokens):
+            t = tok.strip(" ?!.," ).lower()
+            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम"} and idx + 1 < len(tokens):
+                cand = tokens[idx + 1].strip(" ?!.,")
+                if cand and cand.lower() not in stop:
+                    return cand
         return resolve_location_name(question)
 
     def _extract_season(self, context_part: str) -> str | None:
