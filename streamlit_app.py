@@ -166,6 +166,7 @@ def normalize_agmarknet_df(df: pd.DataFrame) -> pd.DataFrame:
     col_map = {
         "state_name": "State",
         "district_name": "District",
+        "market_name": "Market",
         "cmdt_name": "Commodity",
         "rep_date": "Arrival_Date",
         "model_price_wt": "Modal_Price",
@@ -369,6 +370,15 @@ def summarize_latest_market(df: pd.DataFrame) -> tuple[str, dict[str, str] | Non
     if qty and arrival_unit:
         line += f", आवक: {qty} {arrival_unit}"
     return line, latest
+
+
+def summarize_latest_market_for_market(df: pd.DataFrame, market: str) -> tuple[str, dict[str, str] | None]:
+    if df.empty or "Market" not in df.columns:
+        return summarize_latest_market(df)
+    sub = df[df["Market"].astype(str).str.lower() == market.lower()]
+    if sub.empty:
+        return summarize_latest_market(df)
+    return summarize_latest_market(sub)
 
 
 def filter_market_rows(
@@ -776,7 +786,40 @@ if user_query:
 
     if intent_price and not market_df.empty:
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
-        latest_line, _latest = summarize_latest_market(filtered)
+        nearest_market = None
+        if not filtered.empty and "Market" in filtered.columns:
+            place = None
+            tokens = [t.strip(" ?!.,") for t in user_query.split() if t.strip()]
+            stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
+            for tok in tokens:
+                if tok.lower() not in stop and tok.lower() not in {"price", "rate", "mandi", "bhav"}:
+                    place = tok
+                    break
+            if place:
+                place_geo = _geocode_cached(place, f"{selected_district}, Uttar Pradesh")
+                if place_geo:
+                    plat, plon, _ = place_geo
+                    markets = (
+                        filtered["Market"].dropna().astype(str).unique().tolist()
+                        if "Market" in filtered.columns
+                        else []
+                    )
+                    best = None
+                    for m in markets[:30]:
+                        geo = _geocode_cached(m, f"{selected_district}, Uttar Pradesh")
+                        if not geo:
+                            continue
+                        lat, lon, label = geo
+                        dist = haversine_km(plat, plon, lat, lon)
+                        if best is None or dist < best[0]:
+                            best = (dist, label, m)
+                    if best:
+                        nearest_market = best
+
+        if nearest_market:
+            latest_line, _latest = summarize_latest_market_for_market(filtered, nearest_market[2])
+        else:
+            latest_line, _latest = summarize_latest_market(filtered)
         auto_caption = f"{selected_state} / {selected_district} / {selected_commodity}"
         auto_chart = None
         auto_table = None
@@ -830,42 +873,12 @@ if user_query:
             avg_7d = float(auto_table["Forecast"].head(7).mean())
             market_answer += f"- अगले 7 दिन का औसत अनुमानित भाव: {avg_7d:.2f} Rs./Quintal\n"
 
-        # Nearest market by geocoded distance (best-effort)
-        nearest_line = ""
-        if not filtered.empty and "Market" in filtered.columns:
-            place = None
-            # Try to find a place token in the query (first non-stopword token)
-            tokens = [t.strip(" ?!.,") for t in user_query.split() if t.strip()]
-            stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
-            for tok in tokens:
-                if tok.lower() not in stop and tok.lower() not in {"price", "rate", "mandi", "bhav"}:
-                    place = tok
-                    break
-            if place:
-                place_geo = _geocode_cached(place, f"{selected_district}, Uttar Pradesh")
-                if place_geo:
-                    plat, plon, _ = place_geo
-                    markets = (
-                        filtered["Market"].dropna().astype(str).unique().tolist()
-                        if "Market" in filtered.columns
-                        else []
-                    )
-                    best = None
-                    for m in markets[:30]:
-                        geo = _geocode_cached(m, f"{selected_district}, Uttar Pradesh")
-                        if not geo:
-                            continue
-                        lat, lon, label = geo
-                        dist = haversine_km(plat, plon, lat, lon)
-                        if best is None or dist < best[0]:
-                            best = (dist, label)
-                    if best:
-                        nearest_line = f"- निकटतम मंडी (लगभग): {best[1]} ({best[0]:.1f} km)"
-        if nearest_line:
-            market_answer += f"{nearest_line}\n"
-        with st.spinner("Generating recommendation..."):
-            result = advisor.answer(composed_query)
-        final_answer = f"{result['answer']}\n\n{market_answer}"
+        if nearest_market:
+            market_answer += (
+                f"- निकटतम मंडी (लगभग): {nearest_market[1]} ({nearest_market[0]:.1f} km)\n"
+            )
+        # Skip RAG for price intent to avoid irrelevant filler.
+        final_answer = market_answer
     else:
         with st.spinner("Generating recommendation..."):
             result = advisor.answer(composed_query)
@@ -875,7 +888,7 @@ if user_query:
         {
             "role": "assistant",
             "text": final_answer,
-            "references": result.get("references", []),
+            "references": ([] if intent_price else result.get("references", [])),
         }
     )
 
