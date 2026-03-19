@@ -869,9 +869,10 @@ if user_query:
         if market_list:
             sample_markets = ", ".join(sorted(market_list)[:8])
             market_answer += f"- उपलब्ध मंडियाँ (नमूना): {sample_markets}\n"
-        if auto_table is not None:
-            avg_7d = float(auto_table["Forecast"].head(7).mean())
-            market_answer += f"- अगले 7 दिन का औसत अनुमानित भाव: {avg_7d:.2f} Rs./Quintal\n"
+        if auto_table is not None and not auto_table.empty:
+            next_vals = auto_table["Forecast"].head(7).tolist()
+            vals_str = ", ".join([f\"{v:.0f}\" for v in next_vals])
+            market_answer += f\"- अगले 7 दिन के अनुमानित भाव: {vals_str} Rs./Quintal\n\"
 
         if nearest_market:
             market_answer += (
