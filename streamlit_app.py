@@ -871,8 +871,8 @@ if user_query:
             market_answer += f"- उपलब्ध मंडियाँ (नमूना): {sample_markets}\n"
         if auto_table is not None and not auto_table.empty:
             next_vals = auto_table["Forecast"].head(7).tolist()
-            vals_str = ", ".join([f\"{v:.0f}\" for v in next_vals])
-            market_answer += f\"- अगले 7 दिन के अनुमानित भाव: {vals_str} Rs./Quintal\n\"
+            vals_str = ", ".join([f"{v:.0f}" for v in next_vals])
+            market_answer += f"- अगले 7 दिन के अनुमानित भाव: {vals_str} Rs./Quintal\n"
 
         if nearest_market:
             market_answer += (
