@@ -895,9 +895,10 @@ if user_query:
 
     with st.chat_message("assistant"):
         st.write(final_answer)
-        with st.expander("Sources Used"):
-            for src in result.get("references", []):
-                st.write(f"- {src}")
+        if not intent_price:
+            with st.expander("Sources Used"):
+                for src in result.get("references", []):
+                    st.write(f"- {src}")
 
     if intent_price:
         st.session_state["pending_selection"] = {
