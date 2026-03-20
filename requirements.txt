@@ -13,3 +13,4 @@ PyYAML==6.0.2
 python-dateutil==2.9.0.post0
 
 streamlit==1.41.1
+statsmodels==0.14.2

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 
 class PriceLSTM(nn.Module):
@@ -24,6 +25,58 @@ class PriceLSTM(nn.Module):
 class ForecastResult:
     history: pd.DataFrame
     forecast: pd.DataFrame
+
+
+def _auto_sarima_forecast(values: np.ndarray, horizon_days: int) -> np.ndarray:
+    # Simple auto-SARIMA via small AIC grid search.
+    best_aic = None
+    best_model = None
+    best_order = None
+    best_seasonal = None
+
+    # Small, fast grid to avoid heavy compute.
+    p_values = [0, 1, 2]
+    d_values = [0, 1]
+    q_values = [0, 1, 2]
+    P_values = [0, 1]
+    D_values = [0, 1]
+    Q_values = [0, 1]
+    m = 7  # weekly seasonality for daily data
+
+    for p in p_values:
+        for d in d_values:
+            for q in q_values:
+                for P in P_values:
+                    for D in D_values:
+                        for Q in Q_values:
+                            order = (p, d, q)
+                            seasonal = (P, D, Q, m)
+                            try:
+                                model = SARIMAX(
+                                    values,
+                                    order=order,
+                                    seasonal_order=seasonal,
+                                    enforce_stationarity=False,
+                                    enforce_invertibility=False,
+                                )
+                                res = model.fit(disp=False)
+                                aic = res.aic
+                                if best_aic is None or aic < best_aic:
+                                    best_aic = aic
+                                    best_model = res
+                                    best_order = order
+                                    best_seasonal = seasonal
+                            except Exception:
+                                continue
+
+    if best_model is None:
+        raise ValueError("SARIMA model fitting failed.")
+
+    forecast = best_model.forecast(steps=horizon_days)
+    preds = np.asarray(forecast, dtype=np.float32)
+    # Guard against negative prices
+    preds[preds < 0] = 0.0
+    return preds
 
 
 def prepare_daily_series(
@@ -105,6 +158,7 @@ def train_and_forecast(
     seed: int = 42,
     train_window_days: int = 1095,
     max_daily_change_pct: float = 0.05,
+    model: str = "sarima",
 ) -> ForecastResult:
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -121,6 +175,17 @@ def train_and_forecast(
         raise ValueError(
             f"Not enough history for lookback={lookback}. Need > {lookback + 5} daily points."
         )
+
+    # Prefer SARIMA unless explicitly disabled; fallback to LSTM on failure.
+    if model.lower() != "lstm":
+        try:
+            preds = _auto_sarima_forecast(values, horizon_days)
+            start = data["date"].max() + pd.Timedelta(days=1)
+            f_dates = pd.date_range(start=start, periods=horizon_days, freq="D")
+            forecast_df = pd.DataFrame({"date": f_dates, "predicted_value": preds})
+            return ForecastResult(history=data, forecast=forecast_df)
+        except Exception:
+            pass
 
     vmin, vmax = float(values.min()), float(values.max())
     denom = (vmax - vmin) if (vmax - vmin) > 1e-8 else 1.0
