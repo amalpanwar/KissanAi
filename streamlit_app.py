@@ -838,8 +838,12 @@ if user_query:
                     if best:
                         nearest_market = best
 
+        forecast_df = filtered
         if nearest_market:
             latest_line, _latest = summarize_latest_market_for_market(filtered, nearest_market[2])
+            forecast_df = filtered[
+                filtered["Market"].astype(str).str.lower() == nearest_market[2].lower()
+            ]
         else:
             latest_line, _latest = summarize_latest_market(filtered)
         auto_caption = f"{selected_state} / {selected_district} / {selected_commodity}"
@@ -847,7 +851,7 @@ if user_query:
         auto_table = None
         try:
             hist, fc = build_forecast_from_df(
-                df=filtered,
+                df=forecast_df,
                 commodity=selected_commodity,
                 state=selected_state,
                 district=selected_district,
