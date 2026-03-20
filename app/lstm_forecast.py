@@ -104,7 +104,7 @@ def train_and_forecast(
     lr: float = 0.001,
     seed: int = 42,
     train_window_days: int = 1095,
-    max_daily_change_pct: float = 0.03,
+    max_daily_change_pct: float = 0.05,
 ) -> ForecastResult:
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -159,19 +159,25 @@ def train_and_forecast(
     anchored_preds: list[float] = []
     prev = float(values[-1])
     max_pct = max(0.0, float(max_daily_change_pct))
-    baseline = float(np.median(values[-7:])) if len(values) >= 7 else prev
     for p in preds.tolist():
         low = prev * (1.0 - max_pct)
         high = prev * (1.0 + max_pct)
         clipped = min(max(float(p), low), high)
-        # Extra clamp to recent median to avoid unrealistic jumps.
-        low2 = baseline * (1.0 - max_pct)
-        high2 = baseline * (1.0 + max_pct)
-        clipped = min(max(float(clipped), low2), high2)
         anchored_preds.append(clipped)
         prev = clipped
 
     preds = np.array(anchored_preds, dtype=np.float32)
+    # If predictions are flat, fall back to recent trend.
+    if float(np.std(preds)) < 1e-3:
+        recent = values[-14:] if len(values) >= 14 else values
+        if len(recent) >= 2:
+            deltas = np.diff(recent)
+            mean_delta = float(np.mean(deltas))
+            if abs(mean_delta) < 1e-6 and len(recent) >= 8:
+                mean_delta = float((recent[-1] - recent[-8]) / 7.0)
+            trend = np.array([values[-1] + mean_delta * (i + 1) for i in range(horizon_days)])
+            preds = trend.astype(np.float32)
+
     start = data["date"].max() + pd.Timedelta(days=1)
     f_dates = pd.date_range(start=start, periods=horizon_days, freq="D")
 
