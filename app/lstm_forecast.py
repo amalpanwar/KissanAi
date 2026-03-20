@@ -104,7 +104,7 @@ def train_and_forecast(
     lr: float = 0.001,
     seed: int = 42,
     train_window_days: int = 1095,
-    max_daily_change_pct: float = 0.08,
+    max_daily_change_pct: float = 0.03,
 ) -> ForecastResult:
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -159,10 +159,15 @@ def train_and_forecast(
     anchored_preds: list[float] = []
     prev = float(values[-1])
     max_pct = max(0.0, float(max_daily_change_pct))
+    baseline = float(np.median(values[-7:])) if len(values) >= 7 else prev
     for p in preds.tolist():
         low = prev * (1.0 - max_pct)
         high = prev * (1.0 + max_pct)
         clipped = min(max(float(p), low), high)
+        # Extra clamp to recent median to avoid unrealistic jumps.
+        low2 = baseline * (1.0 - max_pct)
+        high2 = baseline * (1.0 + max_pct)
+        clipped = min(max(float(clipped), low2), high2)
         anchored_preds.append(clipped)
         prev = clipped
 
