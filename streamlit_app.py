@@ -631,6 +631,27 @@ with st.sidebar:
                 st.error(f"Fetch timed out/failed: {e}")
                 st.info("API is slow right now. Retry after 10-20 seconds.")
 
+    if st.button("Refresh Agmarknet (Last 14 Days)", use_container_width=True):
+        with st.spinner("Refreshing Agmarknet data (last 14 days)..."):
+            try:
+                import subprocess
+
+                cmd = [
+                    sys.executable,
+                    str(Path("scripts/agmarknet_daily_refresh.py")),
+                ]
+                env = os.environ.copy()
+                env["AGMARKNET_LOOKBACK_DAYS"] = "14"
+                result = subprocess.run(cmd, env=env, cwd=str(Path(".")), capture_output=True, text=True)
+                if result.returncode != 0:
+                    st.error("Agmarknet refresh failed.")
+                    st.code(result.stderr or result.stdout)
+                else:
+                    st.success("Agmarknet refresh completed.")
+                    st.cache_data.clear()
+            except Exception as e:
+                st.error(f"Agmarknet refresh failed: {e}")
+
     if st.button("Show 15-Day Forecast", use_container_width=True):
         try:
             if AGMARKNET_CSV.exists():
