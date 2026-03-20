@@ -286,14 +286,27 @@ def _best_match(query: str, options: list[str]) -> str | None:
 
 HINDI_COMMODITY_MAP = {
     "गेहूं": "Wheat",
+    "गेहूँ": "Wheat",
+    "गेहू": "Wheat",
+    "gehu": "Wheat",
+    "gehun": "Wheat",
+    "gehoo": "Wheat",
     "धान": "Rice",
     "चावल": "Rice",
+    "chawal": "Rice",
+    "chawal": "Rice",
     "आलू": "Potato",
+    "aloo": "Potato",
     "गन्ना": "Sugarcane",
+    "ganna": "Sugarcane",
     "सरसों": "Mustard",
+    "sarso": "Mustard",
     "मक्का": "Maize",
+    "makka": "Maize",
     "प्याज": "Onion",
+    "pyaz": "Onion",
     "टमाटर": "Tomato",
+    "tamatar": "Tomato",
 }
 
 LOCATION_DISTRICT_MAP = {
