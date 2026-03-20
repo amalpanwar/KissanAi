@@ -809,7 +809,7 @@ if user_query:
     if intent_price and not market_df.empty:
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
         nearest_market = None
-        if not filtered.empty and "Market" in filtered.columns:
+        if not filtered.empty and "Market" in filtered.columns and filtered["Market"].notna().any():
             place = None
             tokens = [t.strip(" ?!.,") for t in user_query.split() if t.strip()]
             stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
