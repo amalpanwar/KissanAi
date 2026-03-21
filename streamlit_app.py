@@ -328,6 +328,24 @@ def _normalize_text(val: str) -> str:
     return "".join(ch for ch in val.lower() if ch.isalnum())
 
 
+@st.cache_data(show_spinner=False)
+def load_commodity_aliases() -> dict[str, list[str]]:
+    path = Path("data/raw/commodity_aliases.json")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned = {}
+    for k, v in data.items():
+        if isinstance(v, list):
+            cleaned[str(k).lower()] = [str(x) for x in v]
+    return cleaned
+
+
 def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str | None:
     if not query or not commodity_list:
         return None
@@ -342,9 +360,19 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
         if _normalize_text(name) in qn:
             return name
     # Hinglish/Hindi aliases mapped to canonical names if present in catalog
+    # Alias map from json (key is English commodity name)
+    aliases = load_commodity_aliases()
+    for eng_name, alias_list in aliases.items():
+        for alias in alias_list:
+            if alias.lower() in q:
+                # Return the catalog's exact name if present
+                for name in commodity_list:
+                    if name.lower() == eng_name.lower():
+                        return name
+                return eng_name.title()
+    # Fallback built-in aliases
     for hi, en in HINDI_COMMODITY_MAP.items():
         if hi in q:
-            # If alias resolves to a specific commodity name not in list, still return alias target.
             for name in commodity_list:
                 if name.lower() == en.lower():
                     return name

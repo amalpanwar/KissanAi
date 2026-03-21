@@ -1,0 +1,10 @@
+{
+  "wheat": ["गेहूं", "गेहूँ", "गेहू", "gehu", "gehun", "gehoo"],
+  "rice": ["धान", "चावल", "chawal"],
+  "potato": ["आलू", "aloo"],
+  "sugarcane": ["गन्ना", "ganna"],
+  "mustard": ["सरसों", "sarso"],
+  "maize": ["मक्का", "makka"],
+  "onion": ["प्याज", "pyaz"],
+  "tomato": ["टमाटर", "tamatar"]
+}
