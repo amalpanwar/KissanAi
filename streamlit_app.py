@@ -344,9 +344,11 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
     # Hinglish/Hindi aliases mapped to canonical names if present in catalog
     for hi, en in HINDI_COMMODITY_MAP.items():
         if hi in q:
+            # If alias resolves to a specific commodity name not in list, still return alias target.
             for name in commodity_list:
                 if name.lower() == en.lower():
                     return name
+            return en
     return None
 
 LOCATION_DISTRICT_MAP = {
