@@ -1,10 +1,2972 @@
 {
-  "wheat": ["गेहूं", "गेहूँ", "गेहू", "gehu", "gehun", "gehoo"],
-  "rice": ["धान", "चावल", "chawal"],
-  "potato": ["आलू", "aloo"],
-  "sugarcane": ["गन्ना", "ganna"],
-  "mustard": ["सरसों", "sarso"],
-  "maize": ["मक्का", "makka"],
-  "onion": ["प्याज", "pyaz"],
-  "tomato": ["टमाटर", "tamatar"]
+  "wheat": [
+    "Wheat",
+    "gehoo",
+    "gehu",
+    "gehun",
+    "wheat",
+    "गेहू",
+    "गेहूँ",
+    "गेहूं"
+  ],
+  "rice": [
+    "Rice",
+    "chawal",
+    "rice",
+    "चावल",
+    "धान"
+  ],
+  "potato": [
+    "Potato",
+    "aloo",
+    "potato",
+    "आलू"
+  ],
+  "sugarcane": [
+    "Sugarcane",
+    "ganna",
+    "sugarcane",
+    "गन्ना"
+  ],
+  "mustard": [
+    "Mustard",
+    "mustard",
+    "sarso",
+    "सरसों"
+  ],
+  "maize": [
+    "Maize",
+    "maize",
+    "makka",
+    "मक्का"
+  ],
+  "onion": [
+    "Onion",
+    "onion",
+    "pyaz",
+    "प्याज"
+  ],
+  "tomato": [
+    "Tomato",
+    "tamatar",
+    "tomato",
+    "टमाटर"
+  ],
+  "paddy(common)": [
+    "Paddy",
+    "Paddy(Common)",
+    "paddy",
+    "paddy(common)"
+  ],
+  "jowar(sorghum)": [
+    "Jowar",
+    "Jowar(Sorghum)",
+    "jowar",
+    "jowar(sorghum)"
+  ],
+  "bengal gram(gram)(whole)": [
+    "Bengal Gram",
+    "Bengal Gram(Gram)(Whole)",
+    "BengalGram",
+    "bengal gram",
+    "bengal gram(gram)(whole)",
+    "bengalgram"
+  ],
+  "red gram": [
+    "Red Gram",
+    "RedGram",
+    "red gram",
+    "redgram"
+  ],
+  "black gram(urd beans)(whole)": [
+    "Black Gram",
+    "Black Gram(Urd Beans)(Whole)",
+    "BlackGram",
+    "black gram",
+    "black gram(urd beans)(whole)",
+    "blackgram"
+  ],
+  "green gram(moong)(whole)": [
+    "Green Gram",
+    "Green Gram(Moong)(Whole)",
+    "GreenGram",
+    "green gram",
+    "green gram(moong)(whole)",
+    "greengram"
+  ],
+  "groundnut": [
+    "Groundnut",
+    "groundnut"
+  ],
+  "sesamum(sesame,gingelly,til)": [
+    "Sesamum",
+    "Sesamum(Sesame,Gingelly,Til)",
+    "sesamum",
+    "sesamum(sesame,gingelly,til)"
+  ],
+  "soyabean": [
+    "Soyabean",
+    "soyabean"
+  ],
+  "sunflower": [
+    "Sunflower",
+    "sunflower"
+  ],
+  "cotton": [
+    "Cotton",
+    "cotton"
+  ],
+  "jute": [
+    "Jute",
+    "jute"
+  ],
+  "apple": [
+    "Apple",
+    "apple"
+  ],
+  "orange": [
+    "Orange",
+    "orange"
+  ],
+  "banana": [
+    "Banana",
+    "banana"
+  ],
+  "mango": [
+    "Mango",
+    "mango"
+  ],
+  "pineapple": [
+    "Pineapple",
+    "pineapple"
+  ],
+  "grapes": [
+    "Grapes",
+    "grapes"
+  ],
+  "garlic": [
+    "Garlic",
+    "garlic"
+  ],
+  "chili red": [
+    "Chili Red",
+    "ChiliRed",
+    "chili red",
+    "chilired"
+  ],
+  "ginger(dry)": [
+    "Ginger",
+    "Ginger(Dry)",
+    "ginger",
+    "ginger(dry)"
+  ],
+  "bajra(pearl millet/cumbu)": [
+    "Bajra",
+    "Bajra(Pearl Millet/Cumbu)",
+    "bajra",
+    "bajra(pearl millet/cumbu)"
+  ],
+  "barley(jau)": [
+    "Barley",
+    "Barley(Jau)",
+    "barley",
+    "barley(jau)"
+  ],
+  "ragi(finger millet)": [
+    "Ragi",
+    "Ragi(Finger Millet)",
+    "ragi",
+    "ragi(finger millet)"
+  ],
+  "cauliflower": [
+    "Cauliflower",
+    "cauliflower"
+  ],
+  "brinjal": [
+    "Brinjal",
+    "brinjal"
+  ],
+  "cashewnuts": [
+    "Cashewnuts",
+    "cashewnuts"
+  ],
+  "black pepper": [
+    "Black pepper",
+    "Blackpepper",
+    "black pepper",
+    "blackpepper"
+  ],
+  "turmeric": [
+    "Turmeric",
+    "turmeric"
+  ],
+  "cardamoms": [
+    "Cardamoms",
+    "cardamoms"
+  ],
+  "betelnuts": [
+    "Betelnuts",
+    "betelnuts"
+  ],
+  "cummin seed(jeera)": [
+    "Cummin Seed",
+    "Cummin Seed(Jeera)",
+    "CumminSeed",
+    "cummin seed",
+    "cummin seed(jeera)",
+    "cumminseed"
+  ],
+  "coriander(leaves)": [
+    "Coriander",
+    "Coriander(Leaves)",
+    "coriander",
+    "coriander(leaves)"
+  ],
+  "tea": [
+    "Tea",
+    "tea"
+  ],
+  "coffee": [
+    "Coffee",
+    "coffee"
+  ],
+  "methi(leaves)": [
+    "Methi",
+    "Methi(Leaves)",
+    "methi",
+    "methi(leaves)"
+  ],
+  "methi seeds": [
+    "Methi Seeds",
+    "MethiSeeds",
+    "methi seeds",
+    "methiseeds"
+  ],
+  "sugar": [
+    "Sugar",
+    "sugar"
+  ],
+  "arhar(tur/red gram)(whole)": [
+    "Arhar",
+    "Arhar(Tur/Red Gram)(Whole)",
+    "arhar",
+    "arhar(tur/red gram)(whole)"
+  ],
+  "green peas": [
+    "Green Peas",
+    "GreenPeas",
+    "green peas",
+    "greenpeas"
+  ],
+  "binoula": [
+    "Binoula",
+    "binoula"
+  ],
+  "safflower": [
+    "Safflower",
+    "safflower"
+  ],
+  "mash": [
+    "Mash",
+    "mash"
+  ],
+  "kharif mash": [
+    "Kharif Mash",
+    "KharifMash",
+    "kharif mash",
+    "kharifmash"
+  ],
+  "riccbcan": [
+    "Riccbcan",
+    "riccbcan"
+  ],
+  "lentil(masur)(whole)": [
+    "Lentil",
+    "Lentil(Masur)(Whole)",
+    "lentil",
+    "lentil(masur)(whole)"
+  ],
+  "field pea": [
+    "Field Pea",
+    "FieldPea",
+    "field pea",
+    "fieldpea"
+  ],
+  "raya": [
+    "Raya",
+    "raya"
+  ],
+  "toria": [
+    "Toria",
+    "toria"
+  ],
+  "linseed": [
+    "Linseed",
+    "linseed"
+  ],
+  "dhaincha": [
+    "Dhaincha",
+    "dhaincha"
+  ],
+  "chikoos(sapota)": [
+    "Chikoos",
+    "Chikoos(Sapota)",
+    "chikoos",
+    "chikoos(sapota)"
+  ],
+  "papaya": [
+    "Papaya",
+    "papaya"
+  ],
+  "water melon": [
+    "Water Melon",
+    "WaterMelon",
+    "water melon",
+    "watermelon"
+  ],
+  "gur(jaggery)": [
+    "Gur",
+    "Gur(Jaggery)",
+    "gur",
+    "gur(jaggery)"
+  ],
+  "guar": [
+    "Guar",
+    "guar"
+  ],
+  "taramira": [
+    "Taramira",
+    "taramira"
+  ],
+  "mousambi(sweet lime)": [
+    "Mousambi",
+    "Mousambi(Sweet Lime)",
+    "mousambi",
+    "mousambi(sweet lime)"
+  ],
+  "cluster beans": [
+    "Cluster beans",
+    "Clusterbeans",
+    "cluster beans",
+    "clusterbeans"
+  ],
+  "bitter gourd": [
+    "Bitter gourd",
+    "Bittergourd",
+    "bitter gourd",
+    "bittergourd"
+  ],
+  "bottle gourd": [
+    "Bottle gourd",
+    "Bottlegourd",
+    "bottle gourd",
+    "bottlegourd"
+  ],
+  "ashgourd": [
+    "Ashgourd",
+    "ashgourd"
+  ],
+  "pumpkin": [
+    "Pumpkin",
+    "pumpkin"
+  ],
+  "bhindi(ladies finger)": [
+    "Bhindi",
+    "Bhindi(Ladies Finger)",
+    "bhindi",
+    "bhindi(ladies finger)"
+  ],
+  "amaranthus": [
+    "Amaranthus",
+    "amaranthus"
+  ],
+  "green chilli": [
+    "Green Chilli",
+    "GreenChilli",
+    "green chilli",
+    "greenchilli"
+  ],
+  "chilly capsicum": [
+    "Chilly Capsicum",
+    "ChillyCapsicum",
+    "chilly capsicum",
+    "chillycapsicum"
+  ],
+  "cowpea(veg)": [
+    "Cowpea",
+    "Cowpea(Veg)",
+    "cowpea",
+    "cowpea(veg)"
+  ],
+  "banana - green": [
+    "Banana - Green",
+    "Banana Green",
+    "BananaGreen",
+    "banana - green",
+    "banana green",
+    "bananagreen"
+  ],
+  "dal(avare)": [
+    "Dal",
+    "Dal(Avare)",
+    "dal",
+    "dal(avare)"
+  ],
+  "cowpea(lobia/karamani)": [
+    "Cowpea",
+    "Cowpea(Lobia/Karamani)",
+    "cowpea",
+    "cowpea(lobia/karamani)"
+  ],
+  "mataki": [
+    "Mataki",
+    "mataki"
+  ],
+  "beans": [
+    "Beans",
+    "beans"
+  ],
+  "lak(teora)": [
+    "Lak",
+    "Lak(Teora)",
+    "lak",
+    "lak(teora)"
+  ],
+  "other pulses": [
+    "Other Pulses",
+    "OtherPulses",
+    "other pulses",
+    "otherpulses"
+  ],
+  "niger seed(ramtil)": [
+    "Niger Seed",
+    "Niger Seed(Ramtil)",
+    "NigerSeed",
+    "niger seed",
+    "niger seed(ramtil)",
+    "nigerseed"
+  ],
+  "cotton seed": [
+    "Cotton Seed",
+    "CottonSeed",
+    "cotton seed",
+    "cottonseed"
+  ],
+  "tapioca": [
+    "Tapioca",
+    "tapioca"
+  ],
+  "ginger(green)": [
+    "Ginger",
+    "Ginger(Green)",
+    "ginger",
+    "ginger(green)"
+  ],
+  "cocoa": [
+    "Cocoa",
+    "cocoa"
+  ],
+  "cloves": [
+    "Cloves",
+    "cloves"
+  ],
+  "nutmeg": [
+    "Nutmeg",
+    "nutmeg"
+  ],
+  "mace": [
+    "Mace",
+    "mace"
+  ],
+  "corriander seed": [
+    "Corriander seed",
+    "Corrianderseed",
+    "corriander seed",
+    "corrianderseed"
+  ],
+  "pepper garbled": [
+    "Pepper garbled",
+    "Peppergarbled",
+    "pepper garbled",
+    "peppergarbled"
+  ],
+  "pepper ungarbled": [
+    "Pepper ungarbled",
+    "Pepperungarbled",
+    "pepper ungarbled",
+    "pepperungarbled"
+  ],
+  "rubber": [
+    "Rubber",
+    "rubber"
+  ],
+  "coconut seed": [
+    "Coconut Seed",
+    "CoconutSeed",
+    "coconut seed",
+    "coconutseed"
+  ],
+  "big gram": [
+    "Big Gram",
+    "BigGram",
+    "big gram",
+    "biggram"
+  ],
+  "kulthi(horse gram)": [
+    "Kulthi",
+    "Kulthi(Horse Gram)",
+    "kulthi",
+    "kulthi(horse gram)"
+  ],
+  "karamani": [
+    "Karamani",
+    "karamani"
+  ],
+  "thinai(italian millet)": [
+    "Thinai",
+    "Thinai(Italian Millet)",
+    "thinai",
+    "thinai(italian millet)"
+  ],
+  "kodo millet(varagu)": [
+    "Kodo Millet",
+    "Kodo Millet(Varagu)",
+    "KodoMillet",
+    "kodo millet",
+    "kodo millet(varagu)",
+    "kodomillet"
+  ],
+  "hybrid cumbu": [
+    "Hybrid Cumbu",
+    "HybridCumbu",
+    "hybrid cumbu",
+    "hybridcumbu"
+  ],
+  "t.v. cumbu": [
+    "T V Cumbu",
+    "T.V. Cumbu",
+    "TVCumbu",
+    "t v cumbu",
+    "t.v. cumbu",
+    "tvcumbu"
+  ],
+  "foxtail millet(navane)": [
+    "Foxtail Millet",
+    "Foxtail Millet(Navane)",
+    "FoxtailMillet",
+    "foxtail millet",
+    "foxtail millet(navane)",
+    "foxtailmillet"
+  ],
+  "same/savi": [
+    "Same Savi",
+    "Same/Savi",
+    "SameSavi",
+    "same savi",
+    "same/savi",
+    "samesavi"
+  ],
+  "castor seed": [
+    "Castor Seed",
+    "CastorSeed",
+    "castor seed",
+    "castorseed"
+  ],
+  "honge seed": [
+    "Honge seed",
+    "Hongeseed",
+    "honge seed",
+    "hongeseed"
+  ],
+  "hippe seed": [
+    "Hippe Seed",
+    "HippeSeed",
+    "hippe seed",
+    "hippeseed"
+  ],
+  "neem seed": [
+    "Neem Seed",
+    "NeemSeed",
+    "neem seed",
+    "neemseed"
+  ],
+  "pundi seed": [
+    "Pundi Seed",
+    "PundiSeed",
+    "pundi seed",
+    "pundiseed"
+  ],
+  "copra": [
+    "Copra",
+    "copra"
+  ],
+  "ambada seed": [
+    "Ambada Seed",
+    "AmbadaSeed",
+    "ambada seed",
+    "ambadaseed"
+  ],
+  "dry chillies": [
+    "Dry Chillies",
+    "DryChillies",
+    "dry chillies",
+    "drychillies"
+  ],
+  "soanf": [
+    "Soanf",
+    "soanf"
+  ],
+  "ajwan": [
+    "Ajwan",
+    "ajwan"
+  ],
+  "coconut": [
+    "Coconut",
+    "coconut"
+  ],
+  "sanai/sunhemp": [
+    "Sanai Sunhemp",
+    "Sanai/Sunhemp",
+    "SanaiSunhemp",
+    "sanai sunhemp",
+    "sanai/sunhemp",
+    "sanaisunhemp"
+  ],
+  "arecanut(betelnut/supari)": [
+    "Arecanut",
+    "Arecanut(Betelnut/Supari)",
+    "arecanut",
+    "arecanut(betelnut/supari)"
+  ],
+  "tobacco": [
+    "Tobacco",
+    "tobacco"
+  ],
+  "myrobolan(harad)": [
+    "Myrobolan",
+    "Myrobolan(Harad)",
+    "myrobolan",
+    "myrobolan(harad)"
+  ],
+  "betal leaves": [
+    "Betal Leaves",
+    "BetalLeaves",
+    "betal leaves",
+    "betalleaves"
+  ],
+  "sweet potato": [
+    "Sweet Potato",
+    "SweetPotato",
+    "sweet potato",
+    "sweetpotato"
+  ],
+  "carrot": [
+    "Carrot",
+    "carrot"
+  ],
+  "cabbage": [
+    "Cabbage",
+    "cabbage"
+  ],
+  "ladies finger": [
+    "Ladies Finger",
+    "LadiesFinger",
+    "ladies finger",
+    "ladiesfinger"
+  ],
+  "snakeguard": [
+    "Snakeguard",
+    "snakeguard"
+  ],
+  "beetroot": [
+    "Beetroot",
+    "beetroot"
+  ],
+  "white pumpkin": [
+    "White Pumpkin",
+    "WhitePumpkin",
+    "white pumpkin",
+    "whitepumpkin"
+  ],
+  "cucumbar(kheera)": [
+    "Cucumbar",
+    "Cucumbar(Kheera)",
+    "cucumbar",
+    "cucumbar(kheera)"
+  ],
+  "ridgeguard(tori)": [
+    "Ridgeguard",
+    "Ridgeguard(Tori)",
+    "ridgeguard",
+    "ridgeguard(tori)"
+  ],
+  "raddish": [
+    "Raddish",
+    "raddish"
+  ],
+  "thondekai": [
+    "Thondekai",
+    "thondekai"
+  ],
+  "duster beans": [
+    "Duster Beans",
+    "DusterBeans",
+    "duster beans",
+    "dusterbeans"
+  ],
+  "capsicum": [
+    "Capsicum",
+    "capsicum"
+  ],
+  "green avare(w)": [
+    "Green Avare",
+    "Green Avare(W)",
+    "GreenAvare",
+    "green avare",
+    "green avare(w)",
+    "greenavare"
+  ],
+  "alsandikai": [
+    "Alsandikai",
+    "alsandikai"
+  ],
+  "chow chow": [
+    "Chow Chow",
+    "ChowChow",
+    "chow chow",
+    "chowchow"
+  ],
+  "drumstick": [
+    "Drumstick",
+    "drumstick"
+  ],
+  "chapparad avare": [
+    "Chapparad Avare",
+    "ChapparadAvare",
+    "chapparad avare",
+    "chapparadavare"
+  ],
+  "thogrikai": [
+    "Thogrikai",
+    "thogrikai"
+  ],
+  "leafy vegetable": [
+    "Leafy Vegetable",
+    "LeafyVegetable",
+    "leafy vegetable",
+    "leafyvegetable"
+  ],
+  "mango(raw-ripe)": [
+    "Mango",
+    "Mango(Raw-Ripe)",
+    "mango",
+    "mango(raw-ripe)"
+  ],
+  "sweet pumpkin": [
+    "Sweet Pumpkin",
+    "SweetPumpkin",
+    "sweet pumpkin",
+    "sweetpumpkin"
+  ],
+  "peas wet": [
+    "Peas Wet",
+    "PeasWet",
+    "peas wet",
+    "peaswet"
+  ],
+  "jamamkhan": [
+    "Jamamkhan",
+    "jamamkhan"
+  ],
+  "seemebadnekai": [
+    "Seemebadnekai",
+    "seemebadnekai"
+  ],
+  "knool khol": [
+    "Knool Khol",
+    "KnoolKhol",
+    "knool khol",
+    "knoolkhol"
+  ],
+  "suvarna gadde": [
+    "Suvarna Gadde",
+    "SuvarnaGadde",
+    "suvarna gadde",
+    "suvarnagadde"
+  ],
+  "lime": [
+    "Lime",
+    "lime"
+  ],
+  "marasebu": [
+    "Marasebu",
+    "marasebu"
+  ],
+  "jack fruit(ripe)": [
+    "Jack Fruit",
+    "Jack Fruit(Ripe)",
+    "JackFruit",
+    "jack fruit",
+    "jack fruit(ripe)",
+    "jackfruit"
+  ],
+  "siddota": [
+    "Siddota",
+    "siddota"
+  ],
+  "jamun(narale hannu)": [
+    "Jamun",
+    "Jamun(Narale Hannu)",
+    "jamun",
+    "jamun(narale hannu)"
+  ],
+  "guava": [
+    "Guava",
+    "guava"
+  ],
+  "karbuja(musk melon)": [
+    "Karbuja",
+    "Karbuja(Musk Melon)",
+    "karbuja",
+    "karbuja(musk melon)"
+  ],
+  "chakotha": [
+    "Chakotha",
+    "chakotha"
+  ],
+  "borehannu": [
+    "Borehannu",
+    "borehannu"
+  ],
+  "pomegranate": [
+    "Pomegranate",
+    "pomegranate"
+  ],
+  "tender coconut": [
+    "Tender Coconut",
+    "TenderCoconut",
+    "tender coconut",
+    "tendercoconut"
+  ],
+  "seetapal": [
+    "Seetapal",
+    "seetapal"
+  ],
+  "wood": [
+    "Wood",
+    "wood"
+  ],
+  "bamboo": [
+    "Bamboo",
+    "bamboo"
+  ],
+  "cane": [
+    "Cane",
+    "cane"
+  ],
+  "firewood": [
+    "Firewood",
+    "firewood"
+  ],
+  "soapnut(antawala/retha)": [
+    "Soapnut",
+    "Soapnut(Antawala/Retha)",
+    "soapnut",
+    "soapnut(antawala/retha)"
+  ],
+  "tamarind seed": [
+    "Tamarind Seed",
+    "TamarindSeed",
+    "tamarind seed",
+    "tamarindseed"
+  ],
+  "antawala": [
+    "Antawala",
+    "antawala"
+  ],
+  "jute seed": [
+    "Jute Seed",
+    "JuteSeed",
+    "jute seed",
+    "juteseed"
+  ],
+  "cow": [
+    "Cow",
+    "cow"
+  ],
+  "ox": [
+    "Ox",
+    "ox"
+  ],
+  "bull": [
+    "Bull",
+    "bull"
+  ],
+  "calf": [
+    "Calf",
+    "calf"
+  ],
+  "he buffalo": [
+    "He Buffalo",
+    "HeBuffalo",
+    "he buffalo",
+    "hebuffalo"
+  ],
+  "she buffalo": [
+    "She Buffalo",
+    "SheBuffalo",
+    "she buffalo",
+    "shebuffalo"
+  ],
+  "sheep": [
+    "Sheep",
+    "sheep"
+  ],
+  "goat": [
+    "Goat",
+    "goat"
+  ],
+  "pigs": [
+    "Pigs",
+    "pigs"
+  ],
+  "fig(anjura/anjeer)": [
+    "Fig",
+    "Fig(Anjura/Anjeer)",
+    "fig",
+    "fig(anjura/anjeer)"
+  ],
+  "nearle hannu": [
+    "Nearle Hannu",
+    "NearleHannu",
+    "nearle hannu",
+    "nearlehannu"
+  ],
+  "nelli kai": [
+    "Nelli Kai",
+    "NelliKai",
+    "nelli kai",
+    "nellikai"
+  ],
+  "bunch beans": [
+    "Bunch Beans",
+    "BunchBeans",
+    "bunch beans",
+    "bunchbeans"
+  ],
+  "maragensu": [
+    "Maragensu",
+    "maragensu"
+  ],
+  "skin and hide": [
+    "Skin And Hide",
+    "SkinAndHide",
+    "skin and hide",
+    "skinandhide"
+  ],
+  "rose(loose))": [
+    "Rose",
+    "Rose(Loose))",
+    "Rose)",
+    "rose",
+    "rose(loose))",
+    "rose)"
+  ],
+  "jasmine": [
+    "Jasmine",
+    "jasmine"
+  ],
+  "kakada": [
+    "Kakada",
+    "kakada"
+  ],
+  "chrysanthemum(loose)": [
+    "Chrysanthemum",
+    "Chrysanthemum(Loose)",
+    "chrysanthemum",
+    "chrysanthemum(loose)"
+  ],
+  "astera": [
+    "Astera",
+    "astera"
+  ],
+  "kankambra": [
+    "Kankambra",
+    "kankambra"
+  ],
+  "tube flower": [
+    "Tube Flower",
+    "TubeFlower",
+    "tube flower",
+    "tubeflower"
+  ],
+  "marigold(calcutta)": [
+    "Marigold",
+    "Marigold(Calcutta)",
+    "marigold",
+    "marigold(calcutta)"
+  ],
+  "honey": [
+    "Honey",
+    "honey"
+  ],
+  "millets": [
+    "Millets",
+    "millets"
+  ],
+  "cashew kernnel": [
+    "Cashew Kernnel",
+    "CashewKernnel",
+    "cashew kernnel",
+    "cashewkernnel"
+  ],
+  "polherb": [
+    "Polherb",
+    "polherb"
+  ],
+  "chennangi(whole)": [
+    "Chennangi",
+    "Chennangi(Whole)",
+    "chennangi",
+    "chennangi(whole)"
+  ],
+  "suram": [
+    "Suram",
+    "suram"
+  ],
+  "kuchur": [
+    "Kuchur",
+    "kuchur"
+  ],
+  "yam": [
+    "Yam",
+    "yam"
+  ],
+  "nargasi": [
+    "Nargasi",
+    "nargasi"
+  ],
+  "sompu": [
+    "Sompu",
+    "sompu"
+  ],
+  "sarasum": [
+    "Sarasum",
+    "sarasum"
+  ],
+  "rajgir": [
+    "Rajgir",
+    "rajgir"
+  ],
+  "ghee": [
+    "Ghee",
+    "ghee"
+  ],
+  "javi": [
+    "Javi",
+    "javi"
+  ],
+  "haralekai": [
+    "Haralekai",
+    "haralekai"
+  ],
+  "seegu": [
+    "Seegu",
+    "seegu"
+  ],
+  "pundi": [
+    "Pundi",
+    "pundi"
+  ],
+  "suva(dill seed)": [
+    "Suva",
+    "Suva(Dill Seed)",
+    "suva",
+    "suva(dill seed)"
+  ],
+  "isabgul(psyllium)": [
+    "Isabgul",
+    "Isabgul(Psyllium)",
+    "isabgul",
+    "isabgul(psyllium)"
+  ],
+  "masur dal": [
+    "Masur Dal",
+    "MasurDal",
+    "masur dal",
+    "masurdal"
+  ],
+  "arhar dal(tur dal)": [
+    "Arhar Dal",
+    "Arhar Dal(Tur Dal)",
+    "ArharDal",
+    "arhar dal",
+    "arhar dal(tur dal)",
+    "arhardal"
+  ],
+  "tamarind fruit": [
+    "Tamarind Fruit",
+    "TamarindFruit",
+    "tamarind fruit",
+    "tamarindfruit"
+  ],
+  "beaten rice": [
+    "Beaten Rice",
+    "BeatenRice",
+    "beaten rice",
+    "beatenrice"
+  ],
+  "bengal gram dal(chana dal)": [
+    "Bengal Gram Dal",
+    "Bengal Gram Dal(Chana Dal)",
+    "BengalGramDal",
+    "bengal gram dal",
+    "bengal gram dal(chana dal)",
+    "bengalgramdal"
+  ],
+  "black gram dal(urd dal)": [
+    "Black Gram Dal",
+    "Black Gram Dal(Urd Dal)",
+    "BlackGramDal",
+    "black gram dal",
+    "black gram dal(urd dal)",
+    "blackgramdal"
+  ],
+  "green gram dal(moong dal)": [
+    "Green Gram Dal",
+    "Green Gram Dal(Moong Dal)",
+    "GreenGramDal",
+    "green gram dal",
+    "green gram dal(moong dal)",
+    "greengramdal"
+  ],
+  "coconut oil": [
+    "Coconut Oil",
+    "CoconutOil",
+    "coconut oil",
+    "coconutoil"
+  ],
+  "ground nut oil": [
+    "Ground Nut Oil",
+    "GroundNutOil",
+    "ground nut oil",
+    "groundnutoil"
+  ],
+  "ground nut seed": [
+    "Ground Nut Seed",
+    "GroundNutSeed",
+    "ground nut seed",
+    "groundnutseed"
+  ],
+  "avare dal": [
+    "Avare Dal",
+    "AvareDal",
+    "avare dal",
+    "avaredal"
+  ],
+  "castor oil": [
+    "Castor Oil",
+    "CastorOil",
+    "castor oil",
+    "castoroil"
+  ],
+  "sajje": [
+    "Sajje",
+    "sajje"
+  ],
+  "butter": [
+    "Butter",
+    "butter"
+  ],
+  "dalda": [
+    "Dalda",
+    "dalda"
+  ],
+  "balekai": [
+    "Balekai",
+    "balekai"
+  ],
+  "gingelly oil": [
+    "Gingelly Oil",
+    "GingellyOil",
+    "gingelly oil",
+    "gingellyoil"
+  ],
+  "season leaves": [
+    "Season Leaves",
+    "SeasonLeaves",
+    "season leaves",
+    "seasonleaves"
+  ],
+  "dry grapes": [
+    "Dry Grapes",
+    "DryGrapes",
+    "dry grapes",
+    "drygrapes"
+  ],
+  "gurellu": [
+    "Gurellu",
+    "gurellu"
+  ],
+  "lint": [
+    "Lint",
+    "lint"
+  ],
+  "alasande gram": [
+    "Alasande Gram",
+    "AlasandeGram",
+    "alasande gram",
+    "alasandegram"
+  ],
+  "ram": [
+    "Ram",
+    "ram"
+  ],
+  "she goat": [
+    "She Goat",
+    "SheGoat",
+    "she goat",
+    "shegoat"
+  ],
+  "bullar": [
+    "Bullar",
+    "bullar"
+  ],
+  "sunflower seed": [
+    "Sunflower Seed",
+    "SunflowerSeed",
+    "sunflower seed",
+    "sunflowerseed"
+  ],
+  "soji": [
+    "Soji",
+    "soji"
+  ],
+  "wheat atta": [
+    "Wheat Atta",
+    "WheatAtta",
+    "wheat atta",
+    "wheatatta"
+  ],
+  "maida atta": [
+    "Maida Atta",
+    "MaidaAtta",
+    "maida atta",
+    "maidaatta"
+  ],
+  "bran": [
+    "Bran",
+    "bran"
+  ],
+  "sabu dan": [
+    "Sabu Dan",
+    "SabuDan",
+    "sabu dan",
+    "sabudan"
+  ],
+  "broken rice": [
+    "Broken Rice",
+    "BrokenRice",
+    "broken rice",
+    "brokenrice"
+  ],
+  "gramflour": [
+    "Gramflour",
+    "gramflour"
+  ],
+  "chennangi dal": [
+    "Chennangi Dal",
+    "ChennangiDal",
+    "chennangi dal",
+    "chennangidal"
+  ],
+  "elephant yam(suran)/amorphophallus": [
+    "Elephant Yam Amorphophallus",
+    "Elephant Yam(Suran)/Amorphophallus",
+    "Elephant Yam/Amorphophallus",
+    "ElephantYamAmorphophallus",
+    "elephant yam amorphophallus",
+    "elephant yam(suran)/amorphophallus",
+    "elephant yam/amorphophallus",
+    "elephantyamamorphophallus"
+  ],
+  "yam(ratalu)": [
+    "Yam",
+    "Yam(Ratalu)",
+    "yam",
+    "yam(ratalu)"
+  ],
+  "french beans(frasbean)": [
+    "French Beans",
+    "French Beans(Frasbean)",
+    "FrenchBeans",
+    "french beans",
+    "french beans(frasbean)",
+    "frenchbeans"
+  ],
+  "indian beans(seam)": [
+    "Indian Beans",
+    "Indian Beans(Seam)",
+    "IndianBeans",
+    "indian beans",
+    "indian beans(seam)",
+    "indianbeans"
+  ],
+  "surat beans(papadi)": [
+    "Surat Beans",
+    "Surat Beans(Papadi)",
+    "SuratBeans",
+    "surat beans",
+    "surat beans(papadi)",
+    "suratbeans"
+  ],
+  "pegeon pea(arhar fali)": [
+    "Pegeon Pea",
+    "Pegeon Pea(Arhar Fali)",
+    "PegeonPea",
+    "pegeon pea",
+    "pegeon pea(arhar fali)",
+    "pegeonpea"
+  ],
+  "little gourd(kundru)": [
+    "Little gourd",
+    "Little gourd(Kundru)",
+    "Littlegourd",
+    "little gourd",
+    "little gourd(kundru)",
+    "littlegourd"
+  ],
+  "pointed gourd(parval)": [
+    "Pointed gourd",
+    "Pointed gourd(Parval)",
+    "Pointedgourd",
+    "pointed gourd",
+    "pointed gourd(parval)",
+    "pointedgourd"
+  ],
+  "long melon(kakri)": [
+    "Long Melon",
+    "Long Melon(Kakri)",
+    "LongMelon",
+    "long melon",
+    "long melon(kakri)",
+    "longmelon"
+  ],
+  "kartali(kantola)": [
+    "Kartali",
+    "Kartali(Kantola)",
+    "kartali",
+    "kartali(kantola)"
+  ],
+  "round gourd": [
+    "Round gourd",
+    "Roundgourd",
+    "round gourd",
+    "roundgourd"
+  ],
+  "rat tail radish(mogari)": [
+    "Rat Tail Radish",
+    "Rat Tail Radish(Mogari)",
+    "RatTailRadish",
+    "rat tail radish",
+    "rat tail radish(mogari)",
+    "rattailradish"
+  ],
+  "pea pod/pea cod/": [
+    "Pea Pod Pea Cod",
+    "Pea Pod/Pea Cod/",
+    "PeaPodPeaCod",
+    "pea pod pea cod",
+    "pea pod/pea cod/",
+    "peapodpeacod"
+  ],
+  "turmeric(raw)": [
+    "Turmeric",
+    "Turmeric(raw)",
+    "turmeric",
+    "turmeric(raw)"
+  ],
+  "lemon": [
+    "Lemon",
+    "lemon"
+  ],
+  "sponge gourd": [
+    "Sponge gourd",
+    "Spongegourd",
+    "sponge gourd",
+    "spongegourd"
+  ],
+  "groundnut pods(raw)": [
+    "Groundnut pods",
+    "Groundnut pods(raw)",
+    "Groundnutpods",
+    "groundnut pods",
+    "groundnut pods(raw)",
+    "groundnutpods"
+  ],
+  "papaya(raw)": [
+    "Papaya",
+    "Papaya(Raw)",
+    "papaya",
+    "papaya(raw)"
+  ],
+  "groundnut(split)": [
+    "Groundnut",
+    "Groundnut(Split)",
+    "groundnut",
+    "groundnut(split)"
+  ],
+  "coca": [
+    "Coca",
+    "coca"
+  ],
+  "cinamon(dalchini)": [
+    "Cinamon",
+    "Cinamon(Dalchini)",
+    "cinamon",
+    "cinamon(dalchini)"
+  ],
+  "kacholam": [
+    "Kacholam",
+    "kacholam"
+  ],
+  "colacasia": [
+    "Colacasia",
+    "colacasia"
+  ],
+  "broomstick(flower broom)": [
+    "Broomstick",
+    "Broomstick(Flower Broom)",
+    "broomstick",
+    "broomstick(flower broom)"
+  ],
+  "bay leaf(tejpatta)": [
+    "Bay leaf",
+    "Bay leaf(Tejpatta)",
+    "Bayleaf",
+    "bay leaf",
+    "bay leaf(tejpatta)",
+    "bayleaf"
+  ],
+  "resinwood": [
+    "Resinwood",
+    "resinwood"
+  ],
+  "torchwood": [
+    "Torchwood",
+    "torchwood"
+  ],
+  "mustard oil": [
+    "Mustard Oil",
+    "MustardOil",
+    "mustard oil",
+    "mustardoil"
+  ],
+  "almond(badam)": [
+    "Almond",
+    "Almond(Badam)",
+    "almond",
+    "almond(badam)"
+  ],
+  "apricot(jardalu/khumani)": [
+    "Apricot",
+    "Apricot(Jardalu/Khumani)",
+    "apricot",
+    "apricot(jardalu/khumani)"
+  ],
+  "persimon(japani fal)": [
+    "Persimon",
+    "Persimon(Japani Fal)",
+    "persimon",
+    "persimon(japani fal)"
+  ],
+  "cherry": [
+    "Cherry",
+    "cherry"
+  ],
+  "plum": [
+    "Plum",
+    "plum"
+  ],
+  "pear(marasebu)": [
+    "Pear",
+    "Pear(Marasebu)",
+    "pear",
+    "pear(marasebu)"
+  ],
+  "peach": [
+    "Peach",
+    "peach"
+  ],
+  "squash(chappal kadoo)": [
+    "Squash",
+    "Squash(Chappal Kadoo)",
+    "squash",
+    "squash(chappal kadoo)"
+  ],
+  "mahua": [
+    "Mahua",
+    "mahua"
+  ],
+  "kinnow": [
+    "Kinnow",
+    "kinnow"
+  ],
+  "lukad": [
+    "Lukad",
+    "lukad"
+  ],
+  "saffron": [
+    "Saffron",
+    "saffron"
+  ],
+  "lotus sticks": [
+    "Lotus Sticks",
+    "LotusSticks",
+    "lotus sticks",
+    "lotussticks"
+  ],
+  "mashrooms": [
+    "Mashrooms",
+    "mashrooms"
+  ],
+  "turnip": [
+    "Turnip",
+    "turnip"
+  ],
+  "spinach": [
+    "Spinach",
+    "spinach"
+  ],
+  "walnut": [
+    "Walnut",
+    "walnut"
+  ],
+  "indian colza(sarson)": [
+    "Indian Colza",
+    "Indian Colza(Sarson)",
+    "IndianColza",
+    "indian colza",
+    "indian colza(sarson)",
+    "indiancolza"
+  ],
+  "dry fodder": [
+    "Dry Fodder",
+    "DryFodder",
+    "dry fodder",
+    "dryfodder"
+  ],
+  "green fodder": [
+    "Green Fodder",
+    "GreenFodder",
+    "green fodder",
+    "greenfodder"
+  ],
+  "peas(dry)": [
+    "Peas",
+    "Peas(Dry)",
+    "peas",
+    "peas(dry)"
+  ],
+  "wool": [
+    "Wool",
+    "wool"
+  ],
+  "tinda": [
+    "Tinda",
+    "tinda"
+  ],
+  "galgal(lemon)": [
+    "Galgal",
+    "Galgal(Lemon)",
+    "galgal",
+    "galgal(lemon)"
+  ],
+  "litchi": [
+    "Litchi",
+    "litchi"
+  ],
+  "custard apple(sharifa)": [
+    "Custard Apple",
+    "Custard Apple(Sharifa)",
+    "CustardApple",
+    "custard apple",
+    "custard apple(sharifa)",
+    "custardapple"
+  ],
+  "goat hair": [
+    "Goat Hair",
+    "GoatHair",
+    "goat hair",
+    "goathair"
+  ],
+  "camel hair": [
+    "Camel Hair",
+    "CamelHair",
+    "camel hair",
+    "camelhair"
+  ],
+  "amla(nelli kai)": [
+    "Amla",
+    "Amla(Nelli Kai)",
+    "amla",
+    "amla(nelli kai)"
+  ],
+  "ber(zizyphus/borehannu)": [
+    "Ber",
+    "Ber(Zizyphus/Borehannu)",
+    "ber",
+    "ber(zizyphus/borehannu)"
+  ],
+  "onion green": [
+    "Onion Green",
+    "OnionGreen",
+    "onion green",
+    "oniongreen"
+  ],
+  "gram raw(chholia)": [
+    "Gram Raw",
+    "Gram Raw(Chholia)",
+    "GramRaw",
+    "gram raw",
+    "gram raw(chholia)",
+    "gramraw"
+  ],
+  "mint(pudina)": [
+    "Mint",
+    "Mint(Pudina)",
+    "mint",
+    "mint(pudina)"
+  ],
+  "egypian clover(barseem)": [
+    "Egypian Clover",
+    "Egypian Clover(Barseem)",
+    "EgypianClover",
+    "egypian clover",
+    "egypian clover(barseem)",
+    "egypianclover"
+  ],
+  "kabuli chana(chickpeas-white)": [
+    "Kabuli Chana",
+    "Kabuli Chana(Chickpeas-White)",
+    "KabuliChana",
+    "kabuli chana",
+    "kabuli chana(chickpeas-white)",
+    "kabulichana"
+  ],
+  "gladiolus cut flower": [
+    "Gladiolus Cut Flower",
+    "GladiolusCutFlower",
+    "gladiolus cut flower",
+    "gladioluscutflower"
+  ],
+  "gladiolus bulb": [
+    "Gladiolus Bulb",
+    "GladiolusBulb",
+    "gladiolus bulb",
+    "gladiolusbulb"
+  ],
+  "flower broom": [
+    "Flower Broom",
+    "FlowerBroom",
+    "flower broom",
+    "flowerbroom"
+  ],
+  "fish": [
+    "Fish",
+    "fish"
+  ],
+  "egg": [
+    "Egg",
+    "egg"
+  ],
+  "cock": [
+    "Cock",
+    "cock"
+  ],
+  "hen": [
+    "Hen",
+    "hen"
+  ],
+  "duck": [
+    "Duck",
+    "duck"
+  ],
+  "mahua seed(hippe seed)": [
+    "Mahua Seed",
+    "Mahua Seed(Hippe seed)",
+    "MahuaSeed",
+    "mahua seed",
+    "mahua seed(hippe seed)",
+    "mahuaseed"
+  ],
+  "khoya": [
+    "Khoya",
+    "khoya"
+  ],
+  "rose(tata)": [
+    "Rose",
+    "Rose(Tata)",
+    "rose",
+    "rose(tata)"
+  ],
+  "rose(local)": [
+    "Rose",
+    "Rose(Local)",
+    "rose",
+    "rose(local)"
+  ],
+  "carnation": [
+    "Carnation",
+    "carnation"
+  ],
+  "jarbara": [
+    "Jarbara",
+    "jarbara"
+  ],
+  "tube rose(single)": [
+    "Tube Rose",
+    "Tube Rose(Single)",
+    "TubeRose",
+    "tube rose",
+    "tube rose(single)",
+    "tuberose"
+  ],
+  "lilly": [
+    "Lilly",
+    "lilly"
+  ],
+  "anthorium": [
+    "Anthorium",
+    "anthorium"
+  ],
+  "bop": [
+    "BOP",
+    "bop"
+  ],
+  "orchid": [
+    "Orchid",
+    "orchid"
+  ],
+  "daila(chandni)": [
+    "Daila",
+    "Daila(Chandni)",
+    "daila",
+    "daila(chandni)"
+  ],
+  "tube rose(double)": [
+    "Tube Rose",
+    "Tube Rose(Double)",
+    "TubeRose",
+    "tube rose",
+    "tube rose(double)",
+    "tuberose"
+  ],
+  "chrysanthemum": [
+    "Chrysanthemum",
+    "chrysanthemum"
+  ],
+  "lotus": [
+    "Lotus",
+    "lotus"
+  ],
+  "patti calcutta": [
+    "Patti Calcutta",
+    "PattiCalcutta",
+    "patti calcutta",
+    "patticalcutta"
+  ],
+  "marigold(loose)": [
+    "Marigold",
+    "Marigold(loose)",
+    "marigold",
+    "marigold(loose)"
+  ],
+  "jaffri": [
+    "Jaffri",
+    "jaffri"
+  ],
+  "marget": [
+    "Marget",
+    "marget"
+  ],
+  "tube rose(loose)": [
+    "Tube Rose",
+    "Tube Rose(Loose)",
+    "TubeRose",
+    "tube rose",
+    "tube rose(loose)",
+    "tuberose"
+  ],
+  "raibel": [
+    "Raibel",
+    "raibel"
+  ],
+  "delha": [
+    "Delha",
+    "delha"
+  ],
+  "mahedi": [
+    "Mahedi",
+    "mahedi"
+  ],
+  "white peas": [
+    "White Peas",
+    "WhitePeas",
+    "white peas",
+    "whitepeas"
+  ],
+  "guar seed(cluster beans seed)": [
+    "Guar Seed",
+    "Guar Seed(Cluster Beans Seed)",
+    "GuarSeed",
+    "guar seed",
+    "guar seed(cluster beans seed)",
+    "guarseed"
+  ],
+  "paddy(basmati)": [
+    "Paddy",
+    "Paddy(Basmati)",
+    "paddy",
+    "paddy(basmati)"
+  ],
+  "kutki": [
+    "Kutki",
+    "kutki"
+  ],
+  "buttery": [
+    "buttery"
+  ],
+  "ambady/mesta/patson": [
+    "Ambady Mesta Patson",
+    "Ambady/Mesta/Patson",
+    "AmbadyMestaPatson",
+    "ambady mesta patson",
+    "ambady/mesta/patson",
+    "ambadymestapatson"
+  ],
+  "bael": [
+    "Bael",
+    "bael"
+  ],
+  "amranthas red": [
+    "Amranthas Red",
+    "AmranthasRed",
+    "amranthas red",
+    "amranthasred"
+  ],
+  "other green and fresh vegetables": [
+    "Other green and fresh vegetables",
+    "Othergreenandfreshvegetables",
+    "other green and fresh vegetables",
+    "othergreenandfreshvegetables"
+  ],
+  "poppy seeds": [
+    "poppy seeds",
+    "poppyseeds"
+  ],
+  "mango powder": [
+    "mango powder",
+    "mangopowder"
+  ],
+  "dried mango": [
+    "dried mango",
+    "driedmango"
+  ],
+  "nigella": [
+    "nigella"
+  ],
+  "poppy capsules": [
+    "Poppy capsules",
+    "Poppycapsules",
+    "poppy capsules",
+    "poppycapsules"
+  ],
+  "macoy": [
+    "macoy"
+  ],
+  "muleti": [
+    "Muleti",
+    "muleti"
+  ],
+  "white muesli": [
+    "White Muesli",
+    "WhiteMuesli",
+    "white muesli",
+    "whitemuesli"
+  ],
+  "stone pulverizer": [
+    "stone pulverizer",
+    "stonepulverizer"
+  ],
+  "pippali": [
+    "pippali"
+  ],
+  "liquor turmeric": [
+    "liquor turmeric",
+    "liquorturmeric"
+  ],
+  "sanay": [
+    "sanay"
+  ],
+  "asparagus": [
+    "Asparagus",
+    "asparagus"
+  ],
+  "basil": [
+    "basil"
+  ],
+  "vadang": [
+    "vadang"
+  ],
+  "vatsanabha": [
+    "Vatsanabha",
+    "vatsanabha"
+  ],
+  "chandrashoor": [
+    "Chandrashoor",
+    "chandrashoor"
+  ],
+  "karanja seeds": [
+    "karanja seeds",
+    "karanjaseeds"
+  ],
+  "stevia": [
+    "stevia"
+  ],
+  "palash flowers": [
+    "Palash flowers",
+    "Palashflowers",
+    "palash flowers",
+    "palashflowers"
+  ],
+  "dhawai flowers": [
+    "dhawai flowers",
+    "dhawaiflowers"
+  ],
+  "ashwagandha": [
+    "Ashwagandha",
+    "ashwagandha"
+  ],
+  "asalia": [
+    "Asalia",
+    "asalia"
+  ],
+  "nigella seeds": [
+    "nigella seeds",
+    "nigellaseeds"
+  ],
+  "muesli": [
+    "Muesli",
+    "muesli"
+  ],
+  "pupadia": [
+    "Pupadia",
+    "pupadia"
+  ],
+  "bhui amlaya": [
+    "Bhui Amlaya",
+    "BhuiAmlaya",
+    "bhui amlaya",
+    "bhuiamlaya"
+  ],
+  "brahmi": [
+    "Brahmi",
+    "brahmi"
+  ],
+  "sandalwood": [
+    "Sandalwood",
+    "sandalwood"
+  ],
+  "absinthe": [
+    "Absinthe",
+    "absinthe"
+  ],
+  "giloy": [
+    "Giloy",
+    "giloy"
+  ],
+  "gudmar": [
+    "Gudmar",
+    "gudmar"
+  ],
+  "guggal": [
+    "Guggal",
+    "guggal"
+  ],
+  "spikenard": [
+    "spikenard"
+  ],
+  "kalihari": [
+    "Kalihari",
+    "kalihari"
+  ],
+  "kalmegh": [
+    "Kalmegh",
+    "kalmegh"
+  ],
+  "kokum": [
+    "kokum"
+  ],
+  "kooth": [
+    "Kooth",
+    "kooth"
+  ],
+  "ratanjot": [
+    "Ratanjot",
+    "ratanjot"
+  ],
+  "gulli": [
+    "gulli"
+  ],
+  "glardia": [
+    "Glardia",
+    "glardia"
+  ],
+  "tulip": [
+    "Tulip",
+    "tulip"
+  ],
+  "sevanti": [
+    "sevanti"
+  ],
+  "irish": [
+    "Irish",
+    "irish"
+  ],
+  "sweet sultan": [
+    "Sweet Sultan",
+    "SweetSultan",
+    "sweet sultan",
+    "sweetsultan"
+  ],
+  "cineraria": [
+    "cineraria"
+  ],
+  "salvia": [
+    "salvia"
+  ],
+  "gypsophila": [
+    "gypsophila"
+  ],
+  "limonia(status)": [
+    "Limonia",
+    "Limonia(status)",
+    "limonia",
+    "limonia(status)"
+  ],
+  "gamphrena": [
+    "Gamphrena",
+    "gamphrena"
+  ],
+  "cossandra": [
+    "Cossandra",
+    "cossandra"
+  ],
+  "hydrangea": [
+    "hydrangea"
+  ],
+  "heliconia species": [
+    "Heliconia species",
+    "Heliconiaspecies",
+    "heliconia species",
+    "heliconiaspecies"
+  ],
+  "golden rod": [
+    "golden rod",
+    "goldenrod"
+  ],
+  "dianthus": [
+    "dianthus"
+  ],
+  "sweet william": [
+    "sweet william",
+    "sweetwilliam"
+  ],
+  "clarkia": [
+    "Clarkia",
+    "clarkia"
+  ],
+  "lupine": [
+    "Lupine",
+    "lupine"
+  ],
+  "calendula": [
+    "Calendula",
+    "calendula"
+  ],
+  "kevda": [
+    "Kevda",
+    "kevda"
+  ],
+  "balsam": [
+    "balsam"
+  ],
+  "banana flower": [
+    "Banana flower",
+    "Bananaflower",
+    "banana flower",
+    "bananaflower"
+  ],
+  "banana stem": [
+    "Banana stem",
+    "Bananastem",
+    "banana stem",
+    "bananastem"
+  ],
+  "banana leaf": [
+    "Banana Leaf",
+    "BananaLeaf",
+    "banana leaf",
+    "bananaleaf"
+  ],
+  "curry leaf": [
+    "Curry Leaf",
+    "CurryLeaf",
+    "curry leaf",
+    "curryleaf"
+  ],
+  "brocoli": [
+    "Brocoli",
+    "brocoli"
+  ],
+  "sundaikai": [
+    "Sundaikai",
+    "sundaikai"
+  ],
+  "perandai": [
+    "Perandai",
+    "perandai"
+  ],
+  "siru kizhagu": [
+    "Siru Kizhagu",
+    "SiruKizhagu",
+    "siru kizhagu",
+    "sirukizhagu"
+  ],
+  "bajji chilli": [
+    "Bajji chilli",
+    "Bajjichilli",
+    "bajji chilli",
+    "bajjichilli"
+  ],
+  "double beans": [
+    "Double Beans",
+    "DoubleBeans",
+    "double beans",
+    "doublebeans"
+  ],
+  "red cabbage": [
+    "Red Cabbage",
+    "RedCabbage",
+    "red cabbage",
+    "redcabbage"
+  ],
+  "goose berry(nellikkai)": [
+    "Goose berry",
+    "Goose berry(Nellikkai)",
+    "Gooseberry",
+    "goose berry",
+    "goose berry(nellikkai)",
+    "gooseberry"
+  ],
+  "dragon fruit": [
+    "Dragon fruit",
+    "Dragonfruit",
+    "dragon fruit",
+    "dragonfruit"
+  ],
+  "water apple": [
+    "Water Apple",
+    "WaterApple",
+    "water apple",
+    "waterapple"
+  ],
+  "bread fruit": [
+    "Bread Fruit",
+    "BreadFruit",
+    "bread fruit",
+    "breadfruit"
+  ],
+  "wild lemon": [
+    "Wild lemon",
+    "Wildlemon",
+    "wild lemon",
+    "wildlemon"
+  ],
+  "wood apple": [
+    "Wood Apple",
+    "WoodApple",
+    "wood apple",
+    "woodapple"
+  ],
+  "nerium": [
+    "Nerium",
+    "nerium"
+  ],
+  "kakatan": [
+    "kakatan"
+  ],
+  "marikozhunthu": [
+    "Marikozhunthu",
+    "marikozhunthu"
+  ],
+  "tulasi": [
+    "Tulasi",
+    "tulasi"
+  ],
+  "ma.inji": [
+    "Ma Inji",
+    "Ma.Inji",
+    "MaInji",
+    "ma inji",
+    "ma.inji",
+    "mainji"
+  ],
+  "asgand": [
+    "Asgand",
+    "asgand"
+  ],
+  "ashoka": [
+    "Ashoka",
+    "ashoka"
+  ],
+  "atis": [
+    "Atis",
+    "atis"
+  ],
+  "behada": [
+    "Behada",
+    "behada"
+  ],
+  "chironji": [
+    "Chironji",
+    "chironji"
+  ],
+  "flax seeds": [
+    "Flax seeds",
+    "Flaxseeds",
+    "flax seeds",
+    "flaxseeds"
+  ],
+  "gond": [
+    "Gond",
+    "gond"
+  ],
+  "harrah": [
+    "Harrah",
+    "harrah"
+  ],
+  "jaee": [
+    "Jaee",
+    "jaee"
+  ],
+  "khirni": [
+    "Khirni",
+    "khirni"
+  ],
+  "laha": [
+    "Laha",
+    "laha"
+  ],
+  "muskmelon seeds": [
+    "Muskmelon Seeds",
+    "MuskmelonSeeds",
+    "muskmelon seeds",
+    "muskmelonseeds"
+  ],
+  "rala": [
+    "Rala",
+    "rala"
+  ],
+  "ramphal": [
+    "Ramphal",
+    "ramphal"
+  ],
+  "rayee": [
+    "Rayee",
+    "rayee"
+  ],
+  "soha": [
+    "Soha",
+    "soha"
+  ],
+  "water chestnut": [
+    "Water chestnut",
+    "Waterchestnut",
+    "water chestnut",
+    "waterchestnut"
+  ],
+  "wax": [
+    "Wax",
+    "wax"
+  ],
+  "moath dal": [
+    "Moath Dal",
+    "MoathDal",
+    "moath dal",
+    "moathdal"
+  ],
+  "ajwain husk": [
+    "Ajwain Husk",
+    "AjwainHusk",
+    "ajwain husk",
+    "ajwainhusk"
+  ],
+  "aloe vera": [
+    "Aloe Vera",
+    "AloeVera",
+    "aloe vera",
+    "aloevera"
+  ],
+  "ambat chuka": [
+    "Ambat Chuka",
+    "AmbatChuka",
+    "ambat chuka",
+    "ambatchuka"
+  ],
+  "arrowroot": [
+    "Arrowroot",
+    "arrowroot"
+  ],
+  "avocado": [
+    "Avocado",
+    "avocado"
+  ],
+  "baby corn": [
+    "Baby Corn",
+    "BabyCorn",
+    "baby corn",
+    "babycorn"
+  ],
+  "bamboo shoot": [
+    "Bamboo Shoot",
+    "BambooShoot",
+    "bamboo shoot",
+    "bambooshoot"
+  ],
+  "barnyard millet": [
+    "Barnyard Millet",
+    "BarnyardMillet",
+    "barnyard millet",
+    "barnyardmillet"
+  ],
+  "bilimbi": [
+    "Bilimbi",
+    "bilimbi"
+  ],
+  "black currant": [
+    "Black Currant",
+    "BlackCurrant",
+    "black currant",
+    "blackcurrant"
+  ],
+  "blueberry": [
+    "Blueberry",
+    "blueberry"
+  ],
+  "browntop millet": [
+    "Browntop Millet",
+    "BrowntopMillet",
+    "browntop millet",
+    "browntopmillet"
+  ],
+  "carissa(karvand)": [
+    "Carissa",
+    "Carissa(Karvand)",
+    "carissa",
+    "carissa(karvand)"
+  ],
+  "chakhao(black rice)": [
+    "Chakhao",
+    "Chakhao(Black Rice)",
+    "chakhao",
+    "chakhao(black rice)"
+  ],
+  "chhappan kaddu": [
+    "Chhappan Kaddu",
+    "ChhappanKaddu",
+    "chhappan kaddu",
+    "chhappankaddu"
+  ],
+  "coconut coir": [
+    "Coconut Coir",
+    "CoconutCoir",
+    "coconut coir",
+    "coconutcoir"
+  ],
+  "coleus": [
+    "Coleus",
+    "coleus"
+  ],
+  "crab": [
+    "Crab",
+    "crab"
+  ],
+  "dates": [
+    "Dates",
+    "dates"
+  ],
+  "dry fish": [
+    "Dry Fish",
+    "DryFish",
+    "dry fish",
+    "dryfish"
+  ],
+  "field bean(anumulu)": [
+    "Field Bean",
+    "Field Bean(Anumulu)",
+    "FieldBean",
+    "field bean",
+    "field bean(anumulu)",
+    "fieldbean"
+  ],
+  "field gram": [
+    "Field Gram",
+    "FieldGram",
+    "field gram",
+    "fieldgram"
+  ],
+  "fig (dry)": [
+    "Fig",
+    "Fig (Dry)",
+    "fig",
+    "fig (dry)"
+  ],
+  "garcinia": [
+    "Garcinia",
+    "garcinia"
+  ],
+  "gerbera": [
+    "Gerbera",
+    "gerbera"
+  ],
+  "gherkin": [
+    "Gherkin",
+    "gherkin"
+  ],
+  "ghost pepper(king chilli)": [
+    "Ghost Pepper",
+    "Ghost Pepper(King Chilli)",
+    "GhostPepper",
+    "ghost pepper",
+    "ghost pepper(king chilli)",
+    "ghostpepper"
+  ],
+  "ginger seed": [
+    "Ginger Seed",
+    "GingerSeed",
+    "ginger seed",
+    "gingerseed"
+  ],
+  "goosefoot": [
+    "Goosefoot",
+    "goosefoot"
+  ],
+  "green tea": [
+    "Green Tea",
+    "GreenTea",
+    "green tea",
+    "greentea"
+  ],
+  "grey fruit": [
+    "Grey Fruit",
+    "GreyFruit",
+    "grey fruit",
+    "greyfruit"
+  ],
+  "hilsa": [
+    "Hilsa",
+    "hilsa"
+  ],
+  "hog plum": [
+    "Hog Plum",
+    "HogPlum",
+    "hog plum",
+    "hogplum"
+  ],
+  "indian sherbet berry(phalsa)": [
+    "Indian Sherbet Berry",
+    "Indian Sherbet Berry(Phalsa)",
+    "IndianSherbetBerry",
+    "indian sherbet berry",
+    "indian sherbet berry(phalsa)",
+    "indiansherbetberry"
+  ],
+  "isbgol": [
+    "Isbgol",
+    "isbgol"
+  ],
+  "jackfruit seed": [
+    "Jackfruit Seed",
+    "JackfruitSeed",
+    "jackfruit seed",
+    "jackfruitseed"
+  ],
+  "kagda": [
+    "Kagda",
+    "kagda"
+  ],
+  "kidney beans(rajma)": [
+    "Kidney Beans",
+    "Kidney Beans(Rajma)",
+    "KidneyBeans",
+    "kidney beans",
+    "kidney beans(rajma)",
+    "kidneybeans"
+  ],
+  "kiwi fruit": [
+    "Kiwi Fruit",
+    "KiwiFruit",
+    "kiwi fruit",
+    "kiwifruit"
+  ],
+  "kuchur - kusum seed": [
+    "Kuchur - Kusum Seed",
+    "Kuchur Kusum Seed",
+    "KuchurKusumSeed",
+    "kuchur - kusum seed",
+    "kuchur kusum seed",
+    "kuchurkusumseed"
+  ],
+  "large cardamom": [
+    "Large Cardamom",
+    "LargeCardamom",
+    "large cardamom",
+    "largecardamom"
+  ],
+  "leek": [
+    "Leek",
+    "leek"
+  ],
+  "lemongrass": [
+    "Lemongrass",
+    "lemongrass"
+  ],
+  "lesser yam": [
+    "Lesser Yam",
+    "LesserYam",
+    "lesser yam",
+    "lesseryam"
+  ],
+  "little millet": [
+    "Little Millet",
+    "LittleMillet",
+    "little millet",
+    "littlemillet"
+  ],
+  "mangosteen": [
+    "Mangosteen",
+    "mangosteen"
+  ],
+  "meal maker (soya chunks)": [
+    "Meal Maker",
+    "Meal Maker (Soya Chunks)",
+    "MealMaker",
+    "meal maker",
+    "meal maker (soya chunks)",
+    "mealmaker"
+  ],
+  "mentha oil": [
+    "Mentha Oil",
+    "MenthaOil",
+    "mentha oil",
+    "menthaoil"
+  ],
+  "mulberry": [
+    "Mulberry",
+    "mulberry"
+  ],
+  "neem fruits": [
+    "Neem Fruits",
+    "NeemFruits",
+    "neem fruits",
+    "neemfruits"
+  ],
+  "passion fruit": [
+    "Passion Fruit",
+    "PassionFruit",
+    "passion fruit",
+    "passionfruit"
+  ],
+  "phuee(leafy veg)": [
+    "Phuee",
+    "Phuee(Leafy Veg)",
+    "phuee",
+    "phuee(leafy veg)"
+  ],
+  "pincushion flower": [
+    "Pincushion Flower",
+    "PincushionFlower",
+    "pincushion flower",
+    "pincushionflower"
+  ],
+  "pine nut(chilgoza /niyoza)": [
+    "Pine Nut",
+    "Pine Nut(Chilgoza /Niyoza)",
+    "PineNut",
+    "pine nut",
+    "pine nut(chilgoza /niyoza)",
+    "pinenut"
+  ],
+  "pista(pistachio)": [
+    "Pista",
+    "Pista(Pistachio)",
+    "pista",
+    "pista(pistachio)"
+  ],
+  "pokcha leafy veg": [
+    "Pokcha Leafy Veg",
+    "PokchaLeafyVeg",
+    "pokcha leafy veg",
+    "pokchaleafyveg"
+  ],
+  "prawn": [
+    "Prawn",
+    "prawn"
+  ],
+  "proso millet": [
+    "Proso Millet",
+    "ProsoMillet",
+    "proso millet",
+    "prosomillet"
+  ],
+  "purslane": [
+    "Purslane",
+    "purslane"
+  ],
+  "quince(nakh)": [
+    "Quince",
+    "Quince(Nakh)",
+    "quince",
+    "quince(nakh)"
+  ],
+  "rambutan": [
+    "Rambutan",
+    "rambutan"
+  ],
+  "raw biomass(agro residue)": [
+    "Raw Biomass",
+    "Raw Biomass(Agro Residue)",
+    "RawBiomass",
+    "raw biomass",
+    "raw biomass(agro residue)",
+    "rawbiomass"
+  ],
+  "red gourd": [
+    "Red Gourd",
+    "RedGourd",
+    "red gourd",
+    "redgourd"
+  ],
+  "ribbed celery": [
+    "Ribbed Celery",
+    "RibbedCelery",
+    "ribbed celery",
+    "ribbedcelery"
+  ],
+  "rice bean": [
+    "Rice Bean",
+    "RiceBean",
+    "rice bean",
+    "ricebean"
+  ],
+  "ridge gourd(permal/hybrid gourd)": [
+    "Ridge Gourd",
+    "Ridge Gourd(Permal/Hybrid Gourd)",
+    "RidgeGourd",
+    "ridge gourd",
+    "ridge gourd(permal/hybrid gourd)",
+    "ridgegourd"
+  ],
+  "round chilli": [
+    "Round Chilli",
+    "RoundChilli",
+    "round chilli",
+    "roundchilli"
+  ],
+  "sal seeds": [
+    "Sal Seeds",
+    "SalSeeds",
+    "sal seeds",
+    "salseeds"
+  ],
+  "salix-pursi(willow)": [
+    "Salix Pursi",
+    "Salix-Pursi",
+    "Salix-Pursi(Willow)",
+    "SalixPursi",
+    "salix pursi",
+    "salix-pursi",
+    "salix-pursi(willow)",
+    "salixpursi"
+  ],
+  "sem": [
+    "Sem",
+    "sem"
+  ],
+  "shrimp": [
+    "Shrimp",
+    "shrimp"
+  ],
+  "silk cocoon": [
+    "Silk Cocoon",
+    "SilkCocoon",
+    "silk cocoon",
+    "silkcocoon"
+  ],
+  "snow mountain garlic": [
+    "Snow Mountain Garlic",
+    "SnowMountainGarlic",
+    "snow mountain garlic",
+    "snowmountaingarlic"
+  ],
+  "soursop": [
+    "Soursop",
+    "soursop"
+  ],
+  "star fruit(kamraikh)": [
+    "Star Fruit",
+    "Star Fruit(Kamraikh)",
+    "StarFruit",
+    "star fruit",
+    "star fruit(kamraikh)",
+    "starfruit"
+  ],
+  "strawberry": [
+    "Strawberry",
+    "strawberry"
+  ],
+  "sugar snap peas": [
+    "Sugar Snap Peas",
+    "SugarSnapPeas",
+    "sugar snap peas",
+    "sugarsnappeas"
+  ],
+  "swan phali(flat bean)": [
+    "Swan Phali",
+    "Swan Phali(Flat Bean)",
+    "SwanPhali",
+    "swan phali",
+    "swan phali(flat bean)",
+    "swanphali"
+  ],
+  "swan plant (green herb)": [
+    "Swan Plant",
+    "Swan Plant (Green Herb)",
+    "SwanPlant",
+    "swan plant",
+    "swan plant (green herb)",
+    "swanplant"
+  ],
+  "swanflower": [
+    "Swanflower",
+    "swanflower"
+  ],
+  "sweet corn": [
+    "Sweet Corn",
+    "SweetCorn",
+    "sweet corn",
+    "sweetcorn"
+  ],
+  "sweet saag": [
+    "Sweet Saag",
+    "SweetSaag",
+    "sweet saag",
+    "sweetsaag"
+  ],
+  "taro (arvi) leaves": [
+    "Taro (Arvi) Leaves",
+    "Taro Leaves",
+    "TaroLeaves",
+    "taro (arvi) leaves",
+    "taro leaves",
+    "taroleaves"
+  ],
+  "taro (arvi) stem": [
+    "Taro (Arvi) Stem",
+    "Taro Stem",
+    "TaroStem",
+    "taro (arvi) stem",
+    "taro stem",
+    "tarostem"
+  ],
+  "tevada": [
+    "Tevada",
+    "tevada"
+  ],
+  "water plant(kaseru)": [
+    "Water Plant",
+    "Water Plant(Kaseru)",
+    "WaterPlant",
+    "water plant",
+    "water plant(kaseru)",
+    "waterplant"
+  ],
+  "wild bean / pod": [
+    "Wild Bean / Pod",
+    "Wild Bean Pod",
+    "WildBeanPod",
+    "wild bean / pod",
+    "wild bean pod",
+    "wildbeanpod"
+  ],
+  "wild cucumber": [
+    "Wild Cucumber",
+    "WildCucumber",
+    "wild cucumber",
+    "wildcucumber"
+  ],
+  "wild garlic / shoots": [
+    "Wild Garlic / Shoots",
+    "Wild Garlic Shoots",
+    "WildGarlicShoots",
+    "wild garlic / shoots",
+    "wild garlic shoots",
+    "wildgarlicshoots"
+  ],
+  "wild melon": [
+    "Wild Melon",
+    "WildMelon",
+    "wild melon",
+    "wildmelon"
+  ],
+  "wild spinach": [
+    "Wild Spinach",
+    "WildSpinach",
+    "wild spinach",
+    "wildspinach"
+  ],
+  "yam bean / mexican turnip(bankla)": [
+    "Yam Bean / Mexican Turnip",
+    "Yam Bean / Mexican Turnip(Bankla)",
+    "Yam Bean Mexican Turnip",
+    "YamBeanMexicanTurnip",
+    "yam bean / mexican turnip",
+    "yam bean / mexican turnip(bankla)",
+    "yam bean mexican turnip",
+    "yambeanmexicanturnip"
+  ],
+  "menetc*3": [
+    "MENETC 3",
+    "MENETC*3",
+    "MENETC3",
+    "menetc 3",
+    "menetc*3",
+    "menetc3"
+  ],
+  "rab/liquid jaggery/molasses": [
+    "Rab Liquid Jaggery Molasses",
+    "Rab/Liquid Jaggery/Molasses",
+    "RabLiquidJaggeryMolasses",
+    "rab liquid jaggery molasses",
+    "rab/liquid jaggery/molasses",
+    "rabliquidjaggerymolasses"
+  ],
+  "catechu(black cutch/ khair/katha)": [
+    "Catechu",
+    "Catechu(Black Cutch/ Khair/Katha)",
+    "catechu",
+    "catechu(black cutch/ khair/katha)"
+  ],
+  "chicory(chikori/kasni)": [
+    "Chicory",
+    "Chicory(Chikori/Kasni)",
+    "chicory",
+    "chicory(chikori/kasni)"
+  ],
+  "dhaincha(seed)": [
+    "Dhaincha",
+    "Dhaincha(Seed)",
+    "dhaincha",
+    "dhaincha(seed)"
+  ],
+  "imarti wood(good quality)": [
+    "Imarti Wood",
+    "Imarti Wood(Good Quality)",
+    "ImartiWood",
+    "imarti wood",
+    "imarti wood(good quality)",
+    "imartiwood"
+  ],
+  "jackfruit(green/raw/unripe)": [
+    "Jackfruit",
+    "Jackfruit(Green/Raw/Unripe)",
+    "jackfruit",
+    "jackfruit(green/raw/unripe)"
+  ],
+  "makhana(foxnut)": [
+    "Makhana",
+    "Makhana(Foxnut)",
+    "makhana",
+    "makhana(foxnut)"
+  ],
+  "mentha(mint)": [
+    "Mentha",
+    "Mentha(Mint)",
+    "mentha",
+    "mentha(mint)"
+  ],
+  "popular wood": [
+    "Popular Wood",
+    "PopularWood",
+    "popular wood",
+    "popularwood"
+  ],
+  "rambans(agave /century plant)": [
+    "Rambans",
+    "Rambans(Agave /Century plant)",
+    "rambans",
+    "rambans(agave /century plant)"
+  ],
+  "sehuwan (seed)": [
+    "Sehuwan",
+    "Sehuwan (Seed)",
+    "sehuwan",
+    "sehuwan (seed)"
+  ],
+  "tendu leaves/kendu leaves/bidi leaves": [
+    "Tendu Leaves Kendu leaves Bidi Leaves",
+    "Tendu Leaves/Kendu leaves/Bidi Leaves",
+    "TenduLeavesKenduleavesBidiLeaves",
+    "tendu leaves kendu leaves bidi leaves",
+    "tendu leaves/kendu leaves/bidi leaves",
+    "tenduleaveskenduleavesbidileaves"
+  ],
+  "engineered wood/processed wood": [
+    "Engineered Wood Processed Wood",
+    "Engineered Wood/Processed Wood",
+    "EngineeredWoodProcessedWood",
+    "engineered wood processed wood",
+    "engineered wood/processed wood",
+    "engineeredwoodprocessedwood"
+  ],
+  "wooden stick / wooden pole": [
+    "Wooden Stick / Wooden Pole",
+    "Wooden Stick Wooden Pole",
+    "WoodenStickWoodenPole",
+    "wooden stick / wooden pole",
+    "wooden stick wooden pole",
+    "woodenstickwoodenpole"
+  ],
+  "wood veneer": [
+    "Wood Veneer",
+    "WoodVeneer",
+    "wood veneer",
+    "woodveneer"
+  ],
+  "flowers-others": [
+    "Flowers Others",
+    "Flowers-Others",
+    "FlowersOthers",
+    "flowers others",
+    "flowers-others",
+    "flowersothers"
+  ],
+  "khandsari(desi khand)": [
+    "Khandsari",
+    "Khandsari(Desi Khand)",
+    "khandsari",
+    "khandsari(desi khand)"
+  ]
 }
