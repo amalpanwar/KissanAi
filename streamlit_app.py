@@ -350,10 +350,20 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
     if not query or not commodity_list:
         return None
     q = query.lower()
-    # Direct substring match first
+    q_tokens = re.findall(r"[a-z0-9]+", q)
+    q_norm = " ".join(q_tokens)
+    # Match by full token to avoid "rice" in "price"
     for name in commodity_list:
-        if name.lower() in q:
-            return name
+        n_tokens = re.findall(r"[a-z0-9]+", name.lower())
+        if not n_tokens:
+            continue
+        if len(n_tokens) == 1:
+            if n_tokens[0] in q_tokens:
+                return name
+        else:
+            n_norm = " ".join(n_tokens)
+            if n_norm in q_norm:
+                return name
     # Normalized match (remove spaces/punct)
     qn = _normalize_text(q)
     for name in commodity_list:
@@ -364,12 +374,23 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
     aliases = load_commodity_aliases()
     for eng_name, alias_list in aliases.items():
         for alias in alias_list:
-            if alias.lower() in q:
-                # Return the catalog's exact name if present
-                for name in commodity_list:
-                    if name.lower() == eng_name.lower():
-                        return name
-                return eng_name.title()
+            a_tokens = re.findall(r"[a-z0-9]+", alias.lower())
+            if not a_tokens:
+                continue
+            if len(a_tokens) == 1:
+                if a_tokens[0] in q_tokens:
+                    # Return the catalog's exact name if present
+                    for name in commodity_list:
+                        if name.lower() == eng_name.lower():
+                            return name
+                    return eng_name.title()
+            else:
+                a_norm = " ".join(a_tokens)
+                if a_norm in q_norm:
+                    for name in commodity_list:
+                        if name.lower() == eng_name.lower():
+                            return name
+                    return eng_name.title()
     # Fallback built-in aliases
     for hi, en in HINDI_COMMODITY_MAP.items():
         if hi in q:
