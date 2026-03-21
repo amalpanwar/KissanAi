@@ -294,7 +294,6 @@ HINDI_COMMODITY_MAP = {
     "धान": "Rice",
     "चावल": "Rice",
     "chawal": "Rice",
-    "chawal": "Rice",
     "आलू": "Potato",
     "aloo": "Potato",
     "गन्ना": "Sugarcane",
@@ -308,6 +307,47 @@ HINDI_COMMODITY_MAP = {
     "टमाटर": "Tomato",
     "tamatar": "Tomato",
 }
+
+
+@st.cache_data(show_spinner=False)
+def load_commodity_catalog() -> list[str]:
+    path = Path("data/raw/agmarknet_commodities.csv")
+    if not path.exists():
+        return []
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return []
+    if "commodity_name" not in df.columns:
+        return []
+    names = df["commodity_name"].dropna().astype(str).unique().tolist()
+    return sorted(names)
+
+
+def _normalize_text(val: str) -> str:
+    return "".join(ch for ch in val.lower() if ch.isalnum())
+
+
+def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str | None:
+    if not query or not commodity_list:
+        return None
+    q = query.lower()
+    # Direct substring match first
+    for name in commodity_list:
+        if name.lower() in q:
+            return name
+    # Normalized match (remove spaces/punct)
+    qn = _normalize_text(q)
+    for name in commodity_list:
+        if _normalize_text(name) in qn:
+            return name
+    # Hinglish/Hindi aliases mapped to canonical names if present in catalog
+    for hi, en in HINDI_COMMODITY_MAP.items():
+        if hi in q:
+            for name in commodity_list:
+                if name.lower() == en.lower():
+                    return name
+    return None
 
 LOCATION_DISTRICT_MAP = {
     "doghat": "Baghpat",
@@ -353,11 +393,10 @@ def extract_selection_from_query(
             if loc in q:
                 district = dist
                 break
-        # Hindi mapping first
-        for hi, en in HINDI_COMMODITY_MAP.items():
-            if hi in q:
-                commodity = en
-                break
+        catalog = load_commodity_catalog()
+        comm_match = resolve_commodity_from_query(query, catalog or commodities)
+        if comm_match:
+            commodity = comm_match
         else:
             comm_match = _best_match(q, commodities)
             if comm_match:
