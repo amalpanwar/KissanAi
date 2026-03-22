@@ -330,6 +330,13 @@ def _best_match(query: str, options: list[str]) -> str | None:
     return matches[0]
 
 
+def _normalize_district_name(name: str) -> str:
+    n = name.lower().strip()
+    n = n.replace("district", "").replace("division", "").replace(" मंडल", "").replace(" जिला", "")
+    n = re.sub(r"[^a-z0-9]+", "", n)
+    return n
+
+
 def extract_place_from_query(query: str) -> str | None:
     tokens = [t.strip(" ?!.,") for t in query.split() if t.strip()]
     stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
@@ -465,23 +472,30 @@ def extract_selection_from_query(
         dist_match = _best_match(q, districts)
         if dist_match:
             district = dist_match
+        # Prefer geocode + reverse-geocode if a place is present
+        place = extract_place_from_query(query)
+        if place:
+            geo = _geocode_cached(place, "Uttar Pradesh")
+            if geo:
+                plat, plon, _ = geo
+                rev = _reverse_geocode_cached(plat, plon)
+                if rev and rev.get("district"):
+                    rev_norm = _normalize_district_name(rev["district"])
+                    for d in districts:
+                        if _normalize_district_name(d) == rev_norm:
+                            district = d
+                            break
+                    else:
+                        # partial match fallback
+                        for d in districts:
+                            if rev_norm and rev_norm in _normalize_district_name(d):
+                                district = d
+                                break
+        # Fallback to manual mapping if reverse-geocode fails
         for loc, dist in LOCATION_DISTRICT_MAP.items():
             if loc in q:
                 district = dist
                 break
-        if not dist_match:
-            place = extract_place_from_query(query)
-            if place:
-                geo = _geocode_cached(place, "Uttar Pradesh")
-                if geo:
-                    plat, plon, _ = geo
-                    rev = _reverse_geocode_cached(plat, plon)
-                    if rev and rev.get("district"):
-                        # Match reverse-geocoded district to available options
-                        for d in districts:
-                            if d.lower() == rev["district"].lower():
-                                district = d
-                                break
         catalog = load_commodity_catalog()
         comm_match = resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
