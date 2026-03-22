@@ -338,7 +338,12 @@ def _normalize_district_name(name: str) -> str:
 
 
 def extract_place_from_query(query: str) -> str | None:
+    # Prefer token immediately before "me/में/में" or "in"
     tokens = [t.strip(" ?!.,") for t in query.split() if t.strip()]
+    for i, tok in enumerate(tokens):
+        t = tok.lower()
+        if t in {"me", "mein", "में", "in"} and i > 0:
+            return tokens[i - 1]
     stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
     for tok in tokens:
         if tok.lower() not in stop and tok.lower() not in {"price", "rate", "mandi", "bhav"}:
