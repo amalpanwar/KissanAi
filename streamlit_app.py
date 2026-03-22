@@ -351,6 +351,14 @@ def extract_place_from_query(query: str) -> str | None:
     return None
 
 
+def _place_variants(place: str) -> list[str]:
+    base = place.strip()
+    variants = [base]
+    if base.lower().endswith("e") and len(base) > 3:
+        variants.append(base[:-1])
+    return variants
+
+
 @st.cache_data(show_spinner=False)
 def load_commodity_catalog() -> list[str]:
     path = Path("data/raw/agmarknet_commodities.csv")
@@ -443,6 +451,10 @@ LOCATION_DISTRICT_MAP = {
     "बरौत": "Baghpat",
     "biral": "Baghpat",
     "बिराल": "Baghpat",
+    "sardhana": "Meerut",
+    "sardhane": "Meerut",
+    "सारधना": "Meerut",
+    "सरधाने": "Meerut",
 }
 
 
@@ -479,22 +491,25 @@ def extract_selection_from_query(
         # Prefer geocode + reverse-geocode if a place is present
         place = extract_place_from_query(query)
         if place:
-            geo = _geocode_cached(place, "Uttar Pradesh")
-            if geo:
-                plat, plon, _ = geo
-                rev = _reverse_geocode_cached(plat, plon)
-                if rev and rev.get("district"):
-                    rev_norm = _normalize_district_name(rev["district"])
-                    for d in districts:
-                        if _normalize_district_name(d) == rev_norm:
-                            district = d
-                            break
-                    else:
-                        # partial match fallback
+            for variant in _place_variants(place):
+                geo = _geocode_cached(variant, "Uttar Pradesh")
+                if geo:
+                    plat, plon, _ = geo
+                    rev = _reverse_geocode_cached(plat, plon)
+                    if rev and rev.get("district"):
+                        rev_norm = _normalize_district_name(rev["district"])
                         for d in districts:
-                            if rev_norm and rev_norm in _normalize_district_name(d):
+                            if _normalize_district_name(d) == rev_norm:
                                 district = d
                                 break
+                        else:
+                            # partial match fallback
+                            for d in districts:
+                                if rev_norm and rev_norm in _normalize_district_name(d):
+                                    district = d
+                                    break
+                    if district:
+                        break
         # Fallback to manual mapping if reverse-geocode fails
         for loc, dist in LOCATION_DISTRICT_MAP.items():
             if loc in q:
