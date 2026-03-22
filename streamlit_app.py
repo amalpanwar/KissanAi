@@ -389,25 +389,7 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
     q = query.lower()
     q_tokens = re.findall(r"[a-z0-9]+", q)
     q_norm = " ".join(q_tokens)
-    # Match by full token to avoid "rice" in "price"
-    for name in commodity_list:
-        n_tokens = re.findall(r"[a-z0-9]+", name.lower())
-        if not n_tokens:
-            continue
-        if len(n_tokens) == 1:
-            if n_tokens[0] in q_tokens:
-                return name
-        else:
-            n_norm = " ".join(n_tokens)
-            if n_norm in q_norm:
-                return name
-    # Normalized match (remove spaces/punct)
-    qn = _normalize_text(q)
-    for name in commodity_list:
-        if _normalize_text(name) in qn:
-            return name
-    # Hinglish/Hindi aliases mapped to canonical names if present in catalog
-    # Alias map from json (key is English commodity name)
+    # Alias map from json (key is English commodity name) - highest priority
     aliases = load_commodity_aliases()
     for eng_name, alias_list in aliases.items():
         for alias in alias_list:
@@ -428,6 +410,23 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
                         if name.lower() == eng_name.lower():
                             return name
                     return eng_name.title()
+    # Match by full token to avoid "rice" in "price"
+    for name in commodity_list:
+        n_tokens = re.findall(r"[a-z0-9]+", name.lower())
+        if not n_tokens:
+            continue
+        if len(n_tokens) == 1:
+            if n_tokens[0] in q_tokens:
+                return name
+        else:
+            n_norm = " ".join(n_tokens)
+            if n_norm in q_norm:
+                return name
+    # Normalized match (remove spaces/punct)
+    qn = _normalize_text(q)
+    for name in commodity_list:
+        if _normalize_text(name) in qn:
+            return name
     return None
 
 LOCATION_DISTRICT_MAP = {
