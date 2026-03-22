@@ -275,10 +275,21 @@ def is_price_query(text: str) -> bool:
 
 def _best_match(query: str, options: list[str]) -> str | None:
     q = query.lower()
+    q_tokens = re.findall(r"[a-z0-9]+", q)
     matches = []
     for opt in options:
-        if opt and opt.lower() in q:
-            matches.append(opt)
+        if not opt:
+            continue
+        o = opt.lower()
+        o_tokens = re.findall(r"[a-z0-9]+", o)
+        if not o_tokens:
+            continue
+        if len(o_tokens) == 1:
+            if o_tokens[0] in q_tokens:
+                matches.append(opt)
+        else:
+            if " ".join(o_tokens) in " ".join(q_tokens):
+                matches.append(opt)
     if not matches:
         return None
     matches.sort(key=lambda x: len(x), reverse=True)
@@ -408,6 +419,8 @@ LOCATION_DISTRICT_MAP = {
     "baraut": "Baghpat",
     "बड़ौत": "Baghpat",
     "बरौत": "Baghpat",
+    "biral": "Baghpat",
+    "बिराल": "Baghpat",
 }
 
 
