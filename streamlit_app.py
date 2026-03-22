@@ -242,6 +242,40 @@ def _geocode_cached(name: str, admin: str | None = None) -> tuple[float, float, 
     return None
 
 
+def _reverse_geocode_cached(lat: float, lon: float) -> dict[str, str] | None:
+    cache_path = Path("data/processed/reverse_geocode_cache.json")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        cache = {}
+    key = f"{lat:.4f},{lon:.4f}"
+    if key in cache:
+        return cache[key]
+    params = urlencode({"format": "json", "lat": lat, "lon": lon, "zoom": 10, "addressdetails": 1})
+    url = f"https://nominatim.openstreetmap.org/reverse?{params}"
+    try:
+        with urlopen(url, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    address = payload.get("address", {}) if isinstance(payload, dict) else {}
+    out = {
+        "district": address.get("district")
+        or address.get("county")
+        or address.get("state_district")
+        or "",
+        "state": address.get("state") or "",
+        "village": address.get("village") or address.get("town") or address.get("city") or "",
+    }
+    cache[key] = out
+    try:
+        cache_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    return out
+
+
 def load_agmarknet_df() -> pd.DataFrame:
     if not AGMARKNET_CSV.exists():
         return pd.DataFrame()
@@ -294,6 +328,15 @@ def _best_match(query: str, options: list[str]) -> str | None:
         return None
     matches.sort(key=lambda x: len(x), reverse=True)
     return matches[0]
+
+
+def extract_place_from_query(query: str) -> str | None:
+    tokens = [t.strip(" ?!.,") for t in query.split() if t.strip()]
+    stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
+    for tok in tokens:
+        if tok.lower() not in stop and tok.lower() not in {"price", "rate", "mandi", "bhav"}:
+            return tok
+    return None
 
 
 HINDI_COMMODITY_MAP = {
@@ -458,6 +501,19 @@ def extract_selection_from_query(
             if loc in q:
                 district = dist
                 break
+        if not dist_match:
+            place = extract_place_from_query(query)
+            if place:
+                geo = _geocode_cached(place, "Uttar Pradesh")
+                if geo:
+                    plat, plon, _ = geo
+                    rev = _reverse_geocode_cached(plat, plon)
+                    if rev and rev.get("district"):
+                        # Match reverse-geocoded district to available options
+                        for d in districts:
+                            if d.lower() == rev["district"].lower():
+                                district = d
+                                break
         catalog = load_commodity_catalog()
         comm_match = resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
@@ -927,13 +983,7 @@ if user_query:
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
         nearest_market = None
         if not filtered.empty and "Market" in filtered.columns and filtered["Market"].notna().any():
-            place = None
-            tokens = [t.strip(" ?!.,") for t in user_query.split() if t.strip()]
-            stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
-            for tok in tokens:
-                if tok.lower() not in stop and tok.lower() not in {"price", "rate", "mandi", "bhav"}:
-                    place = tok
-                    break
+            place = extract_place_from_query(user_query)
             if place:
                 place_geo = _geocode_cached(place, f"{selected_district}, Uttar Pradesh")
                 if place_geo:
