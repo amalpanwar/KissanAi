@@ -339,31 +339,6 @@ def extract_place_from_query(query: str) -> str | None:
     return None
 
 
-HINDI_COMMODITY_MAP = {
-    "गेहूं": "Wheat",
-    "गेहूँ": "Wheat",
-    "गेहू": "Wheat",
-    "gehu": "Wheat",
-    "gehun": "Wheat",
-    "gehoo": "Wheat",
-    "धान": "Rice",
-    "चावल": "Rice",
-    "chawal": "Rice",
-    "आलू": "Potato",
-    "aloo": "Potato",
-    "गन्ना": "Sugarcane",
-    "ganna": "Sugarcane",
-    "सरसों": "Mustard",
-    "sarso": "Mustard",
-    "मक्का": "Maize",
-    "makka": "Maize",
-    "प्याज": "Onion",
-    "pyaz": "Onion",
-    "टमाटर": "Tomato",
-    "tamatar": "Tomato",
-}
-
-
 @st.cache_data(show_spinner=False)
 def load_commodity_catalog() -> list[str]:
     path = Path("data/raw/agmarknet_commodities.csv")
@@ -446,13 +421,6 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
                         if name.lower() == eng_name.lower():
                             return name
                     return eng_name.title()
-    # Fallback built-in aliases
-    for hi, en in HINDI_COMMODITY_MAP.items():
-        if hi in q:
-            for name in commodity_list:
-                if name.lower() == en.lower():
-                    return name
-            return en
     return None
 
 LOCATION_DISTRICT_MAP = {
