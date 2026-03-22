@@ -9,6 +9,12 @@
     "गेहूँ",
     "गेहूं"
   ],
+  "paddy(common)": [
+    "Paddy",
+    "Paddy(Common)",
+    "paddy",
+    "paddy(common)"
+  ],
   "rice": [
     "Rice",
     "chawal",
@@ -16,47 +22,11 @@
     "चावल",
     "धान"
   ],
-  "potato": [
-    "Potato",
-    "aloo",
-    "potato",
-    "आलू"
-  ],
-  "sugarcane": [
-    "Sugarcane",
-    "ganna",
-    "sugarcane",
-    "गन्ना"
-  ],
-  "mustard": [
-    "Mustard",
-    "mustard",
-    "sarso",
-    "सरसों"
-  ],
   "maize": [
     "Maize",
     "maize",
     "makka",
     "मक्का"
-  ],
-  "onion": [
-    "Onion",
-    "onion",
-    "pyaz",
-    "प्याज"
-  ],
-  "tomato": [
-    "Tomato",
-    "tamatar",
-    "tomato",
-    "टमाटर"
-  ],
-  "paddy(common)": [
-    "Paddy",
-    "Paddy(Common)",
-    "paddy",
-    "paddy(common)"
   ],
   "jowar(sorghum)": [
     "Jowar",
@@ -104,6 +74,12 @@
     "sesamum",
     "sesamum(sesame,gingelly,til)"
   ],
+  "mustard": [
+    "Mustard",
+    "mustard",
+    "sarso",
+    "सरसों"
+  ],
   "soyabean": [
     "Soyabean",
     "soyabean"
@@ -143,6 +119,18 @@
   "grapes": [
     "Grapes",
     "grapes"
+  ],
+  "onion": [
+    "Onion",
+    "onion",
+    "pyaz",
+    "प्याज"
+  ],
+  "potato": [
+    "Potato",
+    "aloo",
+    "potato",
+    "आलू"
   ],
   "garlic": [
     "Garlic",
@@ -343,6 +331,12 @@
     "Mousambi(Sweet Lime)",
     "mousambi",
     "mousambi(sweet lime)"
+  ],
+  "tomato": [
+    "Tomato",
+    "tamatar",
+    "tomato",
+    "टमाटर"
   ],
   "cluster beans": [
     "Cluster beans",
@@ -653,6 +647,12 @@
     "BetalLeaves",
     "betal leaves",
     "betalleaves"
+  ],
+  "sugarcane": [
+    "Sugarcane",
+    "ganna",
+    "sugarcane",
+    "गन्ना"
   ],
   "sweet potato": [
     "Sweet Potato",
@@ -1674,11 +1674,19 @@
   ],
   "fish": [
     "Fish",
-    "fish"
+    "fish",
+    "machhi",
+    "machhli",
+    "machli",
+    "मछली"
   ],
   "egg": [
     "Egg",
-    "egg"
+    "ande",
+    "andey",
+    "egg",
+    "अंडा",
+    "अंडे"
   ],
   "cock": [
     "Cock",
@@ -1831,7 +1839,6 @@
     "paddy(basmati)"
   ],
   "kutki": [
-    "Kutki",
     "kutki"
   ],
   "buttery": [
