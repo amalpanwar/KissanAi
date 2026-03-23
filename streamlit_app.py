@@ -379,7 +379,7 @@ def _normalize_text(val: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
-def load_commodity_aliases() -> dict[str, list[str]]:
+def load_commodity_aliases(mtime_ns: int) -> dict[str, list[str]]:
     path = Path("data/raw/commodity_aliases.json")
     if not path.exists():
         return {}
@@ -403,7 +403,9 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
     q_tokens = re.findall(r"[a-z0-9]+", q)
     q_norm = " ".join(q_tokens)
     # Alias map from json (key is English commodity name) - highest priority
-    aliases = load_commodity_aliases()
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
     for eng_name, alias_list in aliases.items():
         for alias in alias_list:
             a_tokens = re.findall(r"[a-z0-9]+", alias.lower())
@@ -442,20 +444,7 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
             return name
     return None
 
-LOCATION_DISTRICT_MAP = {
-    "doghat": "Baghpat",
-    "डोघाट": "Baghpat",
-    "दोगहट": "Baghpat",
-    "baraut": "Baghpat",
-    "बड़ौत": "Baghpat",
-    "बरौत": "Baghpat",
-    "biral": "Baghpat",
-    "बिराल": "Baghpat",
-    "sardhana": "Meerut",
-    "sardhane": "Meerut",
-    "सारधना": "Meerut",
-    "सरधाने": "Meerut",
-}
+LOCATION_DISTRICT_MAP = {}
 
 
 def extract_selection_from_query(
@@ -510,11 +499,6 @@ def extract_selection_from_query(
                                     break
                     if district:
                         break
-        # Fallback to manual mapping if reverse-geocode fails
-        for loc, dist in LOCATION_DISTRICT_MAP.items():
-            if loc in q:
-                district = dist
-                break
         catalog = load_commodity_catalog()
         comm_match = resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
