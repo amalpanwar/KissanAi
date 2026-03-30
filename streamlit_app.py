@@ -1033,6 +1033,9 @@ if user_query:
 
     if intent_price and not market_df.empty:
         if not selected_district:
+            st.session_state.pop("auto_chart", None)
+            st.session_state.pop("auto_forecast_table", None)
+            st.session_state.pop("auto_forecast_caption", None)
             final_answer = "कृपया स्थान या जिला स्पष्ट करें ताकि सही मंडी/जिला का भाव बताया जा सके।"
             st.session_state.chat_history.append(
                 {
@@ -1109,6 +1112,11 @@ if user_query:
             st.session_state["auto_chart"] = auto_chart
             st.session_state["auto_forecast_table"] = auto_table
             st.session_state["auto_forecast_caption"] = auto_caption
+            st.session_state["pending_selection"] = {
+                "state": selected_state,
+                "district": selected_district,
+                "commodity": selected_commodity,
+            }
         else:
             st.session_state.pop("auto_chart", None)
             st.session_state.pop("auto_forecast_table", None)
