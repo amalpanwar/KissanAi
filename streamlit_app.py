@@ -436,6 +436,37 @@ def load_commodity_aliases(mtime_ns: int) -> dict[str, list[str]]:
     return cleaned
 
 
+@st.cache_data(show_spinner=False)
+def load_location_corrections(mtime_ns: int) -> dict[str, str]:
+    path = Path("data/raw/location_corrections.json")
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned = {}
+    for k, v in data.items():
+        if isinstance(v, str):
+            cleaned[str(k).lower()] = v
+    return cleaned
+
+
+def save_location_correction(place: str, district: str) -> None:
+    path = Path("data/raw/location_corrections.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data[str(place).lower()] = district
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str | None:
     if not query or not commodity_list:
         return None
@@ -522,19 +553,25 @@ def extract_selection_from_query(
         place = extract_place_from_query(query)
         if place:
             place_provided = True
-            # Prefer forward geocode for villages/towns
-            fwd = _forward_geocode_cached(place, "Uttar Pradesh")
-            if fwd and fwd.get("district"):
-                rev_norm = _normalize_district_name(fwd["district"])
-                for d in districts:
-                    if _normalize_district_name(d) == rev_norm:
-                        district = d
-                        break
-                else:
+            corr_path = Path("data/raw/location_corrections.json")
+            corr_mtime = corr_path.stat().st_mtime_ns if corr_path.exists() else 0
+            corrections = load_location_corrections(corr_mtime)
+            if place.lower() in corrections:
+                district = corrections[place.lower()]
+            else:
+                # Prefer forward geocode for villages/towns
+                fwd = _forward_geocode_cached(place, "Uttar Pradesh")
+                if fwd and fwd.get("district"):
+                    rev_norm = _normalize_district_name(fwd["district"])
                     for d in districts:
-                        if rev_norm and rev_norm in _normalize_district_name(d):
+                        if _normalize_district_name(d) == rev_norm:
                             district = d
                             break
+                    else:
+                        for d in districts:
+                            if rev_norm and rev_norm in _normalize_district_name(d):
+                                district = d
+                                break
             # Fallback: reverse geocode via coordinates
             if not district:
                 for variant in _place_variants(place):
@@ -1167,6 +1204,18 @@ if user_query:
             with st.expander("Sources Used"):
                 for src in result.get("references", []):
                     st.write(f"- {src}")
+
+    # Correction form (location -> district)
+    if intent_price:
+        with st.expander("गलत जिला? सही करें"):
+            place_guess = extract_place_from_query(user_query) or ""
+            corr_place = st.text_input("स्थान (Village/Town)", value=place_guess, key="corr_place")
+            corr_district = st.text_input("सही जिला", value=selected_district, key="corr_district")
+            if st.button("सुधार सहेजें", use_container_width=True):
+                if corr_place and corr_district:
+                    save_location_correction(corr_place, corr_district)
+                    st.cache_data.clear()
+                    st.success("सुधार सहेजा गया। अगली बार यही जिला उपयोग होगा।")
 
     if intent_price:
         st.session_state["pending_selection"] = {
