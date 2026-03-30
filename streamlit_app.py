@@ -553,6 +553,11 @@ def extract_selection_from_query(
         place = extract_place_from_query(query)
         if place:
             place_provided = True
+            # First try fuzzy match against known districts (handles misspellings like Sharanpur)
+            if districts:
+                matches = difflib.get_close_matches(place, districts, n=1, cutoff=0.8)
+                if matches:
+                    district = matches[0]
             corr_path = Path("data/raw/location_corrections.json")
             corr_mtime = corr_path.stat().st_mtime_ns if corr_path.exists() else 0
             corrections = load_location_corrections(corr_mtime)
@@ -595,11 +600,6 @@ def extract_selection_from_query(
                             break
             if not district:
                 st.warning(f"स्थान '{place}' का जिला नहीं मिला। कृपया स्थान या जिला स्पष्ट करें।")
-                # Fuzzy match against district list as a last resort
-                if districts:
-                    matches = difflib.get_close_matches(place, districts, n=1, cutoff=0.8)
-                    if matches:
-                        district = matches[0]
         catalog = load_commodity_catalog()
         comm_match = resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
