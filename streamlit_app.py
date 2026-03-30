@@ -1073,7 +1073,10 @@ if user_query:
             st.session_state.pop("auto_chart", None)
             st.session_state.pop("auto_forecast_table", None)
             st.session_state.pop("auto_forecast_caption", None)
-            final_answer = "कृपया स्थान या जिला स्पष्ट करें ताकि सही मंडी/जिला का भाव बताया जा सके।"
+            final_answer = (
+                "स्थान का जिला ऑटो‑मैप नहीं हो पाया। "
+                "कृपया सही जिला बताएं, ताकि अगली बार अपने‑आप सही जिला चुना जा सके।"
+            )
             st.session_state.chat_history.append(
                 {
                     "role": "assistant",
@@ -1083,6 +1086,7 @@ if user_query:
             )
             with st.chat_message("assistant"):
                 st.write(final_answer)
+            st.session_state["need_location_correction"] = True
             st.stop()
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
         nearest_market = None
@@ -1205,12 +1209,12 @@ if user_query:
                 for src in result.get("references", []):
                     st.write(f"- {src}")
 
-    # Correction form (location -> district)
-    if intent_price:
-        with st.expander("गलत जिला? सही करें"):
+    # Correction form only when auto-mapping failed
+    if st.session_state.pop("need_location_correction", False):
+        with st.expander("सही जिला बताएं (एक बार)"):
             place_guess = extract_place_from_query(user_query) or ""
             corr_place = st.text_input("स्थान (Village/Town)", value=place_guess, key="corr_place")
-            corr_district = st.text_input("सही जिला", value=selected_district, key="corr_district")
+            corr_district = st.text_input("सही जिला", value="", key="corr_district")
             if st.button("सुधार सहेजें", use_container_width=True):
                 if corr_place and corr_district:
                     save_location_correction(corr_place, corr_district)
