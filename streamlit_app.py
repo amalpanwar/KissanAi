@@ -276,6 +276,45 @@ def _reverse_geocode_cached(lat: float, lon: float) -> dict[str, str] | None:
     return out
 
 
+def _forward_geocode_cached(place: str, region: str = "Uttar Pradesh") -> dict[str, str] | None:
+    if not place:
+        return None
+    cache_path = Path("data/processed/forward_geocode_cache.json")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        cache = {}
+    key = f"{place}|{region}".lower()
+    if key in cache:
+        return cache[key]
+    params = urlencode({"q": f"{place}, {region}, India", "format": "json", "limit": 1, "addressdetails": 1})
+    url = f"https://nominatim.openstreetmap.org/search?{params}"
+    try:
+        with urlopen(url, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    if not payload:
+        return None
+    top = payload[0]
+    addr = top.get("address", {}) if isinstance(top, dict) else {}
+    out = {
+        "district": addr.get("district")
+        or addr.get("county")
+        or addr.get("state_district")
+        or "",
+        "state": addr.get("state") or "",
+        "village": addr.get("village") or addr.get("town") or addr.get("city") or "",
+    }
+    cache[key] = out
+    try:
+        cache_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    return out
+
+
 def load_agmarknet_df() -> pd.DataFrame:
     if not AGMARKNET_CSV.exists():
         return pd.DataFrame()
@@ -499,6 +538,19 @@ def extract_selection_from_query(
                                     break
                     if district:
                         break
+            if not district:
+                fwd = _forward_geocode_cached(place, "Uttar Pradesh")
+                if fwd and fwd.get("district"):
+                    rev_norm = _normalize_district_name(fwd["district"])
+                    for d in districts:
+                        if _normalize_district_name(d) == rev_norm:
+                            district = d
+                            break
+                    else:
+                        for d in districts:
+                            if rev_norm and rev_norm in _normalize_district_name(d):
+                                district = d
+                                break
         catalog = load_commodity_catalog()
         comm_match = resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
