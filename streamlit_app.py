@@ -519,38 +519,42 @@ def extract_selection_from_query(
         # Prefer geocode + reverse-geocode if a place is present
         place = extract_place_from_query(query)
         if place:
-            for variant in _place_variants(place):
-                geo = _geocode_cached(variant, "Uttar Pradesh")
-                if geo:
-                    plat, plon, _ = geo
-                    rev = _reverse_geocode_cached(plat, plon)
-                    if rev and rev.get("district"):
-                        rev_norm = _normalize_district_name(rev["district"])
-                        for d in districts:
-                            if _normalize_district_name(d) == rev_norm:
-                                district = d
-                                break
-                        else:
-                            # partial match fallback
-                            for d in districts:
-                                if rev_norm and rev_norm in _normalize_district_name(d):
-                                    district = d
-                                    break
-                    if district:
+            # Prefer forward geocode for villages/towns
+            fwd = _forward_geocode_cached(place, "Uttar Pradesh")
+            if fwd and fwd.get("district"):
+                rev_norm = _normalize_district_name(fwd["district"])
+                for d in districts:
+                    if _normalize_district_name(d) == rev_norm:
+                        district = d
                         break
-            if not district:
-                fwd = _forward_geocode_cached(place, "Uttar Pradesh")
-                if fwd and fwd.get("district"):
-                    rev_norm = _normalize_district_name(fwd["district"])
+                else:
                     for d in districts:
-                        if _normalize_district_name(d) == rev_norm:
+                        if rev_norm and rev_norm in _normalize_district_name(d):
                             district = d
                             break
-                    else:
-                        for d in districts:
-                            if rev_norm and rev_norm in _normalize_district_name(d):
-                                district = d
-                                break
+            # Fallback: reverse geocode via coordinates
+            if not district:
+                for variant in _place_variants(place):
+                    geo = _geocode_cached(variant, "Uttar Pradesh")
+                    if geo:
+                        plat, plon, _ = geo
+                        rev = _reverse_geocode_cached(plat, plon)
+                        if rev and rev.get("district"):
+                            rev_norm = _normalize_district_name(rev["district"])
+                            for d in districts:
+                                if _normalize_district_name(d) == rev_norm:
+                                    district = d
+                                    break
+                            else:
+                                # partial match fallback
+                                for d in districts:
+                                    if rev_norm and rev_norm in _normalize_district_name(d):
+                                        district = d
+                                        break
+                        if district:
+                            break
+            if not district:
+                st.warning(f"स्थान '{place}' का जिला नहीं मिला। कृपया स्थान या जिला स्पष्ट करें।")
         catalog = load_commodity_catalog()
         comm_match = resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
@@ -1086,6 +1090,9 @@ if user_query:
             st.session_state.pop("auto_chart", None)
             st.session_state.pop("auto_forecast_table", None)
             st.session_state.pop("auto_forecast_caption", None)
+
+        # Force refresh to update sidebar chart for this query
+        st.rerun()
 
         market_list = []
         if "Market" in filtered.columns:
