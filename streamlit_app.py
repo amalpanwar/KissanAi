@@ -515,6 +515,40 @@ def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str |
             return name
     return None
 
+
+def extract_entities_ner(query: str, districts: list[str], commodities: list[str]) -> tuple[str | None, str | None]:
+    q = query.lower()
+    district = None
+    commodity = None
+
+    # District NER: exact token/phrase match
+    for d in sorted(districts, key=len, reverse=True):
+        if d and re.search(rf"(?<!\\w){re.escape(d.lower())}(?!\\w)", q):
+            district = d
+            break
+
+    # District fuzzy match (misspellings)
+    if not district and districts:
+        matches = difflib.get_close_matches(q, districts, n=1, cutoff=0.85)
+        if matches:
+            district = matches[0]
+
+    # Commodity NER: alias map
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
+    for eng_name, alias_list in aliases.items():
+        for alias in sorted(alias_list, key=len, reverse=True):
+            if alias and alias.lower() in q:
+                for name in commodities:
+                    if name.lower() == eng_name.lower():
+                        commodity = name
+                        return district, commodity
+                commodity = eng_name.title()
+                return district, commodity
+
+    return district, commodity
+
 LOCATION_DISTRICT_MAP = {}
 
 
@@ -546,7 +580,7 @@ def extract_selection_from_query(
         st_match = _best_match(q, states)
         if st_match:
             state = st_match
-        dist_match = _best_match(q, districts)
+        dist_match, comm_match_ner = extract_entities_ner(query, districts, commodities)
         if dist_match:
             district = dist_match
         # Prefer geocode + reverse-geocode if a place is present
@@ -601,7 +635,7 @@ def extract_selection_from_query(
             if not district:
                 st.warning(f"स्थान '{place}' का जिला नहीं मिला। कृपया स्थान या जिला स्पष्ट करें।")
         catalog = load_commodity_catalog()
-        comm_match = resolve_commodity_from_query(query, catalog or commodities)
+        comm_match = comm_match_ner or resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
             commodity = comm_match
         else:

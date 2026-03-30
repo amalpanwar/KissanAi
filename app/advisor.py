@@ -60,8 +60,11 @@ class RAGAdvisor:
                 }
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
         if self._looks_like_location_only(farmer_question):
-            weather = get_current_weather_hindi(farmer_question.strip())
-            return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
+            return {
+                "answer": "कृपया बताएं कि आप मौसम पूछ रहे हैं या भाव/कीमत?",
+                "references": [],
+                "retrieved": [],
+            }
         if self._is_crop_choice_intent(normalized_question):
             structured = self._structured_crop_recommendation(context_part, normalized_question)
             if structured:
