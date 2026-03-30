@@ -13,6 +13,7 @@ import streamlit as st
 import json
 from urllib.parse import urlencode
 from urllib.request import urlopen
+import difflib
 
 from app.advisor import AdvisorConfig, RAGAdvisor
 from app.config import load_config
@@ -497,6 +498,7 @@ def extract_selection_from_query(
     state = fallback_state
     district = fallback_district
     commodity = fallback_commodity
+    place_provided = False
 
     if not df.empty:
         states = sorted(df["State"].dropna().astype(str).unique().tolist()) if "State" in df.columns else []
@@ -519,6 +521,7 @@ def extract_selection_from_query(
         # Prefer geocode + reverse-geocode if a place is present
         place = extract_place_from_query(query)
         if place:
+            place_provided = True
             # Prefer forward geocode for villages/towns
             fwd = _forward_geocode_cached(place, "Uttar Pradesh")
             if fwd and fwd.get("district"):
@@ -555,6 +558,11 @@ def extract_selection_from_query(
                             break
             if not district:
                 st.warning(f"स्थान '{place}' का जिला नहीं मिला। कृपया स्थान या जिला स्पष्ट करें।")
+                # Fuzzy match against district list as a last resort
+                if districts:
+                    matches = difflib.get_close_matches(place, districts, n=1, cutoff=0.8)
+                    if matches:
+                        district = matches[0]
         catalog = load_commodity_catalog()
         comm_match = resolve_commodity_from_query(query, catalog or commodities)
         if comm_match:
@@ -564,6 +572,9 @@ def extract_selection_from_query(
             if comm_match:
                 commodity = comm_match
 
+    # If a place was provided but district couldn't be resolved, avoid defaulting.
+    if place_provided and not district:
+        district = ""
     return state, district, commodity
 
 
@@ -1021,6 +1032,18 @@ if user_query:
     )
 
     if intent_price and not market_df.empty:
+        if not selected_district:
+            final_answer = "कृपया स्थान या जिला स्पष्ट करें ताकि सही मंडी/जिला का भाव बताया जा सके।"
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "text": final_answer,
+                    "references": [],
+                }
+            )
+            with st.chat_message("assistant"):
+                st.write(final_answer)
+            st.stop()
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
         nearest_market = None
         if not filtered.empty and "Market" in filtered.columns and filtered["Market"].notna().any():
