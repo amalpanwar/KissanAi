@@ -1035,6 +1035,11 @@ st.markdown("Ask in Hindi or English. The assistant will respond in Hindi.")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "last_price_response" in st.session_state:
+    last_resp = st.session_state.pop("last_price_response")
+    st.session_state.chat_history.append(
+        {"role": "assistant", "text": last_resp, "references": []}
+    )
 
 for item in st.session_state.chat_history:
     with st.chat_message(item["role"]):
@@ -1158,6 +1163,7 @@ if user_query:
                 "district": selected_district,
                 "commodity": selected_commodity,
             }
+            st.session_state["last_price_response"] = market_answer
         else:
             st.session_state.pop("auto_chart", None)
             st.session_state.pop("auto_forecast_table", None)
