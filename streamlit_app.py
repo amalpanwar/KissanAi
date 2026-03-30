@@ -1154,24 +1154,6 @@ if user_query:
             auto_chart = None
             auto_table = None
 
-        if auto_chart is not None and auto_table is not None:
-            st.session_state["auto_chart"] = auto_chart
-            st.session_state["auto_forecast_table"] = auto_table
-            st.session_state["auto_forecast_caption"] = auto_caption
-            st.session_state["pending_selection"] = {
-                "state": selected_state,
-                "district": selected_district,
-                "commodity": selected_commodity,
-            }
-            st.session_state["last_price_response"] = market_answer
-        else:
-            st.session_state.pop("auto_chart", None)
-            st.session_state.pop("auto_forecast_table", None)
-            st.session_state.pop("auto_forecast_caption", None)
-
-        # Force refresh to update sidebar chart for this query
-        st.rerun()
-
         market_list = []
         if "Market" in filtered.columns:
             market_list = (
@@ -1193,6 +1175,24 @@ if user_query:
             market_answer += (
                 f"- निकटतम मंडी (लगभग): {nearest_market[1]} ({nearest_market[0]:.1f} km)\n"
             )
+
+        if auto_chart is not None and auto_table is not None:
+            st.session_state["auto_chart"] = auto_chart
+            st.session_state["auto_forecast_table"] = auto_table
+            st.session_state["auto_forecast_caption"] = auto_caption
+            st.session_state["pending_selection"] = {
+                "state": selected_state,
+                "district": selected_district,
+                "commodity": selected_commodity,
+            }
+            st.session_state["last_price_response"] = market_answer
+        else:
+            st.session_state.pop("auto_chart", None)
+            st.session_state.pop("auto_forecast_table", None)
+            st.session_state.pop("auto_forecast_caption", None)
+
+        # Force refresh to update sidebar chart for this query
+        st.rerun()
         # Skip RAG for price intent to avoid irrelevant filler.
         final_answer = market_answer
     else:
