@@ -512,6 +512,26 @@ def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[st
             district = str(pick.get("district", "")).strip()
             state = str(pick.get("state", "")).strip()
             return (district or None), (state or None)
+    # Fallback: fuzzy match (handles minor spelling errors like Kurava->Kurawa)
+    try:
+        import difflib
+
+        pool = lookup
+        if "state" in lookup.columns:
+            up = lookup[lookup["state"].str.lower() == "uttar pradesh"]
+            if not up.empty:
+                pool = up
+        norms = pool["place_norm"].dropna().astype(str).unique().tolist()
+        matches = difflib.get_close_matches(norm, norms, n=1, cutoff=0.8)
+        if matches:
+            m = pool[pool["place_norm"] == matches[0]]
+            if not m.empty:
+                pick = m.iloc[0]
+                district = str(pick.get("district", "")).strip()
+                state = str(pick.get("state", "")).strip()
+                return (district or None), (state or None)
+    except Exception:
+        pass
     return None, None
 
 

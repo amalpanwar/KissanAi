@@ -183,6 +183,21 @@ class RAGAdvisor:
                 state = (row.get("state") or "").strip()
                 if state.lower() == "uttar pradesh" or not state:
                     return district or None
+        # Fallback: fuzzy match for minor spelling errors
+        try:
+            import difflib
+
+            up_rows = [r for r in rows if (r.get("state") or "").lower() == "uttar pradesh"]
+            pool = up_rows if up_rows else rows
+            norms = list({(r.get("place_norm") or "").strip() for r in pool if r.get("place_norm")})
+            matches = difflib.get_close_matches(norm, norms, n=1, cutoff=0.8)
+            if matches:
+                for row in pool:
+                    if (row.get("place_norm") or "").strip() == matches[0]:
+                        district = (row.get("district") or "").strip()
+                        return district or None
+        except Exception:
+            pass
         return None
 
     def _time_based_greeting(self) -> str:
