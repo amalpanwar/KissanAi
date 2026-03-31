@@ -474,6 +474,22 @@ def _normalize_text(val: str) -> str:
 
 
 @st.cache_data(show_spinner=False)
+def load_location_lookup(mtime_ns: int) -> pd.DataFrame:
+    _ = mtime_ns
+    path = Path("data/processed/location_lookup.csv")
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return pd.DataFrame()
+    for col in ["place", "place_norm", "sub_district", "district", "state"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).fillna("")
+    return df
+
+
+@st.cache_data(show_spinner=False)
 def load_commodity_aliases(mtime_ns: int) -> dict[str, list[str]]:
     path = Path("data/raw/commodity_aliases.json")
     if not path.exists():
@@ -653,35 +669,48 @@ def extract_selection_from_query(
             if place.lower() in corrections:
                 district = corrections[place.lower()]
             else:
-                # Prefer forward geocode for villages/towns (use best candidate)
-                candidates = _forward_geocode_cached(place, "Uttar Pradesh")
-                if candidates:
-                    # Choose candidate whose district matches our known list; tie-breaker by importance.
-                    best = None
-                    for cand in candidates:
-                        rev_norm = _normalize_district_name(cand.get("district", ""))
-                        if not rev_norm:
-                            continue
-                        match = None
-                        for d in districts:
-                            if _normalize_district_name(d) == rev_norm:
-                                match = d
-                                break
-                        if not match:
+                # Prefer local LGD lookup (fast, deterministic)
+                lookup_path = Path("data/processed/location_lookup.csv")
+                lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+                lookup = load_location_lookup(lookup_mtime)
+                if not lookup.empty:
+                    norm_place = _normalize_text(place)
+                    matches = lookup[lookup["place_norm"] == norm_place]
+                    if not matches.empty:
+                        up = matches[matches["state"].str.lower() == "uttar pradesh"]
+                        pick = up.iloc[0] if not up.empty else matches.iloc[0]
+                        if pick.get("district"):
+                            district = str(pick["district"])
+                # If LGD not found, try forward geocode
+                if not district:
+                    candidates = _forward_geocode_cached(place, "Uttar Pradesh")
+                    if candidates:
+                        # Choose candidate whose district matches our known list; tie-breaker by importance.
+                        best = None
+                        for cand in candidates:
+                            rev_norm = _normalize_district_name(cand.get("district", ""))
+                            if not rev_norm:
+                                continue
+                            match = None
                             for d in districts:
-                                if rev_norm in _normalize_district_name(d):
+                                if _normalize_district_name(d) == rev_norm:
                                     match = d
                                     break
-                        if not match:
-                            continue
-                        try:
-                            imp = float(cand.get("importance", "0") or 0.0)
-                        except Exception:
-                            imp = 0.0
-                        if best is None or imp > best[0]:
-                            best = (imp, match)
-                    if best:
-                        district = best[1]
+                            if not match:
+                                for d in districts:
+                                    if rev_norm in _normalize_district_name(d):
+                                        match = d
+                                        break
+                            if not match:
+                                continue
+                            try:
+                                imp = float(cand.get("importance", "0") or 0.0)
+                            except Exception:
+                                imp = 0.0
+                            if best is None or imp > best[0]:
+                                best = (imp, match)
+                        if best:
+                            district = best[1]
             # Fallback: reverse geocode via coordinates
             if not district:
                 for variant in _place_variants(place):
