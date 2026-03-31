@@ -378,17 +378,67 @@ def _normalize_district_name(name: str) -> str:
 
 
 def extract_place_from_query(query: str) -> str | None:
-    # Prefer token immediately before "me/में/में" or "in"
+    # Robust place extraction:
+    # 1) Tokenize.
+    # 2) Remove common stopwords + commodity/price words.
+    # 3) Return remaining phrase as the place name.
     tokens = [t.strip(" ?!.,") for t in query.split() if t.strip()]
-    for i, tok in enumerate(tokens):
-        t = tok.lower()
-        if t in {"me", "mein", "में", "in"} and i > 0:
-            return tokens[i - 1]
-    stop = {"aaj", "aj", "ka", "ki", "ke", "me", "mein", "में", "kesa", "kaisa", "hai", "h"}
+    if not tokens:
+        return None
+
+    stop = {
+        "aaj",
+        "aj",
+        "ka",
+        "ki",
+        "ke",
+        "ko",
+        "se",
+        "par",
+        "me",
+        "mein",
+        "में",
+        "kesa",
+        "kaisa",
+        "hai",
+        "h",
+        "price",
+        "rate",
+        "mandi",
+        "bhav",
+        "daam",
+        "dam",
+        "भाव",
+        "कीमत",
+        "मंडी",
+        "मौसम",
+        "weather",
+    }
+
+    # Remove commodity tokens using alias list
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
+    commodity_tokens = set()
+    for alias_list in aliases.values():
+        for alias in alias_list:
+            for t in re.findall(r"[a-z0-9]+", alias.lower()):
+                commodity_tokens.add(t)
+
+    filtered = []
     for tok in tokens:
-        if tok.lower() not in stop and tok.lower() not in {"price", "rate", "mandi", "bhav"}:
-            return tok
-    return None
+        t = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]+", "", tok).lower()
+        if not t:
+            continue
+        if t in stop:
+            continue
+        if t in commodity_tokens:
+            continue
+        filtered.append(tok)
+
+    if not filtered:
+        return None
+    return " ".join(filtered)
 
 
 def _place_variants(place: str) -> list[str]:
