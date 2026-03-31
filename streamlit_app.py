@@ -443,6 +443,15 @@ def extract_place_from_query(query: str) -> str | None:
 
     if not filtered:
         return None
+    # Trim trailing stopwords or single-letter tokens (e.g., "k", "m")
+    while filtered:
+        last = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]+", "", filtered[-1]).lower()
+        if not last or last in stop or len(re.sub(r"[^a-z0-9]+", "", last)) <= 1:
+            filtered.pop()
+        else:
+            break
+    if not filtered:
+        return None
     return " ".join(filtered)
 
 
@@ -494,6 +503,15 @@ def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[st
         district = str(pick.get("district", "")).strip()
         state = str(pick.get("state", "")).strip()
         return (district or None), (state or None)
+    # Fallback: contains match for place names like "Doghat Rural"
+    if "place" in lookup.columns:
+        contains = lookup[lookup["place"].astype(str).map(_normalize_text).str.contains(norm, na=False)]
+        if not contains.empty:
+            up = contains[contains["state"].str.lower() == "uttar pradesh"] if "state" in contains.columns else contains
+            pick = up.iloc[0] if not up.empty else contains.iloc[0]
+            district = str(pick.get("district", "")).strip()
+            state = str(pick.get("state", "")).strip()
+            return (district or None), (state or None)
     return None, None
 
 

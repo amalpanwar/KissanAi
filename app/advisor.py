@@ -174,6 +174,15 @@ class RAGAdvisor:
                     state = (row.get("state") or "").strip()
                     if state.lower() == "uttar pradesh" or not state:
                         return district or None
+        # Fallback: contains match (e.g., "Doghat Rural")
+        for row in rows:
+            place_val = (row.get("place") or "").strip()
+            place_norm = re.sub(r"[^a-z0-9]+", "", place_val.lower())
+            if norm and norm in place_norm:
+                district = (row.get("district") or "").strip()
+                state = (row.get("state") or "").strip()
+                if state.lower() == "uttar pradesh" or not state:
+                    return district or None
         return None
 
     def _time_based_greeting(self) -> str:
