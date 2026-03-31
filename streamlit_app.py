@@ -809,9 +809,12 @@ if not ok:
 # Apply pending sidebar selection from last query (if any)
 pending = st.session_state.pop("pending_selection", None)
 if isinstance(pending, dict):
-    st.session_state["fc_state"] = pending.get("state", st.session_state.get("fc_state", "Uttar Pradesh"))
-    st.session_state["fc_district"] = pending.get("district", st.session_state.get("fc_district", "Meerut"))
-    st.session_state["fc_commodity_override"] = pending.get("commodity", "")
+    if "fc_state" not in st.session_state:
+        st.session_state["fc_state"] = pending.get("state", "Uttar Pradesh")
+    if "fc_district" not in st.session_state:
+        st.session_state["fc_district"] = pending.get("district", "Meerut")
+    if "fc_commodity_override" not in st.session_state:
+        st.session_state["fc_commodity_override"] = pending.get("commodity", "")
 
 with st.sidebar:
     st.subheader("Farmer Context")
