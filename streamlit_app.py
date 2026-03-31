@@ -277,9 +277,9 @@ def _reverse_geocode_cached(lat: float, lon: float) -> dict[str, str] | None:
     return out
 
 
-def _forward_geocode_cached(place: str, region: str = "Uttar Pradesh") -> dict[str, str] | None:
+def _forward_geocode_cached(place: str, region: str = "Uttar Pradesh") -> list[dict[str, str]]:
     if not place:
-        return None
+        return []
     cache_path = Path("data/processed/forward_geocode_cache.json")
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -289,31 +289,36 @@ def _forward_geocode_cached(place: str, region: str = "Uttar Pradesh") -> dict[s
     key = f"{place}|{region}".lower()
     if key in cache:
         return cache[key]
-    params = urlencode({"q": f"{place}, {region}, India", "format": "json", "limit": 1, "addressdetails": 1})
+    params = urlencode({"q": f"{place}, {region}, India", "format": "json", "limit": 5, "addressdetails": 1})
     url = f"https://nominatim.openstreetmap.org/search?{params}"
     try:
         with urlopen(url, timeout=8) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception:
-        return None
+        return []
     if not payload:
-        return None
-    top = payload[0]
-    addr = top.get("address", {}) if isinstance(top, dict) else {}
-    out = {
-        "district": addr.get("district")
-        or addr.get("county")
-        or addr.get("state_district")
-        or "",
-        "state": addr.get("state") or "",
-        "village": addr.get("village") or addr.get("town") or addr.get("city") or "",
-    }
-    cache[key] = out
+        return []
+    results: list[dict[str, str]] = []
+    for top in payload:
+        addr = top.get("address", {}) if isinstance(top, dict) else {}
+        out = {
+            "district": addr.get("district")
+            or addr.get("county")
+            or addr.get("state_district")
+            or "",
+            "state": addr.get("state") or "",
+            "village": addr.get("village") or addr.get("town") or addr.get("city") or "",
+            "lat": str(top.get("lat", "")),
+            "lon": str(top.get("lon", "")),
+            "importance": str(top.get("importance", "")),
+        }
+        results.append(out)
+    cache[key] = results
     try:
         cache_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
-    return out
+    return results
 
 
 def load_agmarknet_df() -> pd.DataFrame:
@@ -648,19 +653,35 @@ def extract_selection_from_query(
             if place.lower() in corrections:
                 district = corrections[place.lower()]
             else:
-                # Prefer forward geocode for villages/towns
-                fwd = _forward_geocode_cached(place, "Uttar Pradesh")
-                if fwd and fwd.get("district"):
-                    rev_norm = _normalize_district_name(fwd["district"])
-                    for d in districts:
-                        if _normalize_district_name(d) == rev_norm:
-                            district = d
-                            break
-                    else:
+                # Prefer forward geocode for villages/towns (use best candidate)
+                candidates = _forward_geocode_cached(place, "Uttar Pradesh")
+                if candidates:
+                    # Choose candidate whose district matches our known list; tie-breaker by importance.
+                    best = None
+                    for cand in candidates:
+                        rev_norm = _normalize_district_name(cand.get("district", ""))
+                        if not rev_norm:
+                            continue
+                        match = None
                         for d in districts:
-                            if rev_norm and rev_norm in _normalize_district_name(d):
-                                district = d
+                            if _normalize_district_name(d) == rev_norm:
+                                match = d
                                 break
+                        if not match:
+                            for d in districts:
+                                if rev_norm in _normalize_district_name(d):
+                                    match = d
+                                    break
+                        if not match:
+                            continue
+                        try:
+                            imp = float(cand.get("importance", "0") or 0.0)
+                        except Exception:
+                            imp = 0.0
+                        if best is None or imp > best[0]:
+                            best = (imp, match)
+                    if best:
+                        district = best[1]
             # Fallback: reverse geocode via coordinates
             if not district:
                 for variant in _place_variants(place):
