@@ -291,7 +291,7 @@ class RAGAdvisor:
             return None
         q = question.strip()
         # Fast path: strip common weather words and stopwords, keep remaining tokens as location.
-        if "mausam" in q.lower() or "मौसम" in q:
+        if "mausam" in q.lower() or "मौसम" in q or "weather" in q.lower():
             drop = {
                 "aaj",
                 "aj",
@@ -310,6 +310,7 @@ class RAGAdvisor:
                 "mosam",
                 "mausm",
                 "मौसम",
+                "weather",
                 "ka",
                 "?",
                 "kesa?",
@@ -317,13 +318,16 @@ class RAGAdvisor:
                 "mausam?",
                 "mausam.",
                 "mausam,",
+                "weather?",
+                "weather.",
+                "weather,",
             }
             tokens = [t.strip(" ?!.,") for t in re.split(r"\s+", q) if t.strip()]
             kept = [t for t in tokens if t.strip(" ?!.,").lower() not in drop]
             if kept:
                 return " ".join(kept)
         q_lower = question.lower()
-        if "mausam" in q_lower or "मौसम" in question:
+        if "mausam" in q_lower or "मौसम" in question or "weather" in q_lower:
             tokens = [t.strip(" ?!.,") for t in re.split(r"\s+", question) if t.strip()]
             stop = {
                 "aaj",
@@ -338,17 +342,21 @@ class RAGAdvisor:
                 "kaisa",
                 "hai",
                 "h",
+                "weather",
             }
             for tok in tokens:
                 t = tok.lower()
-                if t in stop or t in {"mausam", "maussam", "mosam", "mausm", "मौसम"}:
+                if t in stop or t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather"}:
                     continue
                 return tok
         # Try explicit location phrases first
         patterns = [
             r"(?:weather in|mausam in|maussam in|mosam in)\s+([a-zA-Z\\s]+)",
+            r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+weather",
             r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+(?:mausam|maussam|mosam|mausm|मौसम)",
+            r"(?:aaj|aj)?\\s*(?:ka\\s+)?weather\\s+([a-zA-Z\\s]+?)\\s+(?:me|mein|में)",
             r"(?:aaj|aj)?\\s*(?:ka\\s+)?(?:mausam|maussam|mosam|mausm|मौसम)\\s+([a-zA-Z\\s]+?)\\s+(?:me|mein|में)",
+            r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+(?:ka\\s+)?weather",
             r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+(?:ka\\s+)?(?:mausam|maussam|mosam|mausm|मौसम)",
             r"([\\u0900-\\u097F\\s]+?)\\s+का\\s+मौसम",
             r"([\\u0900-\\u097F\\s]+?)\\s+की\\s+मौसम",
@@ -378,21 +386,21 @@ class RAGAdvisor:
         }
         for idx, tok in enumerate(tokens):
             t = tok.strip(" ?!.," ).lower()
-            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम"} and idx + 1 < len(tokens):
+            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather"} and idx + 1 < len(tokens):
                 cand = tokens[idx + 1].strip(" ?!.,")
                 if cand and cand.lower() not in stop:
                     return cand
         # Fallback: token before 'mausam/मौसम'
         for idx, tok in enumerate(tokens):
             t = tok.strip(" ?!.," ).lower()
-            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम"} and idx - 1 >= 0:
+            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather"} and idx - 1 >= 0:
                 cand = tokens[idx - 1].strip(" ?!.,")
                 if cand and cand.lower() not in stop:
                     return cand
             # Handle "X ka mausam" -> pick token before ka/ki/ke
             if t in {"ka", "ki", "ke"} and idx + 1 < len(tokens):
                 nxt = tokens[idx + 1].strip(" ?!.,").lower()
-                if nxt in {"mausam", "maussam", "mosam", "mausm", "मौसम"} and idx - 1 >= 0:
+                if nxt in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather"} and idx - 1 >= 0:
                     cand = tokens[idx - 1].strip(" ?!.,")
                     if cand and cand.lower() not in stop:
                         return cand

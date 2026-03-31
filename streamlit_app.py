@@ -1255,6 +1255,29 @@ if user_query:
         st.write(user_query)
 
     advisor = get_advisor()
+    # If the previous response asked only for a weather location, treat this input as the location.
+    if st.session_state.pop("pending_weather_location", False):
+        place = user_query.strip()
+        lookup_path = Path("data/processed/location_lookup.csv")
+        lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+        lookup = load_location_lookup(lookup_mtime)
+        district, _state = _lookup_district_from_location(place, lookup)
+        weather_place = place if not district else f"{place}, {district}"
+        weather = get_current_weather_hindi(weather_place)
+        if not weather:
+            weather = get_current_weather_hindi(f"{weather_place}, Uttar Pradesh")
+        final_answer = (
+            weather
+            if weather
+            else "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+        )
+        st.session_state.chat_history.append(
+            {"role": "assistant", "text": final_answer, "references": ["Open-Meteo API"]}
+        )
+        with st.chat_message("assistant"):
+            st.write(final_answer)
+        st.stop()
+
     composed_query = (
         f"जिला: {district} | मौसम: {season} | पसंदीदा फसल: {preferred_crop or 'कोई नहीं'} | "
         f"किसान का प्रश्न: {user_query.strip()}"
@@ -1396,6 +1419,8 @@ if user_query:
         with st.spinner("Generating recommendation..."):
             result = advisor.answer(composed_query)
         final_answer = result["answer"]
+        if final_answer.startswith("कृपया मौसम के लिए स्थान बताएं"):
+            st.session_state["pending_weather_location"] = True
 
     st.session_state.chat_history.append(
         {
