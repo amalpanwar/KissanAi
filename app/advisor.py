@@ -47,7 +47,7 @@ class RAGAdvisor:
             )
             if not place:
                 return {
-                    "answer": "कृपया मौसम के लिए स्थान बताएं (जैसे: बड़ौत/डोघाट/मेरठ)।",
+                    "answer": "मौसम के लिए स्थान नहीं मिला। कृपया केवल स्थान लिखें।",
                     "references": [],
                     "retrieved": [],
                 }
@@ -404,6 +404,33 @@ class RAGAdvisor:
                     cand = tokens[idx - 1].strip(" ?!.,")
                     if cand and cand.lower() not in stop:
                         return cand
+        # Last resort: first non-stop token
+        tokens = [t.strip(" ?!.," ) for t in re.split(r"\s+", question) if t.strip()]
+        stop = {
+            "aaj",
+            "aj",
+            "ka",
+            "ki",
+            "ke",
+            "me",
+            "mein",
+            "में",
+            "kesa",
+            "kaisa",
+            "hai",
+            "h",
+            "mausam",
+            "maussam",
+            "mosam",
+            "mausm",
+            "मौसम",
+            "weather",
+        }
+        for tok in tokens:
+            t = tok.lower()
+            if t in stop:
+                continue
+            return tok
         return resolve_location_name(question)
 
     def _looks_like_location_only(self, question: str) -> bool:
