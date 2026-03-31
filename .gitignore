@@ -7,3 +7,6 @@ data/processed/*.db
 data/processed/*.npz
 data/processed/*.csv
 data/raw/live/*.csv
+Location/
+logs/
+data/processed/*_cache.json

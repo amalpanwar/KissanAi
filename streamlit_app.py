@@ -473,6 +473,30 @@ def _normalize_text(val: str) -> str:
     return "".join(ch for ch in val.lower() if ch.isalnum())
 
 
+def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[str | None, str | None]:
+    if not place or lookup.empty:
+        return None, None
+    norm = _normalize_text(place)
+    if not norm:
+        return None, None
+    # Priority: village/place -> sub-district -> district
+    for col in ["place_norm", "sub_district", "district"]:
+        if col not in lookup.columns:
+            continue
+        if col == "place_norm":
+            matches = lookup[lookup[col] == norm]
+        else:
+            matches = lookup[lookup[col].astype(str).map(_normalize_text) == norm]
+        if matches.empty:
+            continue
+        up = matches[matches["state"].str.lower() == "uttar pradesh"] if "state" in matches.columns else matches
+        pick = up.iloc[0] if not up.empty else matches.iloc[0]
+        district = str(pick.get("district", "")).strip()
+        state = str(pick.get("state", "")).strip()
+        return (district or None), (state or None)
+    return None, None
+
+
 @st.cache_data(show_spinner=False)
 def load_location_lookup(mtime_ns: int) -> pd.DataFrame:
     _ = mtime_ns
@@ -674,13 +698,11 @@ def extract_selection_from_query(
                 lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
                 lookup = load_location_lookup(lookup_mtime)
                 if not lookup.empty:
-                    norm_place = _normalize_text(place)
-                    matches = lookup[lookup["place_norm"] == norm_place]
-                    if not matches.empty:
-                        up = matches[matches["state"].str.lower() == "uttar pradesh"]
-                        pick = up.iloc[0] if not up.empty else matches.iloc[0]
-                        if pick.get("district"):
-                            district = str(pick["district"])
+                    resolved_district, resolved_state = _lookup_district_from_location(place, lookup)
+                    if resolved_district:
+                        district = resolved_district
+                    if resolved_state and resolved_state.lower() != state.lower():
+                        state = resolved_state
                 # If LGD not found, try forward geocode
                 if not district:
                     candidates = _forward_geocode_cached(place, "Uttar Pradesh")

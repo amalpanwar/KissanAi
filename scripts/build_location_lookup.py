@@ -6,6 +6,22 @@ from pathlib import Path
 import pandas as pd
 
 
+def _read_excel(path: Path) -> pd.DataFrame:
+    try:
+        return pd.read_excel(path, engine="calamine")
+    except ImportError:
+        # Fallback if calamine isn't installed in the active venv.
+        try:
+            return pd.read_excel(path, engine="openpyxl")
+        except ImportError as exc:
+            raise SystemExit(
+                "Missing Excel reader engine. Install one in the active venv:\n"
+                "  python -m pip install python-calamine\n"
+                "or\n"
+                "  python -m pip install openpyxl"
+            ) from exc
+
+
 def _find_col(cols: list[str], needle: str) -> str | None:
     for c in cols:
         if needle in c.lower():
@@ -13,23 +29,41 @@ def _find_col(cols: list[str], needle: str) -> str | None:
     return None
 
 
+def _find_any_col(cols: list[str], needles: list[str]) -> str | None:
+    for n in needles:
+        c = _find_col(cols, n)
+        if c:
+            return c
+    return None
+
+
 def _parse_hierarchy(text: str) -> tuple[str, str, str]:
     if not text:
         return "", "", ""
-    parts = [p.strip() for p in str(text).split("/") if p.strip()]
+    raw = str(text)
+    parts = [p.strip() for p in raw.split("/") if p.strip()]
     sub_d, dist, state = "", "", ""
-    for p in parts:
-        m = re.match(r"(.+?)\\s*\\((.+?)\\)", p)
-        if not m:
-            continue
-        name = m.group(1).strip()
-        kind = m.group(2).strip().lower()
-        if "sub" in kind:
+    # Prefer full-string extraction (handles extra slashes/spaces reliably).
+    pairs = re.findall(r"([^/]+?)\\s*\\(([^)]+)\\)", raw)
+    if not pairs:
+        pairs = [(p.split("(")[0].strip(), p.split("(")[-1].rstrip(")")) for p in parts if "(" in p]
+    for name, kind in pairs:
+        name = name.strip()
+        kind_norm = re.sub(r"[^a-z]+", "", kind.lower())
+        if "subdistrict" in kind_norm:
             sub_d = name
-        elif "district" in kind:
+        elif "district" in kind_norm:
             dist = name
-        elif "state" in kind:
+        elif "state" in kind_norm:
             state = name
+    # Fallback: if no labeled pairs were found, assume ordered segments.
+    if not any([sub_d, dist, state]) and parts:
+        if len(parts) >= 1:
+            sub_d = parts[0].split("(")[0].strip()
+        if len(parts) >= 2:
+            dist = parts[1].split("(")[0].strip()
+        if len(parts) >= 3:
+            state = parts[2].split("(")[0].strip()
     return sub_d, dist, state
 
 
@@ -39,20 +73,40 @@ def _normalize(s: str) -> str:
 
 def main() -> None:
     root = Path("Location")
-    files = sorted(root.glob("*.xlsx"))
+    files = [f for f in sorted(root.glob("*.xlsx")) if not f.name.startswith("~$")]
     if not files:
         raise SystemExit("No .xlsx files found in Location/")
 
     rows = []
     for f in files:
-        df = pd.read_excel(f, engine="calamine")
+        df = _read_excel(f)
         df.columns = [str(c).strip() for c in df.columns]
         cols = list(df.columns)
-        hierarchy_col = _find_col(cols, "hierarchy")
-        name_col = _find_col(cols, "name")
+        hierarchy_col = _find_any_col(cols, ["hierarchy"])
+        name_col = _find_any_col(
+            cols,
+            [
+                "name",
+                "village",
+                "town",
+                "local body",
+                "place",
+                "location",
+                "urban",
+                "rural",
+            ],
+        )
+        sub_col = _find_any_col(cols, ["sub-district", "sub district", "subdistrict", "tehsil", "taluka"])
+        dist_col = _find_any_col(cols, ["district"])
+        state_col = _find_any_col(cols, ["state"])
         for _, row in df.iterrows():
             hierarchy = str(row.get(hierarchy_col, "")).strip() if hierarchy_col else ""
-            sub_d, dist, state = _parse_hierarchy(hierarchy)
+            if hierarchy:
+                sub_d, dist, state = _parse_hierarchy(hierarchy)
+            else:
+                sub_d = str(row.get(sub_col, "")).strip() if sub_col else ""
+                dist = str(row.get(dist_col, "")).strip() if dist_col else ""
+                state = str(row.get(state_col, "")).strip() if state_col else ""
             place = ""
             if name_col:
                 place = str(row.get(name_col, "")).strip()

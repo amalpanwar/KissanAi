@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import re
 import sqlite3
 from zoneinfo import ZoneInfo
+import csv
+from pathlib import Path
 
 from app.embeddings import Embedder
 from app.generator import LocalGenerator
@@ -39,19 +41,21 @@ class RAGAdvisor:
 
         normalized_question = self._normalize_hinglish(farmer_question)
         if self._is_weather_intent(normalized_question):
-            district = (
+            place = (
                 self._extract_location_from_question(farmer_question)
                 or self._extract_location_from_question(normalized_question)
             )
-            if not district:
+            if not place:
                 return {
                     "answer": "कृपया मौसम के लिए स्थान बताएं (जैसे: बड़ौत/डोघाट/मेरठ)।",
                     "references": [],
                     "retrieved": [],
                 }
-            weather = get_current_weather_hindi(district)
+            district = self._lookup_district_from_location(place)
+            weather_place = place if not district else f"{place}, {district}"
+            weather = get_current_weather_hindi(weather_place)
             if not weather:
-                weather = get_current_weather_hindi(f"{district}, Uttar Pradesh")
+                weather = get_current_weather_hindi(f"{weather_place}, Uttar Pradesh")
             if not weather:
                 return {
                     "answer": "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।",
@@ -145,6 +149,32 @@ class RAGAdvisor:
             "सरसों",
         ]
         return any(w in t for w in agri_words)
+
+    def _lookup_district_from_location(self, place: str) -> str | None:
+        if not place:
+            return None
+        path = Path("data/processed/location_lookup.csv")
+        if not path.exists():
+            return None
+        norm = re.sub(r"[^a-z0-9]+", "", place.lower())
+        if not norm:
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+        except Exception:
+            return None
+        for col in ["place_norm", "sub_district", "district"]:
+            for row in rows:
+                val = row.get(col, "") or ""
+                val_norm = val if col == "place_norm" else re.sub(r"[^a-z0-9]+", "", val.lower())
+                if val_norm == norm:
+                    district = (row.get("district") or "").strip()
+                    state = (row.get("state") or "").strip()
+                    if state.lower() == "uttar pradesh" or not state:
+                        return district or None
+        return None
 
     def _time_based_greeting(self) -> str:
         hour = datetime.now(ZoneInfo("Asia/Kolkata")).hour
