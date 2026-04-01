@@ -96,16 +96,17 @@ def _weather_code_hi(code: int) -> str:
     return mapping.get(code, "मौसम सामान्य")
 
 
-def get_current_weather_hindi(district: str) -> str:
-    key = resolve_location_name(district) or district.strip().lower()
-    lat_lon = DISTRICT_COORDS.get(key)
-    resolved_name = district.strip()
-    if not lat_lon:
-        geo = _geocode_location(district.strip())
-        if not geo:
-            return ""
+def get_current_weather_hindi(location: str) -> str:
+    # Prefer geocoding for specific places (village/town + district).
+    resolved_name = location.strip()
+    geo = _geocode_location(location.strip())
+    if geo:
         lat, lon, resolved_name = geo
     else:
+        key = resolve_location_name(location) or location.strip().lower()
+        lat_lon = DISTRICT_COORDS.get(key)
+        if not lat_lon:
+            return ""
         lat, lon = lat_lon
     params = urlencode(
         {
