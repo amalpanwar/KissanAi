@@ -10,3 +10,4 @@ data/raw/live/*.csv
 Location/
 logs/
 data/processed/*_cache.json
+data/raw/ppqs_pesticides/
