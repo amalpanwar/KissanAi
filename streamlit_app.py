@@ -338,6 +338,8 @@ def is_price_query(text: str) -> bool:
         "rate",
         "mandi",
         "bhav",
+        "daam",
+        "dam",
         "भाव",
         "दाम",
         "कीमत",
