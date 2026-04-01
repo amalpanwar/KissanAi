@@ -52,10 +52,10 @@ class RAGAdvisor:
                     "retrieved": [],
                 }
             district = self._lookup_district_from_location(place)
-            weather_place = place if not district else f"{place}, {district}"
+            weather_place = place if not district else f"{place}, {district}, Uttar Pradesh"
             weather = get_current_weather_hindi(weather_place)
             if not weather:
-                weather = get_current_weather_hindi(f"{weather_place}, Uttar Pradesh")
+                weather = get_current_weather_hindi(weather_place)
             if not weather:
                 return {
                     "answer": "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।",

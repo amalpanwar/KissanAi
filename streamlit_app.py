@@ -1262,10 +1262,10 @@ if user_query:
         lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
         lookup = load_location_lookup(lookup_mtime)
         district, _state = _lookup_district_from_location(place, lookup)
-        weather_place = place if not district else f"{place}, {district}"
+        weather_place = place if not district else f"{place}, {district}, Uttar Pradesh"
         weather = get_current_weather_hindi(weather_place)
         if not weather:
-            weather = get_current_weather_hindi(f"{weather_place}, Uttar Pradesh")
+            weather = get_current_weather_hindi(weather_place)
         final_answer = (
             weather
             if weather
