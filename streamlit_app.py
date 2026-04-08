@@ -354,6 +354,27 @@ def is_price_query(text: str) -> bool:
     return any(k in t for k in keywords)
 
 
+def is_crop_query(text: str) -> bool:
+    t = text.lower()
+    keys = [
+        "which crop",
+        "best crop",
+        "crop to grow",
+        "what crop should i grow",
+        "कौन सी फसल",
+        "फसल बेहतर",
+        "फसल उगानी",
+        "कौनसी फसल",
+        "कौनसी फसल",
+        "किस फसल",
+        "profit",
+        "profitable",
+        "लाभ",
+        "लाभदायक",
+    ]
+    return any(k in t for k in keys)
+
+
 def _best_match(query: str, options: list[str]) -> str | None:
     q = query.lower()
     q_tokens = re.findall(r"[a-z0-9]+", q)
@@ -1256,6 +1277,14 @@ if user_query:
     with st.chat_message("user"):
         st.write(user_query)
 
+    # Fast path: user says answer is incorrect -> ask for correction details, no greeting/LLM.
+    if user_query.strip().lower() in {"this is incorrect", "incorrect", "गलत", "गलत है", "sahi nahi"}:
+        msg = "कृपया सही जिला/फसल/बजट लिखें ताकि मैं सही उत्तर दे सकूँ।"
+        st.session_state.chat_history.append({"role": "assistant", "text": msg, "references": []})
+        with st.chat_message("assistant"):
+            st.write(msg)
+        st.stop()
+
     advisor = get_advisor()
     # If the previous response asked only for a weather location, treat this input as the location.
     if st.session_state.pop("pending_weather_location", False):
@@ -1280,8 +1309,20 @@ if user_query:
             st.write(final_answer)
         st.stop()
 
+    # Resolve place->district for crop intent (so profit uses correct district)
+    resolved_district = district
+    if is_crop_query(user_query):
+        place = extract_place_from_query(user_query)
+        if place:
+            lookup_path = Path("data/processed/location_lookup.csv")
+            lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+            lookup = load_location_lookup(lookup_mtime)
+            d_from_place, _ = _lookup_district_from_location(place, lookup)
+            if d_from_place:
+                resolved_district = d_from_place
+
     composed_query = (
-        f"जिला: {district} | मौसम: {season} | पसंदीदा फसल: {preferred_crop or 'कोई नहीं'} | "
+        f"जिला: {resolved_district} | मौसम: {season} | पसंदीदा फसल: {preferred_crop or 'कोई नहीं'} | "
         f"किसान का प्रश्न: {user_query.strip()}"
     )
 

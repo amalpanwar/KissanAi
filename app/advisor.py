@@ -126,8 +126,14 @@ class RAGAdvisor:
 
     def _is_greeting(self, text: str) -> bool:
         t = text.strip().lower()
-        greetings = ["hello", "hi", "hey", "namaste", "नमस्ते", "राम राम", "ram ram"]
-        return any(g in t for g in greetings)
+        tokens = re.findall(r"[a-z0-9\u0900-\u097F]+", t)
+        greetings = {"hello", "hi", "hey", "namaste", "नमस्ते", "राम", "ram"}
+        # Handle "राम राम" / "ram ram"
+        if "राम" in tokens and "राम" in tokens:
+            return True
+        if "ram" in tokens and "ram" in tokens:
+            return True
+        return any(tok in greetings for tok in tokens)
 
     def _has_agri_intent(self, text: str) -> bool:
         t = text.strip().lower()
@@ -476,10 +482,15 @@ class RAGAdvisor:
             "what crop should i grow",
             "कौन सी फसल",
             "फसल बेहतर",
+            "कौन सी crop",
+            "लाभदायक फसल",
+            "फसल लाभदायक",
             "best crop",
             "which crop",
             "crop to grow",
             "फसल उगानी",
+            "profitable",
+            "profit",
         ]
         return any(k in t for k in keys)
 
