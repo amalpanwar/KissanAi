@@ -8,12 +8,13 @@ from urllib.request import urlopen
 
 
 PDF_URLS = [
+    # Links as published on PPQS page (Major Uses of Pesticides)
     "https://ppqs.gov.in/sites/default/files/mup_insecticide_03.10.2025.pdf",
-    "https://ppqs.gov.in/sites/default/files/mup_fungicide_03.10.2025.pdf",
-    "https://ppqs.gov.in/sites/default/files/mup_bio_pesticides_fungicide_03.10.2025.pdf",
-    "https://ppqs.gov.in/sites/default/files/mup_herbicide_03.10.2025.pdf",
-    "https://ppqs.gov.in/sites/default/files/mup_plant_growth_regulator_03.10.2025.pdf",
-    "https://ppqs.gov.in/sites/default/files/mup_bio_insecticides_03.10.2025.pdf",
+    "https://ppqs.gov.in/sites/default/files/2._chemical_mup_as_on_30.09.2025.pdf",
+    "https://ppqs.gov.in/sites/default/files/3._bio_pesticide_mup_as_on_30.09.2025.pdf",
+    "https://ppqs.gov.in/sites/default/files/4._herbicides_mup_as_on_30.09.2025.pdf",
+    "https://ppqs.gov.in/sites/default/files/5._pgr_mup_as_on_30.09.2025.pdf",
+    "https://ppqs.gov.in/sites/default/files/6._mup_bio_insecticide_03.10.2025.pdf",
 ]
 
 
