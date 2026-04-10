@@ -9,7 +9,6 @@ from urllib.request import urlopen, Request
 
 
 ALLOWED_DOMAINS = {
-    "fert.nic.in",
     "fert.gov.in",
     "icar.org.in",
     "epubs.icar.org.in",
