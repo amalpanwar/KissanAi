@@ -27,14 +27,16 @@ def _is_allowed(url: str) -> bool:
     return any(host.endswith(d) for d in ALLOWED_DOMAINS)
 
 
-def _download(url: str, out_dir: Path) -> Path | None:
+def _download(url: str, out_dir: Path, debug: bool = False) -> Path | None:
     if not _is_allowed(url):
         return None
-    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "*/*"})
     try:
         with urlopen(req, timeout=20) as resp:
             data = resp.read()
     except Exception:
+        if debug:
+            print(f"Download failed: {url}")
         return None
     name = os.path.basename(urlparse(url).path) or "document.pdf"
     if not name.lower().endswith(".pdf"):
@@ -57,6 +59,7 @@ def _extract_pdf_links(html: str, base_url: str) -> list[str]:
 
 
 def main() -> None:
+    debug = os.getenv("OFFICIAL_SOURCES_DEBUG", "0") == "1"
     sources_path = Path("data/raw/official_sources.json")
     out_dir = Path("data/raw/official_sources")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -74,7 +77,7 @@ def main() -> None:
         if not url:
             continue
         if item.get("type") == "pdf" or url.lower().endswith(".pdf"):
-            path = _download(url, out_dir)
+            path = _download(url, out_dir, debug=debug)
             if path:
                 downloaded.append(str(path))
             continue
@@ -82,14 +85,16 @@ def main() -> None:
         # If it is a page, fetch and extract PDF links
         if not _is_allowed(url):
             continue
-        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html,*/*"})
         try:
             with urlopen(req, timeout=20) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
         except Exception:
+            if debug:
+                print(f"Page fetch failed: {url}")
             continue
         for pdf in _extract_pdf_links(html, url):
-            path = _download(pdf, out_dir)
+            path = _download(pdf, out_dir, debug=debug)
             if path:
                 downloaded.append(str(path))
 
