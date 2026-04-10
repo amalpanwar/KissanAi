@@ -163,6 +163,19 @@ export AGMARKNET_RETRIES=5
 export AGMARKNET_DEBUG=0
 python scripts/agmarknet_daily_refresh.py
 ```
+
+## Official Sources Ingestion (Gov/ICAR)
+
+We use a curated list of official sources and a downloader:
+
+```bash
+python scripts/fetch_official_sources.py
+python scripts/ingest_documents.py --input_dir data/raw/official_sources
+python scripts/build_index.py
+```
+
+Seed SEO queries are stored in:
+`data/raw/seo_seed_queries.txt`
 - For faster cold starts, switch to a smaller embedding/generation model in `configs/pipeline.yaml`.
 
 ## GitHub Actions CI

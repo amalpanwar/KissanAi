@@ -1,0 +1,7 @@
+site:fert.nic.in "NBS Notification" PDF
+site:fert.nic.in "PDM Guidelines" PDF
+site:agricoop.gov.in subsidy fertilizer PDF
+site:icar.org.in "integrated pest management" PDF
+site:epubs.icar.org.in pest management PDF
+site:up.gov.in agriculture subsidy PDF
+site:farmer.gov.in scheme PDF
