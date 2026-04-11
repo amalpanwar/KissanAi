@@ -748,73 +748,16 @@ def extract_selection_from_query(
                 matches = difflib.get_close_matches(place, districts, n=1, cutoff=0.8)
                 if matches:
                     district = matches[0]
-            corr_path = Path("data/raw/location_corrections.json")
-            corr_mtime = corr_path.stat().st_mtime_ns if corr_path.exists() else 0
-            corrections = load_location_corrections(corr_mtime)
-            if place.lower() in corrections:
-                district = corrections[place.lower()]
-            else:
-                # Prefer local LGD lookup (fast, deterministic)
-                lookup_path = Path("data/processed/location_lookup.csv")
-                lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
-                lookup = load_location_lookup(lookup_mtime)
-                if not lookup.empty:
-                    resolved_district, resolved_state = _lookup_district_from_location(place, lookup)
-                    if resolved_district:
-                        district = resolved_district
-                    if resolved_state and resolved_state.lower() != state.lower():
-                        state = resolved_state
-                # If LGD not found, try forward geocode
-                if not district:
-                    candidates = _forward_geocode_cached(place, "Uttar Pradesh")
-                    if candidates:
-                        # Choose candidate whose district matches our known list; tie-breaker by importance.
-                        best = None
-                        for cand in candidates:
-                            rev_norm = _normalize_district_name(cand.get("district", ""))
-                            if not rev_norm:
-                                continue
-                            match = None
-                            for d in districts:
-                                if _normalize_district_name(d) == rev_norm:
-                                    match = d
-                                    break
-                            if not match:
-                                for d in districts:
-                                    if rev_norm in _normalize_district_name(d):
-                                        match = d
-                                        break
-                            if not match:
-                                continue
-                            try:
-                                imp = float(cand.get("importance", "0") or 0.0)
-                            except Exception:
-                                imp = 0.0
-                            if best is None or imp > best[0]:
-                                best = (imp, match)
-                        if best:
-                            district = best[1]
-            # Fallback: reverse geocode via coordinates
-            if not district:
-                for variant in _place_variants(place):
-                    geo = _geocode_cached(variant, "Uttar Pradesh")
-                    if geo:
-                        plat, plon, _ = geo
-                        rev = _reverse_geocode_cached(plat, plon)
-                        if rev and rev.get("district"):
-                            rev_norm = _normalize_district_name(rev["district"])
-                            for d in districts:
-                                if _normalize_district_name(d) == rev_norm:
-                                    district = d
-                                    break
-                            else:
-                                # partial match fallback
-                                for d in districts:
-                                    if rev_norm and rev_norm in _normalize_district_name(d):
-                                        district = d
-                                        break
-                        if district:
-                            break
+            # Always map via local lookup CSV (deterministic).
+            lookup_path = Path("data/processed/location_lookup.csv")
+            lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+            lookup = load_location_lookup(lookup_mtime)
+            if not lookup.empty:
+                resolved_district, resolved_state = _lookup_district_from_location(place, lookup)
+                if resolved_district:
+                    district = resolved_district
+                if resolved_state and resolved_state.lower() != state.lower():
+                    state = resolved_state
             if not district:
                 st.warning(f"स्थान '{place}' का जिला नहीं मिला। कृपया स्थान या जिला स्पष्ट करें।")
         catalog = load_commodity_catalog()

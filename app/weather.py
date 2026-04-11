@@ -4,47 +4,27 @@ import json
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-
-DISTRICT_COORDS = {
-    "meerut": (28.9845, 77.7064),
-    "muzaffarnagar": (29.4727, 77.7085),
-    "baghpat": (28.9446, 77.2187),
-    "saharanpur": (29.9680, 77.5552),
-    "shamli": (29.4497, 77.3153),
-    "bulandshahr": (28.4069, 77.8498),
-    "baraut": (29.1028, 77.2587),
-}
-
-LOCATION_ALIASES = {
-    "meerut": ["meerut", "मेरठ"],
-    "muzaffarnagar": ["muzaffarnagar", "मुज़फ्फरनगर", "मुजफ्फरनगर"],
-    "baghpat": ["baghpat", "बागपत"],
-    "saharanpur": ["saharanpur", "सहारनपुर"],
-    "shamli": ["shamli", "शामली"],
-    "bulandshahr": ["bulandshahr", "बुलंदशहर"],
-    "baraut": ["baraut", "बड़ौत", "बरौत", "barot"],
-}
-
-
-def resolve_location_name(text: str) -> str | None:
-    if not text:
-        return None
-    t = text.lower()
-    for key, aliases in LOCATION_ALIASES.items():
-        for alias in aliases:
-            if alias.lower() in t:
-                return key
-    return None
+from app.location_lookup import lookup_place
 
 
 def _geocode_location(name: str) -> tuple[float, float, str] | None:
     if not name:
         return None
-    candidates = [
-        name,
-        f"{name}, Uttar Pradesh",
-        f"{name}, Uttar Pradesh, India",
-    ]
+    loc = lookup_place(name)
+    candidates = [name]
+    if loc:
+        parts = [loc.get("district"), loc.get("state"), "India"]
+        parts = [p for p in parts if p]
+        if parts:
+            candidates.append(f"{name}, {', '.join(parts)}")
+        if loc.get("district"):
+            candidates.append(f"{name}, {loc['district']}")
+    candidates.extend(
+        [
+            f"{name}, Uttar Pradesh",
+            f"{name}, Uttar Pradesh, India",
+        ]
+    )
     for cand in candidates:
         params = urlencode(
             {
@@ -103,11 +83,7 @@ def get_current_weather_hindi(location: str) -> str:
     if geo:
         lat, lon, resolved_name = geo
     else:
-        key = resolve_location_name(location) or location.strip().lower()
-        lat_lon = DISTRICT_COORDS.get(key)
-        if not lat_lon:
-            return ""
-        lat, lon = lat_lon
+        return ""
     params = urlencode(
         {
             "latitude": lat,

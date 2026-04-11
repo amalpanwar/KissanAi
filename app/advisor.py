@@ -13,7 +13,8 @@ from app.generator import LocalGenerator
 from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
-from app.weather import get_current_weather_hindi, resolve_location_name
+from app.weather import get_current_weather_hindi
+from app.location_lookup import lookup_place
 
 
 @dataclass
@@ -51,8 +52,10 @@ class RAGAdvisor:
                     "references": [],
                     "retrieved": [],
                 }
-            district = self._lookup_district_from_location(place)
-            weather_place = place if not district else f"{place}, {district}, Uttar Pradesh"
+            loc = lookup_place(place)
+            district = loc.get("district") if loc else self._lookup_district_from_location(place)
+            state = loc.get("state") if loc else "Uttar Pradesh"
+            weather_place = place if not district else f"{place}, {district}, {state}"
             weather = get_current_weather_hindi(weather_place)
             if not weather:
                 weather = get_current_weather_hindi(weather_place)
@@ -70,7 +73,14 @@ class RAGAdvisor:
                 "retrieved": [],
             }
         if self._is_crop_choice_intent(normalized_question):
-            structured = self._structured_crop_recommendation(context_part, normalized_question)
+            place = self._extract_location_from_question(farmer_question)
+            loc = lookup_place(place) if place else None
+            district_override = loc.get("district") if loc else None
+            structured = self._structured_crop_recommendation(
+                context_part,
+                normalized_question,
+                district_override=district_override,
+            )
             if structured:
                 return {
                     "answer": structured,
@@ -522,7 +532,7 @@ class RAGAdvisor:
             if t in stop:
                 continue
             return tok
-        return resolve_location_name(question)
+        return None
 
     def _looks_like_location_only(self, question: str) -> bool:
         if not question:
@@ -579,11 +589,16 @@ class RAGAdvisor:
         ]
         return any(k in t for k in keys)
 
-    def _structured_crop_recommendation(self, context_part: str, question: str) -> str | None:
+    def _structured_crop_recommendation(
+        self,
+        context_part: str,
+        question: str,
+        district_override: str | None = None,
+    ) -> str | None:
         if not self.cfg.db_path:
             return None
 
-        district = self._extract_district(context_part) or "Meerut"
+        district = district_override or self._extract_district(context_part) or "Meerut"
         season = self._extract_season(context_part) or "Rabi"
         budget = self._extract_budget(question)
 
