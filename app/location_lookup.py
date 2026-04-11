@@ -12,8 +12,9 @@ def _normalize_place(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (text or "").strip().lower())
 
 
-@lru_cache(maxsize=1)
-def _load_lookup() -> pd.DataFrame:
+@lru_cache(maxsize=4)
+def _load_lookup(mtime_ns: int) -> pd.DataFrame:
+    _ = mtime_ns
     path = Path("data/processed/location_lookup.csv")
     if not path.exists():
         return pd.DataFrame()
@@ -26,10 +27,16 @@ def _load_lookup() -> pd.DataFrame:
     return df
 
 
+def _get_lookup() -> pd.DataFrame:
+    path = Path("data/processed/location_lookup.csv")
+    mtime = path.stat().st_mtime_ns if path.exists() else 0
+    return _load_lookup(mtime)
+
+
 def lookup_place(place: str) -> dict[str, Any] | None:
     if not place:
         return None
-    df = _load_lookup()
+    df = _get_lookup()
     if df.empty or "place_norm" not in df.columns:
         return None
     key = _normalize_place(place)
@@ -71,12 +78,23 @@ def _iter_norm_candidates(df: pd.DataFrame, cols: Iterable[str]) -> list[tuple[s
 def lookup_place_in_text(text: str) -> dict[str, Any] | None:
     if not text:
         return None
-    df = _load_lookup()
+    df = _get_lookup()
     if df.empty:
         return None
     norm_text = _normalize_place(text)
     if not norm_text:
         return None
+
+    # First pass: n-gram token matching for Hinglish queries like "doghat me ..."
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    if tokens and "place_norm" in df.columns:
+        place_map = {str(v): row for v, row in zip(df["place_norm"], df.to_dict(orient="records")) if v}
+        for size in range(min(4, len(tokens)), 0, -1):
+            for i in range(0, len(tokens) - size + 1):
+                phrase = " ".join(tokens[i : i + size])
+                norm = _normalize_place(phrase)
+                if norm in place_map:
+                    return _row_to_result(place_map[norm], phrase)
 
     candidates = _iter_norm_candidates(df, ["place_norm"])
     best: tuple[int, dict] | None = None

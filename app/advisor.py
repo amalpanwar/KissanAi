@@ -81,11 +81,11 @@ class RAGAdvisor:
             }
         if self._is_crop_choice_intent(normalized_question):
             place = self._extract_location_from_question(farmer_question)
-            loc = lookup_place(place) if place else None
-            if not loc:
-                loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
-                if loc and not place:
-                    place = loc.get("place")
+            loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
+            if not loc and place:
+                loc = lookup_place(place)
+            if loc and not place:
+                place = loc.get("place")
             district_override = loc.get("district") if loc else None
             if place and not district_override:
                 return {
@@ -679,6 +679,10 @@ class RAGAdvisor:
             rev = price * float(r["avg_yield_qtl_per_acre"])
             pmin = rev - float(r["cost_max_inr_per_acre"])
             pmax = rev - float(r["cost_min_inr_per_acre"])
+            pressure_label, pressure_penalty, _ = self._estimate_pesticide_pressure(crop)
+            if pressure_penalty > 0:
+                pmin = pmin * (1 - pressure_penalty)
+                pmax = pmax * (1 - pressure_penalty)
             if budget is not None and float(r["cost_max_inr_per_acre"]) > budget:
                 continue
             scored.append(
@@ -690,6 +694,7 @@ class RAGAdvisor:
                     "profit_min": pmin,
                     "profit_max": pmax,
                     "price_note": price_note,
+                    "pressure": pressure_label,
                 }
             )
 
@@ -707,7 +712,7 @@ class RAGAdvisor:
                 f"{i}) {s['crop']}: लागत ₹{int(s['cost_min'])}-₹{int(s['cost_max'])}/एकड़, "
                 f"अनुमानित आय ₹{int(s['revenue'])}/एकड़, "
                 f"संभावित लाभ ₹{int(s['profit_min'])}-₹{int(s['profit_max'])}/एकड़"
-                f"{s['price_note']}"
+                f"{s['price_note']} | कीटनाशक दबाव: {s['pressure']}"
             )
 
         budget_line = f"बजट: ₹{int(budget)} प्रति एकड़" if budget is not None else "बजट: उपलब्ध नहीं"
@@ -718,6 +723,39 @@ class RAGAdvisor:
             + "\n".join(lines)
             + "\n\nनोट: अंतिम निर्णय से पहले स्थानीय मंडी भाव, पानी उपलब्धता और मिट्टी की स्थिति जरूर देखें।"
         ), sources
+
+    def _estimate_pesticide_pressure(self, crop: str) -> tuple[str, float, list[str]]:
+        if not crop:
+            return "अज्ञात", 0.0, []
+        self._ensure_rag_components()
+        if self.embedder is None or self.retriever is None:
+            return "अज्ञात", 0.0, []
+        query = f"{crop} कीटनाशक छिड़काव मात्रा लागत"
+        qvec = self.embedder.encode([query])[0]
+        retrieved = self.retriever.retrieve(qvec, k=max(3, self.top_k))
+        text = " ".join([str(r.get("text") or "") for r in retrieved]).lower()
+        if not text.strip():
+            return "अज्ञात", 0.0, []
+        keywords = [
+            "spray",
+            "dose",
+            "ml",
+            "g/ha",
+            "g/acre",
+            "l/ha",
+            "छिड़काव",
+            "कीटनाशक",
+            "fungicide",
+            "insecticide",
+            "spinosad",
+            "emamectin",
+        ]
+        hits = sum(text.count(k) for k in keywords)
+        if hits >= 18:
+            return "उच्च", 0.12, [r.get("source_file") for r in retrieved if r.get("source_file")]
+        if hits >= 8:
+            return "मध्यम", 0.06, [r.get("source_file") for r in retrieved if r.get("source_file")]
+        return "कम", 0.0, [r.get("source_file") for r in retrieved if r.get("source_file")]
 
     def _load_agmarknet_prices(self, district: str) -> dict[str, dict[str, str | float]]:
         path = Path("data/raw/live/agmarknet_report.csv")
