@@ -14,7 +14,9 @@ from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
 from app.weather import get_current_weather_hindi
-from app.location_lookup import lookup_place
+import pandas as pd
+
+from app.location_lookup import lookup_place, lookup_place_in_text
 
 
 @dataclass
@@ -46,13 +48,18 @@ class RAGAdvisor:
                 self._extract_location_from_question(farmer_question)
                 or self._extract_location_from_question(normalized_question)
             )
-            if not place:
+            loc = lookup_place(place) if place else None
+            if not loc:
+                loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
+                if loc and not place:
+                    place = loc.get("place")
+            if not place and not loc:
                 return {
-                    "answer": "मौसम के लिए स्थान नहीं मिला। कृपया केवल स्थान लिखें।",
+                    "answer": "मौसम के लिए स्थान नहीं मिला। कृपया स्थान लिखें (जैसे: डोघाट/बड़ौत/मेरठ)।",
                     "references": [],
                     "retrieved": [],
                 }
-            loc = lookup_place(place)
+            loc = loc or (lookup_place(place) if place else None)
             district = loc.get("district") if loc else self._lookup_district_from_location(place)
             state = loc.get("state") if loc else "Uttar Pradesh"
             weather_place = place if not district else f"{place}, {district}, {state}"
@@ -75,17 +82,43 @@ class RAGAdvisor:
         if self._is_crop_choice_intent(normalized_question):
             place = self._extract_location_from_question(farmer_question)
             loc = lookup_place(place) if place else None
+            if not loc:
+                loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
+                if loc and not place:
+                    place = loc.get("place")
             district_override = loc.get("district") if loc else None
-            structured = self._structured_crop_recommendation(
+            if place and not district_override:
+                return {
+                    "answer": f"स्थान '{place}' का जिला नहीं मिला। कृपया स्थान/जिला स्पष्ट करें।",
+                    "references": [],
+                    "retrieved": [],
+                }
+            structured, sources = self._structured_crop_recommendation(
                 context_part,
                 normalized_question,
                 district_override=district_override,
             )
             if structured:
+                retrieved = []
+                if self.embedder is None or self.retriever is None or self.generator is None:
+                    self._ensure_rag_components()
+                if self.embedder is not None and self.retriever is not None:
+                    qvec = self.embedder.encode([normalized_question])[0]
+                    retrieved = self.retriever.retrieve(qvec, k=min(3, self.top_k))
+                    if retrieved:
+                        snippets = []
+                        for r in retrieved[:3]:
+                            text = str(r.get("text") or "").strip()
+                            if text:
+                                snippets.append(f"- {text[:180]}".rstrip() + ("..." if len(text) > 180 else ""))
+                        if snippets:
+                            structured += "\n\nसंदर्भ संकेत:\n" + "\n".join(snippets)
+                refs = list(sources)
+                refs.extend([r.get("source_file") for r in retrieved if r.get("source_file")])
                 return {
                     "answer": structured,
-                    "references": ["crop_economics (SQLite)"],
-                    "retrieved": [],
+                    "references": refs,
+                    "retrieved": retrieved,
                 }
         if self._is_pesticide_intent(normalized_question):
             return self._structured_pesticide_advice(normalized_question)
@@ -594,13 +627,17 @@ class RAGAdvisor:
         context_part: str,
         question: str,
         district_override: str | None = None,
-    ) -> str | None:
+    ) -> tuple[str | None, list[str]]:
         if not self.cfg.db_path:
-            return None
+            return None, []
 
         district = district_override or self._extract_district(context_part) or "Meerut"
         season = self._extract_season(context_part) or "Rabi"
         budget = self._extract_budget(question)
+        sources: list[str] = ["crop_economics (SQLite)"]
+        market_prices = self._load_agmarknet_prices(district)
+        if market_prices:
+            sources.append("agmarknet_report.csv")
 
         conn = sqlite3.connect(self.cfg.db_path)
         conn.row_factory = sqlite3.Row
@@ -628,23 +665,31 @@ class RAGAdvisor:
             conn.close()
 
         if not rows:
-            return None
+            return None, sources
 
         scored: list[dict] = []
         for r in rows:
-            rev = float(r["market_price_inr_per_qtl"]) * float(r["avg_yield_qtl_per_acre"])
+            price = float(r["market_price_inr_per_qtl"])
+            price_note = ""
+            crop = r["crop_name"]
+            if crop in market_prices:
+                price_info = market_prices[crop]
+                price = float(price_info["price"])
+                price_note = f" (भाव: {price:.0f} Rs./Quintal, {price_info['date']})"
+            rev = price * float(r["avg_yield_qtl_per_acre"])
             pmin = rev - float(r["cost_max_inr_per_acre"])
             pmax = rev - float(r["cost_min_inr_per_acre"])
             if budget is not None and float(r["cost_max_inr_per_acre"]) > budget:
                 continue
             scored.append(
                 {
-                    "crop": r["crop_name"],
+                    "crop": crop,
                     "cost_min": float(r["cost_min_inr_per_acre"]),
                     "cost_max": float(r["cost_max_inr_per_acre"]),
                     "revenue": rev,
                     "profit_min": pmin,
                     "profit_max": pmax,
+                    "price_note": price_note,
                 }
             )
 
@@ -653,7 +698,7 @@ class RAGAdvisor:
                 f"समझा गया सवाल (हिंदी): {question}\n\n"
                 f"{district} ({season}) में आपके बजट के अंदर कोई स्पष्ट फसल विकल्प नहीं मिला। "
                 "कृपया बजट बढ़ाएँ या फसल विकल्प बताकर फिर पूछें।"
-            )
+            ), sources
 
         scored = sorted(scored, key=lambda x: x["profit_min"], reverse=True)[:3]
         lines = []
@@ -662,6 +707,7 @@ class RAGAdvisor:
                 f"{i}) {s['crop']}: लागत ₹{int(s['cost_min'])}-₹{int(s['cost_max'])}/एकड़, "
                 f"अनुमानित आय ₹{int(s['revenue'])}/एकड़, "
                 f"संभावित लाभ ₹{int(s['profit_min'])}-₹{int(s['profit_max'])}/एकड़"
+                f"{s['price_note']}"
             )
 
         budget_line = f"बजट: ₹{int(budget)} प्रति एकड़" if budget is not None else "बजट: उपलब्ध नहीं"
@@ -671,7 +717,40 @@ class RAGAdvisor:
             "उपलब्ध अर्थशास्त्रीय डेटा के आधार पर सर्वोत्तम फसल विकल्प:\n"
             + "\n".join(lines)
             + "\n\nनोट: अंतिम निर्णय से पहले स्थानीय मंडी भाव, पानी उपलब्धता और मिट्टी की स्थिति जरूर देखें।"
-        )
+        ), sources
+
+    def _load_agmarknet_prices(self, district: str) -> dict[str, dict[str, str | float]]:
+        path = Path("data/raw/live/agmarknet_report.csv")
+        if not path.exists():
+            return {}
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            return {}
+        required = {"District", "Commodity", "Arrival_Date", "Modal_Price"}
+        if not required.issubset(df.columns):
+            return {}
+        df = df[df["District"].astype(str).str.lower() == district.lower()].copy()
+        if df.empty:
+            return {}
+        df["Arrival_Date_dt"] = pd.to_datetime(df["Arrival_Date"], errors="coerce", dayfirst=True)
+        df = df.dropna(subset=["Arrival_Date_dt", "Modal_Price"])
+        if df.empty:
+            return {}
+        latest = df.sort_values("Arrival_Date_dt").groupby("Commodity", as_index=False).tail(1)
+        out: dict[str, dict[str, str | float]] = {}
+        for _, row in latest.iterrows():
+            try:
+                price = float(row["Modal_Price"])
+            except Exception:
+                continue
+            date = row["Arrival_Date_dt"].date().isoformat()
+            out[str(row["Commodity"])] = {
+                "price": price,
+                "date": date,
+                "unit": row.get("Price_Unit", "Rs./Quintal"),
+            }
+        return out
 
     def _ensure_rag_components(self) -> None:
         if self.embedder is None:
