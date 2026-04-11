@@ -77,6 +77,8 @@ class RAGAdvisor:
                     "references": ["crop_economics (SQLite)"],
                     "retrieved": [],
                 }
+        if self._is_pesticide_intent(normalized_question):
+            return self._structured_pesticide_advice(normalized_question)
 
         normalized_query = (
             f"{context_part} किसान का प्रश्न: {normalized_question}".strip()
@@ -106,6 +108,89 @@ class RAGAdvisor:
             "references": [r.get("source_file") for r in retrieved],
             "retrieved": retrieved,
         }
+
+    def _is_pesticide_intent(self, text: str) -> bool:
+        t = text.lower()
+        keys = [
+            "pesticide",
+            "insecticide",
+            "fungicide",
+            "herbicide",
+            "कीटनाशक",
+            "फफूंदनाशी",
+            "घासनाशी",
+            "दवा",
+            "स्प्रे",
+            "छिड़काव",
+            "कीट",
+            "रोग",
+        ]
+        return any(k in t for k in keys)
+
+    def _structured_pesticide_advice(self, question: str) -> dict:
+        self._ensure_rag_components()
+        if self.embedder is None or self.retriever is None:
+            return {
+                "answer": "पेस्ट/रोग संबंधी जानकारी अभी उपलब्ध नहीं है। कृपया बाद में प्रयास करें।",
+                "references": [],
+                "retrieved": [],
+            }
+        qvec = self.embedder.encode([question])[0]
+        retrieved = self.retriever.retrieve(qvec, k=max(5, self.top_k))
+        snippets = [r.get("text", "") for r in retrieved if r.get("text")]
+        if not snippets:
+            return {
+                "answer": "पेस्ट/रोग संबंधी जानकारी नहीं मिली। कृपया फसल और रोग का नाम बताएं।",
+                "references": [],
+                "retrieved": [],
+            }
+
+        # Heuristic extraction from retrieved text
+        text = "\n".join(snippets)
+        pesticides = self._extract_pesticide_names(text)
+        doses = self._extract_dose_lines(text)
+        waiting = self._extract_waiting_period(text)
+
+        lines = []
+        lines.append("संरचित कीटनाशक सलाह:")
+        if pesticides:
+            lines.append(f"- सुझाई गई दवाएँ: {', '.join(pesticides[:5])}")
+        if doses:
+            lines.append(f"- खुराक/डोज़: {doses[0]}")
+        if waiting:
+            lines.append(f"- सुरक्षा अवधि (PHI): {waiting}")
+        lines.append("- छिड़काव से पहले लेबल निर्देश और राज्य सलाह देखें।")
+
+        return {
+            "answer": "\n".join(lines),
+            "references": [r.get("source_file") for r in retrieved],
+            "retrieved": retrieved,
+        }
+
+    def _extract_pesticide_names(self, text: str) -> list[str]:
+        # Simple keyword-based extraction
+        names = set()
+        patterns = [
+            r"(?i)\\b(Chlorpyrifos|Imidacloprid|Mancozeb|Carbendazim|Metalaxyl|Copper oxychloride|Azoxystrobin|Propiconazole|Thiamethoxam|Lambda-cyhalothrin)\\b",
+            r"(?i)\\b(मैनकोज़ेब|कार्बेन्डाज़िम|कॉपर ऑक्सीक्लोराइड|इमिडाक्लोप्रिड|थायमेथोक्साम)\\b",
+        ]
+        for pat in patterns:
+            for m in re.findall(pat, text):
+                names.add(m)
+        return sorted(names)
+
+    def _extract_dose_lines(self, text: str) -> list[str]:
+        lines = []
+        for line in text.splitlines():
+            if re.search(r"(ml|g|gm|gram|लीटर|ली\\.|l/ha|kg/ha|g/l)", line, flags=re.IGNORECASE):
+                lines.append(line.strip())
+        return lines
+
+    def _extract_waiting_period(self, text: str) -> str | None:
+        m = re.search(r"(?:PHI|प्री-हार्वेस्ट|सुरक्षा अवधि)[^\\d]*(\\d+\\s*(?:दिन|days))", text, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        return None
 
     def _fallback_answer(self, retrieved: list[dict], normalized_query: str) -> str:
         if not retrieved:
