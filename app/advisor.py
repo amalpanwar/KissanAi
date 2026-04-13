@@ -82,12 +82,6 @@ class RAGAdvisor:
                     "retrieved": [],
                 }
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
-        if self._looks_like_location_only(farmer_question):
-            return {
-                "answer": "कृपया बताएं कि आप मौसम पूछ रहे हैं या भाव/कीमत?",
-                "references": [],
-                "retrieved": [],
-            }
         if self._is_crop_choice_intent(normalized_question):
             place = self._extract_location_from_question(farmer_question)
             loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
@@ -125,6 +119,12 @@ class RAGAdvisor:
                 }
         if self._is_pesticide_intent(normalized_question):
             return self._structured_pesticide_advice(normalized_question)
+        if self._looks_like_location_only(farmer_question):
+            return {
+                "answer": "कृपया बताएं कि आप मौसम पूछ रहे हैं या भाव/कीमत?",
+                "references": [],
+                "retrieved": [],
+            }
 
         normalized_query = (
             f"{context_part} किसान का प्रश्न: {normalized_question}".strip()
