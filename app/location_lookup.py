@@ -143,6 +143,25 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
     except Exception:
         pass
 
+    # Fallback: handle v/w swap (Kurava vs Kurawa)
+    try:
+        if "place_norm" in df.columns:
+            norm_text = _normalize_place(text)
+            if "v" in norm_text:
+                alt = norm_text.replace("v", "w")
+                matches = df[df["place_norm"].astype(str) == alt]
+                if not matches.empty:
+                    row = matches.iloc[0].to_dict()
+                    return _row_to_result(row, row.get("place", text))
+            if "w" in norm_text:
+                alt = norm_text.replace("w", "v")
+                matches = df[df["place_norm"].astype(str) == alt]
+                if not matches.empty:
+                    row = matches.iloc[0].to_dict()
+                    return _row_to_result(row, row.get("place", text))
+    except Exception:
+        pass
+
     # Fallback: fuzzy match for minor spelling errors against place_norm
     try:
         import difflib
