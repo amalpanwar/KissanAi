@@ -17,7 +17,11 @@ def main() -> None:
     cfg = load_config()
     db_path = cfg.paths["sqlite_db"]
 
-    eco = pd.read_csv("data/raw/western_up_crop_economics.csv")
+    eco_path = Path("data/raw/western_up_crop_economics.csv")
+    if not eco_path.exists():
+        print("western_up_crop_economics.csv not found; skipping seed economics load.")
+        return
+    eco = pd.read_csv(eco_path)
     adv = pd.read_csv("data/raw/sample_advisories.csv")
 
     conn = get_conn(db_path)

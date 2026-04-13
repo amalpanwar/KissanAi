@@ -43,6 +43,15 @@ class RAGAdvisor:
             return {"answer": self._time_based_greeting(), "references": [], "retrieved": []}
 
         normalized_question = self._normalize_hinglish(farmer_question)
+        loc_ctx = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
+        if loc_ctx:
+            district = loc_ctx.get("district")
+            state = loc_ctx.get("state")
+            if district and "District:" not in context_part and "जिला:" not in context_part:
+                suffix = f"District: {district}"
+                if state:
+                    suffix = f"{suffix} | State: {state}"
+                context_part = f"{context_part} | {suffix}" if context_part else suffix
         if self._is_weather_intent(normalized_question):
             place = (
                 self._extract_location_from_question(farmer_question)
@@ -87,12 +96,6 @@ class RAGAdvisor:
             if loc and not place:
                 place = loc.get("place")
             district_override = loc.get("district") if loc else None
-            if place and not district_override:
-                return {
-                    "answer": f"स्थान '{place}' का जिला नहीं मिला। कृपया स्थान/जिला स्पष्ट करें।",
-                    "references": [],
-                    "retrieved": [],
-                }
             structured, sources = self._structured_crop_recommendation(
                 context_part,
                 normalized_question,
@@ -665,7 +668,7 @@ class RAGAdvisor:
             conn.close()
 
         if not rows:
-            return None, sources
+            return self._rank_from_agmarknet_only(district, question), sources
 
         scored: list[dict] = []
         for r in rows:
@@ -676,25 +679,28 @@ class RAGAdvisor:
                 price_info = market_prices[crop]
                 price = float(price_info["price"])
                 price_note = f" (भाव: {price:.0f} Rs./Quintal, {price_info['date']})"
+            pest_label, pest_cost_min, pest_cost_max = self._estimate_pesticide_cost(crop)
             rev = price * float(r["avg_yield_qtl_per_acre"])
-            pmin = rev - float(r["cost_max_inr_per_acre"])
-            pmax = rev - float(r["cost_min_inr_per_acre"])
-            pressure_label, pressure_penalty, _ = self._estimate_pesticide_pressure(crop)
-            if pressure_penalty > 0:
-                pmin = pmin * (1 - pressure_penalty)
-                pmax = pmax * (1 - pressure_penalty)
+            base_cost_min = float(r["cost_min_inr_per_acre"])
+            base_cost_max = float(r["cost_max_inr_per_acre"])
+            total_cost_min = base_cost_min + pest_cost_min
+            total_cost_max = base_cost_max + pest_cost_max
+            pmin = rev - total_cost_max
+            pmax = rev - total_cost_min
             if budget is not None and float(r["cost_max_inr_per_acre"]) > budget:
                 continue
             scored.append(
                 {
                     "crop": crop,
-                    "cost_min": float(r["cost_min_inr_per_acre"]),
-                    "cost_max": float(r["cost_max_inr_per_acre"]),
+                    "cost_min": total_cost_min,
+                    "cost_max": total_cost_max,
                     "revenue": rev,
                     "profit_min": pmin,
                     "profit_max": pmax,
                     "price_note": price_note,
-                    "pressure": pressure_label,
+                    "pest_cost_min": pest_cost_min,
+                    "pest_cost_max": pest_cost_max,
+                    "pressure": pest_label,
                 }
             )
 
@@ -707,12 +713,13 @@ class RAGAdvisor:
 
         scored = sorted(scored, key=lambda x: x["profit_min"], reverse=True)[:3]
         lines = []
+        lines.append("मानदंड: मंडी MSP/भाव (Agmarknet) + कीटनाशक लागत (कम दबाव = कम लागत)।")
         for i, s in enumerate(scored, start=1):
             lines.append(
                 f"{i}) {s['crop']}: लागत ₹{int(s['cost_min'])}-₹{int(s['cost_max'])}/एकड़, "
                 f"अनुमानित आय ₹{int(s['revenue'])}/एकड़, "
                 f"संभावित लाभ ₹{int(s['profit_min'])}-₹{int(s['profit_max'])}/एकड़"
-                f"{s['price_note']} | कीटनाशक दबाव: {s['pressure']}"
+                f"{s['price_note']} | कीटनाशक लागत ~₹{int(s['pest_cost_min'])}-₹{int(s['pest_cost_max'])}/एकड़"
             )
 
         budget_line = f"बजट: ₹{int(budget)} प्रति एकड़" if budget is not None else "बजट: उपलब्ध नहीं"
@@ -724,18 +731,55 @@ class RAGAdvisor:
             + "\n\nनोट: अंतिम निर्णय से पहले स्थानीय मंडी भाव, पानी उपलब्धता और मिट्टी की स्थिति जरूर देखें।"
         ), sources
 
-    def _estimate_pesticide_pressure(self, crop: str) -> tuple[str, float, list[str]]:
+    def _rank_from_agmarknet_only(self, district: str, question: str) -> str | None:
+        market_prices = self._load_agmarknet_prices(district)
+        if not market_prices:
+            return None
+        scored = []
+        for crop, info in market_prices.items():
+            pest_label, pest_cost_min, pest_cost_max = self._estimate_pesticide_cost(crop)
+            scored.append(
+                {
+                    "crop": crop,
+                    "price": float(info["price"]),
+                    "date": info.get("date", ""),
+                    "pest_cost_min": pest_cost_min,
+                    "pest_cost_max": pest_cost_max,
+                    "pressure": pest_label,
+                }
+            )
+        if not scored:
+            return None
+        # Rank by higher price and lower pesticide cost
+        scored = sorted(scored, key=lambda x: (-x["price"], x["pest_cost_max"]))[:3]
+        lines = []
+        lines.append("मानदंड: मंडी MSP/भाव (Agmarknet) + कीटनाशक लागत (कम लागत = बेहतर)।")
+        for i, s in enumerate(scored, start=1):
+            lines.append(
+                f"{i}) {s['crop']}: ताज़ा भाव ₹{int(s['price'])}/क्विंटल ({s['date']}), "
+                f"कीटनाशक लागत ~₹{int(s['pest_cost_min'])}-₹{int(s['pest_cost_max'])}/एकड़, "
+                f"दबाव: {s['pressure']}"
+            )
+        return (
+            f"समझा गया सवाल (हिंदी): {question}\n\n"
+            f"जिला: {district}\n"
+            "उपलब्ध मंडी भाव और कीटनाशक लागत के आधार पर लाभ संकेत:\n"
+            + "\n".join(lines)
+            + "\n\nनोट: यह रैंकिंग कुल उत्पादन लागत/उपज (बीज, मजदूरी, सिंचाई) शामिल नहीं करती।"
+        )
+
+    def _estimate_pesticide_cost(self, crop: str) -> tuple[str, float, float]:
         if not crop:
-            return "अज्ञात", 0.0, []
+            return "अज्ञात", 0.0, 0.0
         self._ensure_rag_components()
         if self.embedder is None or self.retriever is None:
-            return "अज्ञात", 0.0, []
+            return "अज्ञात", 0.0, 0.0
         query = f"{crop} कीटनाशक छिड़काव मात्रा लागत"
         qvec = self.embedder.encode([query])[0]
-        retrieved = self.retriever.retrieve(qvec, k=max(3, self.top_k))
-        text = " ".join([str(r.get("text") or "") for r in retrieved]).lower()
+        retrieved = self.retriever.retrieve(qvec, k=max(5, self.top_k))
+        text = " ".join([str(r.get('text') or '') for r in retrieved]).lower()
         if not text.strip():
-            return "अज्ञात", 0.0, []
+            return "अज्ञात", 0.0, 0.0
         keywords = [
             "spray",
             "dose",
@@ -752,12 +796,42 @@ class RAGAdvisor:
         ]
         hits = sum(text.count(k) for k in keywords)
         if hits >= 18:
-            return "उच्च", 0.12, [r.get("source_file") for r in retrieved if r.get("source_file")]
+            return "उच्च", 8000.0, 15000.0
         if hits >= 8:
-            return "मध्यम", 0.06, [r.get("source_file") for r in retrieved if r.get("source_file")]
-        return "कम", 0.0, [r.get("source_file") for r in retrieved if r.get("source_file")]
+            return "मध्यम", 4000.0, 8000.0
+        return "कम", 2000.0, 4000.0
 
     def _load_agmarknet_prices(self, district: str) -> dict[str, dict[str, str | float]]:
+        # Prefer SQLite market_prices if populated
+        if self.cfg.db_path:
+            try:
+                conn = sqlite3.connect(self.cfg.db_path)
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT commodity, modal_price, arrival_date, price_unit
+                    FROM market_prices
+                    WHERE lower(district)=lower(?)
+                    """,
+                    (district,),
+                ).fetchall()
+                conn.close()
+                if rows:
+                    out: dict[str, dict[str, str | float]] = {}
+                    for r in rows:
+                        try:
+                            price = float(r["modal_price"])
+                        except Exception:
+                            continue
+                        out[str(r["commodity"])] = {
+                            "price": price,
+                            "date": r["arrival_date"] or "",
+                            "unit": r["price_unit"] or "Rs./Quintal",
+                        }
+                    return out
+            except Exception:
+                pass
+
         path = Path("data/raw/live/agmarknet_report.csv")
         if not path.exists():
             return {}
@@ -765,28 +839,47 @@ class RAGAdvisor:
             df = pd.read_csv(path)
         except Exception:
             return {}
-        required = {"District", "Commodity", "Arrival_Date", "Modal_Price"}
-        if not required.issubset(df.columns):
+        if {"District", "Commodity", "Arrival_Date", "Modal_Price"}.issubset(df.columns):
+            df = df.rename(
+                columns={
+                    "District": "district",
+                    "Commodity": "commodity",
+                    "Arrival_Date": "arrival_date",
+                    "Modal_Price": "modal_price",
+                    "Price_Unit": "price_unit",
+                }
+            )
+        elif {"district_name", "cmdt_name", "rep_date", "model_price_wt"}.issubset(df.columns):
+            df = df.rename(
+                columns={
+                    "district_name": "district",
+                    "cmdt_name": "commodity",
+                    "rep_date": "arrival_date",
+                    "model_price_wt": "modal_price",
+                    "unit_name_price": "price_unit",
+                }
+            )
+        else:
             return {}
-        df = df[df["District"].astype(str).str.lower() == district.lower()].copy()
+        df = df[df["district"].astype(str).str.lower() == district.lower()].copy()
         if df.empty:
             return {}
-        df["Arrival_Date_dt"] = pd.to_datetime(df["Arrival_Date"], errors="coerce", dayfirst=True)
-        df = df.dropna(subset=["Arrival_Date_dt", "Modal_Price"])
+        df["Arrival_Date_dt"] = pd.to_datetime(df["arrival_date"], errors="coerce", dayfirst=True)
+        df = df.dropna(subset=["Arrival_Date_dt", "modal_price"])
         if df.empty:
             return {}
-        latest = df.sort_values("Arrival_Date_dt").groupby("Commodity", as_index=False).tail(1)
+        latest = df.sort_values("Arrival_Date_dt").groupby("commodity", as_index=False).tail(1)
         out: dict[str, dict[str, str | float]] = {}
         for _, row in latest.iterrows():
             try:
-                price = float(row["Modal_Price"])
+                price = float(row["modal_price"])
             except Exception:
                 continue
             date = row["Arrival_Date_dt"].date().isoformat()
-            out[str(row["Commodity"])] = {
+            out[str(row["commodity"])] = {
                 "price": price,
                 "date": date,
-                "unit": row.get("Price_Unit", "Rs./Quintal"),
+                "unit": row.get("price_unit", "Rs./Quintal"),
             }
         return out
 

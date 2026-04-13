@@ -100,6 +100,21 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
             for norm in phrase_norms:
                 if norm in place_map:
                     return _row_to_result(place_map[norm], norm)
+            # Prefix match: handle shortened village names like "doghat" -> "doghatrural"
+            best_row = None
+            best_len = None
+            for norm in phrase_norms:
+                if len(norm) < 4:
+                    continue
+                matches = [k for k in place_map.keys() if k.startswith(norm)]
+                if not matches:
+                    continue
+                pick = min(matches, key=len)
+                if best_len is None or len(pick) < best_len:
+                    best_len = len(pick)
+                    best_row = place_map[pick]
+            if best_row:
+                return _row_to_result(best_row, best_row.get("place", text))
         # Fallback: match sub-district or district if explicitly mentioned
         for col in ["sub_district", "district"]:
             if col not in df.columns:
@@ -112,6 +127,21 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
                     row_dict = row.to_dict()
                     row_dict["place"] = cand
                     return _row_to_result(row_dict, cand)
+
+    # Fallback: prefix match for shortened village names (e.g., "doghat" -> "doghatrural")
+    try:
+        if "place_norm" in df.columns:
+            norm_text = _normalize_place(text)
+            if len(norm_text) >= 4:
+                matches = df[df["place_norm"].astype(str).str.startswith(norm_text)]
+                if not matches.empty:
+                    # pick the shortest place_norm to avoid overshooting
+                    matches = matches.copy()
+                    matches["plen"] = matches["place_norm"].astype(str).str.len()
+                    row = matches.sort_values("plen").iloc[0].to_dict()
+                    return _row_to_result(row, row.get("place", text))
+    except Exception:
+        pass
 
     # Fallback: fuzzy match for minor spelling errors against place_norm
     try:

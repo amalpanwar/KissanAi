@@ -62,6 +62,18 @@ DDL = [
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS market_prices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        district TEXT NOT NULL,
+        commodity TEXT NOT NULL,
+        modal_price REAL,
+        arrival_date TEXT,
+        price_unit TEXT,
+        source TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 ]
 
 
