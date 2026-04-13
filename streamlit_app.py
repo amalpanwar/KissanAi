@@ -21,6 +21,7 @@ from app.datagov_client import DataGovClient
 from app.lstm_forecast import prepare_daily_series, train_and_forecast
 from app.weather import get_current_weather_hindi
 from app.cacp import get_latest_sugarcane_frp
+from app.msp import get_msp_for_crop
 
 
 st.set_page_config(page_title="KisaanAI - Western UP", page_icon="🌾", layout="wide")
@@ -1352,10 +1353,18 @@ if user_query:
                         "CACP से FRP निकालने में समस्या आई।"
                     )
             else:
-                final_answer = (
-                    f"चयनित जिले ({selected_district}) में {selected_commodity} का मंडी डेटा उपलब्ध नहीं है। "
-                    "कृपया दूसरी फसल चुनें या बाद में पुनः प्रयास करें।"
-                )
+                msp = get_msp_for_crop(selected_commodity)
+                if msp:
+                    final_answer = (
+                        f"चयनित जिले ({selected_district}) में {selected_commodity} का मंडी डेटा नहीं मिला।\n"
+                        f"MSP (राष्ट्रीय) {msp['crop']}: ₹{int(msp['msp'])}/क्विंटल.\n"
+                        f"स्रोत: {msp['source_url']}"
+                    )
+                else:
+                    final_answer = (
+                        f"चयनित जिले ({selected_district}) में {selected_commodity} का मंडी डेटा उपलब्ध नहीं है। "
+                        "कृपया दूसरी फसल चुनें या बाद में पुनः प्रयास करें।"
+                    )
             st.session_state.chat_history.append(
                 {"role": "assistant", "text": final_answer, "references": []}
             )
