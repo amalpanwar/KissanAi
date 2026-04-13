@@ -19,6 +19,8 @@ from app.advisor import AdvisorConfig, RAGAdvisor
 from app.config import load_config
 from app.datagov_client import DataGovClient
 from app.lstm_forecast import prepare_daily_series, train_and_forecast
+from app.weather import get_current_weather_hindi
+from app.cacp import get_latest_sugarcane_frp
 
 
 st.set_page_config(page_title="KisaanAI - Western UP", page_icon="🌾", layout="wide")
@@ -553,6 +555,24 @@ def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[st
                 district = str(pick.get("district", "")).strip()
                 state = str(pick.get("state", "")).strip()
                 return (district or None), (state or None)
+    except Exception:
+        pass
+    # Fallback: v/w swap
+    try:
+        if "place_norm" in lookup.columns:
+            if "v" in norm:
+                alt = norm.replace("v", "w")
+            elif "w" in norm:
+                alt = norm.replace("w", "v")
+            else:
+                alt = ""
+            if alt:
+                m = lookup[lookup["place_norm"] == alt]
+                if not m.empty:
+                    pick = m.iloc[0]
+                    district = str(pick.get("district", "")).strip()
+                    state = str(pick.get("state", "")).strip()
+                    return (district or None), (state or None)
     except Exception:
         pass
     return None, None
@@ -1280,6 +1300,18 @@ if user_query:
     )
 
     if intent_price and not market_df.empty:
+        # Ensure commodity is explicitly detected for price queries.
+        comm_from_query = resolve_commodity_from_query(
+            user_query, load_commodity_catalog()
+        )
+        if not comm_from_query:
+            final_answer = "कृपया फसल/कमोडिटी का नाम बताएं (जैसे: गेहूं, गन्ना, धान)।"
+            st.session_state.chat_history.append(
+                {"role": "assistant", "text": final_answer, "references": []}
+            )
+            with st.chat_message("assistant"):
+                st.write(final_answer)
+            st.stop()
         if not selected_district:
             st.session_state.pop("auto_chart", None)
             st.session_state.pop("auto_forecast_table", None)
@@ -1299,7 +1331,37 @@ if user_query:
                 st.write(final_answer)
             st.session_state["need_location_correction"] = True
             st.stop()
+        # Use the commodity resolved from query (avoid fallback to unrelated commodity)
+        selected_commodity = comm_from_query or selected_commodity
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
+        if filtered.empty:
+            if selected_commodity.lower() in {"sugarcane", "गन्ना"}:
+                frp = get_latest_sugarcane_frp()
+                if frp:
+                    season = frp.get("season", "")
+                    price = frp.get("price_per_qtl")
+                    src = frp.get("source_url", "")
+                    final_answer = (
+                        f"चयनित जिले ({selected_district}) के लिए मंडी डेटा नहीं मिला।\n"
+                        f"CACP FRP (राष्ट्रीय) {season} के लिए गन्ना: ₹{int(price)}/क्विंटल.\n"
+                        f"स्रोत: {src}"
+                    )
+                else:
+                    final_answer = (
+                        f"चयनित जिले ({selected_district}) में {selected_commodity} का मंडी डेटा उपलब्ध नहीं है। "
+                        "CACP से FRP निकालने में समस्या आई।"
+                    )
+            else:
+                final_answer = (
+                    f"चयनित जिले ({selected_district}) में {selected_commodity} का मंडी डेटा उपलब्ध नहीं है। "
+                    "कृपया दूसरी फसल चुनें या बाद में पुनः प्रयास करें।"
+                )
+            st.session_state.chat_history.append(
+                {"role": "assistant", "text": final_answer, "references": []}
+            )
+            with st.chat_message("assistant"):
+                st.write(final_answer)
+            st.stop()
         nearest_market = None
         if not filtered.empty and "Market" in filtered.columns and filtered["Market"].notna().any():
             place = extract_place_from_query(user_query)
