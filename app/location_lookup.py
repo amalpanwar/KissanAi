@@ -55,6 +55,8 @@ def _row_to_result(row: dict | pd.Series, place_fallback: str) -> dict[str, Any]
         "sub_district": row.get("sub_district", ""),
         "district": row.get("district", ""),
         "state": row.get("state", ""),
+        "lat": row.get("lat", ""),
+        "lon": row.get("lon", ""),
         "source_file": row.get("source_file", ""),
     }
 
@@ -87,30 +89,29 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
 
     # First pass: n-gram token matching for Hinglish queries like "doghat me ..."
     tokens = re.findall(r"[a-z0-9]+", text.lower())
-    if tokens and "place_norm" in df.columns:
-        place_map = {str(v): row for v, row in zip(df["place_norm"], df.to_dict(orient="records")) if v}
+    if tokens:
+        phrase_norms = set()
         for size in range(min(4, len(tokens)), 0, -1):
             for i in range(0, len(tokens) - size + 1):
                 phrase = " ".join(tokens[i : i + size])
-                norm = _normalize_place(phrase)
+                phrase_norms.add(_normalize_place(phrase))
+        if "place_norm" in df.columns:
+            place_map = {str(v): row for v, row in zip(df["place_norm"], df.to_dict(orient="records")) if v}
+            for norm in phrase_norms:
                 if norm in place_map:
-                    return _row_to_result(place_map[norm], phrase)
-
-    candidates = _iter_norm_candidates(df, ["place_norm"])
-    best: tuple[int, dict] | None = None
-    for norm, row in candidates:
-        if norm in norm_text:
-            score = len(norm)
-            if best is None or score > best[0]:
-                best = (score, row)
-    if best:
-        return _row_to_result(best[1], text)
-
-    # Fallback: match sub-district or district if explicitly mentioned
-    candidates = _iter_norm_candidates(df, ["sub_district", "district"])
-    for norm, row in candidates:
-        if norm in norm_text:
-            return _row_to_result(row, text)
+                    return _row_to_result(place_map[norm], norm)
+        # Fallback: match sub-district or district if explicitly mentioned
+        for col in ["sub_district", "district"]:
+            if col not in df.columns:
+                continue
+            for _, row in df.iterrows():
+                cand = (row.get(col) or "").strip()
+                if not cand:
+                    continue
+                if _normalize_place(cand) in phrase_norms:
+                    row_dict = row.to_dict()
+                    row_dict["place"] = cand
+                    return _row_to_result(row_dict, cand)
 
     # Fallback: fuzzy match for minor spelling errors against place_norm
     try:

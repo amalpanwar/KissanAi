@@ -51,8 +51,8 @@ class RAGAdvisor:
             loc = lookup_place(place) if place else None
             if not loc:
                 loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
-                if loc and not place:
-                    place = loc.get("place")
+            if loc and loc.get("place"):
+                place = loc.get("place")
             if not place and not loc:
                 return {
                     "answer": "मौसम के लिए स्थान नहीं मिला। कृपया स्थान लिखें (जैसे: डोघाट/बड़ौत/मेरठ)।",
