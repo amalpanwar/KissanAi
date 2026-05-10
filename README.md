@@ -113,11 +113,36 @@ Notes:
 3. Ensure files are committed:
    - `requirements.txt`
    - `.streamlit/config.toml`
+   - `.streamlit/secrets.toml.example`
    - `configs/pipeline.yaml`
 4. Deploy.
 
 Notes:
 - First startup can take time due to model download.
+- Cloud secrets should be added in the Streamlit app settings, not by committing `.env`.
+
+### Streamlit secrets for email + APIs
+Use `.streamlit/secrets.toml.example` as the template for Streamlit Community Cloud secrets.
+
+Required keys for account verification and password reset:
+
+```toml
+APP_BASE_URL = "https://your-app-name.streamlit.app"
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = "587"
+SMTP_USER = "your-email@example.com"
+SMTP_PASS = "your-app-password"
+SMTP_FROM = "your-email@example.com"
+```
+
+Optional API keys that the deployed app can also read from Streamlit secrets:
+
+```toml
+DATA_GOV_API_KEY = ""
+DATA_GOV_RESOURCE_ID = "35985678-0d79-46b4-9ed6-6f13308a1d24"
+MAPSCO_API_KEY = ""
+GOOGLE_GEOCODING_API_KEY = ""
+```
 
 ## Agmarknet Fetch & Scheduler
 

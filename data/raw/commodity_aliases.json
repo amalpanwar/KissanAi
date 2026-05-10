@@ -32,7 +32,9 @@
     "Jowar",
     "Jowar(Sorghum)",
     "jowar",
-    "jowar(sorghum)"
+    "jowar(sorghum)",
+    "sorghum",
+    "ज्वार"
   ],
   "bengal gram(gram)(whole)": [
     "Bengal Gram",
@@ -40,13 +42,22 @@
     "BengalGram",
     "bengal gram",
     "bengal gram(gram)(whole)",
-    "bengalgram"
+    "bengalgram",
+    "chana",
+    "chickpea",
+    "gram",
+    "चना"
   ],
   "red gram": [
     "Red Gram",
     "RedGram",
+    "arhar",
+    "pigeon pea",
     "red gram",
-    "redgram"
+    "redgram",
+    "tuar",
+    "tur",
+    "अरहर"
   ],
   "black gram(urd beans)(whole)": [
     "Black Gram",
@@ -54,7 +65,10 @@
     "BlackGram",
     "black gram",
     "black gram(urd beans)(whole)",
-    "blackgram"
+    "blackgram",
+    "urad",
+    "urd",
+    "उड़द"
   ],
   "green gram(moong)(whole)": [
     "Green Gram",
@@ -62,17 +76,28 @@
     "GreenGram",
     "green gram",
     "green gram(moong)(whole)",
-    "greengram"
+    "greengram",
+    "moong",
+    "mung",
+    "मूंग"
   ],
   "groundnut": [
     "Groundnut",
-    "groundnut"
+    "groundnut",
+    "moongfali",
+    "mungfali",
+    "peanut",
+    "मूंगफली"
   ],
   "sesamum(sesame,gingelly,til)": [
     "Sesamum",
     "Sesamum(Sesame,Gingelly,Til)",
+    "gingelly",
+    "sesame",
     "sesamum",
-    "sesamum(sesame,gingelly,til)"
+    "sesamum(sesame,gingelly,til)",
+    "til",
+    "तिल"
   ],
   "mustard": [
     "Mustard",
@@ -82,43 +107,65 @@
   ],
   "soyabean": [
     "Soyabean",
-    "soyabean"
+    "soyabean",
+    "soybean",
+    "सोयाबीन"
   ],
   "sunflower": [
     "Sunflower",
-    "sunflower"
+    "soorajmukhi",
+    "sunflower",
+    "surajmukhi",
+    "surujmukhi",
+    "suryamukhi",
+    "सूरजमुखी"
   ],
   "cotton": [
     "Cotton",
-    "cotton"
+    "cotton",
+    "kapas",
+    "कपास"
   ],
   "jute": [
     "Jute",
-    "jute"
+    "jute",
+    "जूट"
   ],
   "apple": [
     "Apple",
-    "apple"
+    "apple",
+    "seb",
+    "सेब"
   ],
   "orange": [
     "Orange",
-    "orange"
+    "orange",
+    "santra",
+    "संतरा"
   ],
   "banana": [
     "Banana",
-    "banana"
+    "banana",
+    "kela",
+    "केला"
   ],
   "mango": [
     "Mango",
-    "mango"
+    "aam",
+    "mango",
+    "आम"
   ],
   "pineapple": [
     "Pineapple",
-    "pineapple"
+    "ananas",
+    "pineapple",
+    "अनानास"
   ],
   "grapes": [
     "Grapes",
-    "grapes"
+    "angoor",
+    "grapes",
+    "अंगूर"
   ],
   "onion": [
     "Onion",
@@ -134,13 +181,21 @@
   ],
   "garlic": [
     "Garlic",
-    "garlic"
+    "garlic",
+    "lahsun",
+    "lehsun",
+    "लहसुन"
   ],
   "chili red": [
     "Chili Red",
     "ChiliRed",
+    "chili",
     "chili red",
-    "chilired"
+    "chilired",
+    "chilli",
+    "lal mirch",
+    "mirch",
+    "लाल मिर्च"
   ],
   "ginger(dry)": [
     "Ginger",
@@ -152,44 +207,68 @@
     "Bajra",
     "Bajra(Pearl Millet/Cumbu)",
     "bajra",
-    "bajra(pearl millet/cumbu)"
+    "bajra(pearl millet/cumbu)",
+    "cumbu",
+    "pearl millet",
+    "बाजरा"
   ],
   "barley(jau)": [
     "Barley",
     "Barley(Jau)",
     "barley",
-    "barley(jau)"
+    "barley(jau)",
+    "jau",
+    "जौ"
   ],
   "ragi(finger millet)": [
     "Ragi",
     "Ragi(Finger Millet)",
+    "finger millet",
+    "mandua",
     "ragi",
-    "ragi(finger millet)"
+    "ragi(finger millet)",
+    "रागी"
   ],
   "cauliflower": [
     "Cauliflower",
-    "cauliflower"
+    "cauliflower",
+    "gobhi",
+    "phool gobhi",
+    "phulgobhi",
+    "फूलगोभी"
   ],
   "brinjal": [
     "Brinjal",
-    "brinjal"
+    "baigan",
+    "baingan",
+    "begun",
+    "brinjal",
+    "eggplant",
+    "बैंगन"
   ],
   "cashewnuts": [
     "Cashewnuts",
+    "kaju",
+    "kajoo",
+    "kazu",
     "cashewnuts"
   ],
   "black pepper": [
     "Black pepper",
     "Blackpepper",
     "black pepper",
+    "kaali mirch",
     "blackpepper"
   ],
   "turmeric": [
     "Turmeric",
-    "turmeric"
+    "haldi",
+    "turmeric",
+    "हल्दी"
   ],
   "cardamoms": [
     "Cardamoms",
+    "elaichi",
     "cardamoms"
   ],
   "betelnuts": [
@@ -202,16 +281,21 @@
     "CumminSeed",
     "cummin seed",
     "cummin seed(jeera)",
-    "cumminseed"
+    "cumminseed",
+    "jeera",
+    "जीरा"
   ],
   "coriander(leaves)": [
     "Coriander",
     "Coriander(Leaves)",
     "coriander",
-    "coriander(leaves)"
+    "coriander(leaves)",
+    "dhania",
+    "धनिया"
   ],
   "tea": [
     "Tea",
+    "chai",
     "tea"
   ],
   "coffee": [
@@ -222,13 +306,17 @@
     "Methi",
     "Methi(Leaves)",
     "methi",
-    "methi(leaves)"
+    "methi(leaves)",
+    "मेथी"
   ],
   "methi seeds": [
     "Methi Seeds",
     "MethiSeeds",
+    "fenugreek",
+    "methi dana",
     "methi seeds",
-    "methiseeds"
+    "methiseeds",
+    "मेथी दाना"
   ],
   "sugar": [
     "Sugar",
@@ -238,11 +326,16 @@
     "Arhar",
     "Arhar(Tur/Red Gram)(Whole)",
     "arhar",
-    "arhar(tur/red gram)(whole)"
+    "arhar(tur/red gram)(whole)",
+    "pigeon pea",
+    "tuar",
+    "tur",
+    "अरहर"
   ],
   "green peas": [
     "Green Peas",
     "GreenPeas",
+    "matar",
     "green peas",
     "greenpeas"
   ],
@@ -252,7 +345,9 @@
   ],
   "safflower": [
     "Safflower",
-    "safflower"
+    "kusum",
+    "safflower",
+    "कुसुम"
   ],
   "mash": [
     "Mash",
@@ -272,6 +367,10 @@
     "Lentil",
     "Lentil(Masur)(Whole)",
     "lentil",
+    "sabut masoor",
+    "saboot masoor",
+    "sabut masur",
+    "saboot masur",
     "lentil(masur)(whole)"
   ],
   "field pea": [
@@ -286,6 +385,8 @@
   ],
   "toria": [
     "Toria",
+    "Tori",
+    "Tory",
     "toria"
   ],
   "linseed": [
@@ -304,12 +405,17 @@
   ],
   "papaya": [
     "Papaya",
-    "papaya"
+    "papaya",
+    "papita",
+    "पपीता"
   ],
   "water melon": [
     "Water Melon",
     "WaterMelon",
     "water melon",
+    "Tarbooj",
+    "Tarbuj",
+    "Tarbooz",
     "watermelon"
   ],
   "gur(jaggery)": [
@@ -330,7 +436,10 @@
     "Mousambi",
     "Mousambi(Sweet Lime)",
     "mousambi",
-    "mousambi(sweet lime)"
+    "mousambi(sweet lime)",
+    "mosambi",
+    "mausambi",
+    "मौसंबी"
   ],
   "tomato": [
     "Tomato",
@@ -348,21 +457,31 @@
     "Bitter gourd",
     "Bittergourd",
     "bitter gourd",
+    "karela",
     "bittergourd"
   ],
   "bottle gourd": [
     "Bottle gourd",
     "Bottlegourd",
     "bottle gourd",
-    "bottlegourd"
+    "loki",
+    "bottlegourd",
+    "lauki",
+    "ghiya",
+    "लौकी"
   ],
   "ashgourd": [
     "Ashgourd",
-    "ashgourd"
+    "ashgourd",
+    "petha",
+    "safed kaddu",
+    "पेठा"
   ],
   "pumpkin": [
     "Pumpkin",
-    "pumpkin"
+    "pumpkin",
+    "kaddu",
+    "कद्दू"
   ],
   "bhindi(ladies finger)": [
     "Bhindi",
@@ -378,7 +497,9 @@
     "Green Chilli",
     "GreenChilli",
     "green chilli",
-    "greenchilli"
+    "greenchilli",
+    "hari mirch",
+    "हरी मिर्च"
   ],
   "chilly capsicum": [
     "Chilly Capsicum",
@@ -398,7 +519,10 @@
     "BananaGreen",
     "banana - green",
     "banana green",
-    "bananagreen"
+    "bananagreen",
+    "kaccha kela",
+    "raw banana",
+    "कच्चा केला"
   ],
   "dal(avare)": [
     "Dal",
@@ -418,7 +542,11 @@
   ],
   "beans": [
     "Beans",
-    "beans"
+    "beans",
+    "sem",
+    "french beans",
+    "फली",
+    "सेम"
   ],
   "lak(teora)": [
     "Lak",
@@ -454,7 +582,9 @@
     "Ginger",
     "Ginger(Green)",
     "ginger",
-    "ginger(green)"
+    "ginger(green)",
+    "adrak",
+    "अदरक"
   ],
   "cocoa": [
     "Cocoa",
@@ -662,11 +792,16 @@
   ],
   "carrot": [
     "Carrot",
-    "carrot"
+    "carrot",
+    "gajar",
+    "गाजर"
   ],
   "cabbage": [
     "Cabbage",
-    "cabbage"
+    "cabbage",
+    "patta gobhi",
+    "pattagobhi",
+    "पत्ता गोभी"
   ],
   "ladies finger": [
     "Ladies Finger",
@@ -680,7 +815,9 @@
   ],
   "beetroot": [
     "Beetroot",
-    "beetroot"
+    "beetroot",
+    "chukandar",
+    "चुकंदर"
   ],
   "white pumpkin": [
     "White Pumpkin",
@@ -702,7 +839,11 @@
   ],
   "raddish": [
     "Raddish",
-    "raddish"
+    "raddish",
+    "radish",
+    "mooli",
+    "muli",
+    "मूली"
   ],
   "thondekai": [
     "Thondekai",
@@ -716,7 +857,10 @@
   ],
   "capsicum": [
     "Capsicum",
-    "capsicum"
+    "capsicum",
+    "shimla mirch",
+    "shimlamirch",
+    "शिमला मिर्च"
   ],
   "green avare(w)": [
     "Green Avare",
@@ -738,7 +882,11 @@
   ],
   "drumstick": [
     "Drumstick",
-    "drumstick"
+    "drumstick",
+    "sahjan",
+    "munga",
+    "moringa",
+    "सहजन"
   ],
   "chapparad avare": [
     "Chapparad Avare",
@@ -772,7 +920,11 @@
     "Peas Wet",
     "PeasWet",
     "peas wet",
-    "peaswet"
+    "peaswet",
+    "matar",
+    "green peas",
+    "हरा मटर",
+    "मटर"
   ],
   "jamamkhan": [
     "Jamamkhan",
@@ -822,7 +974,10 @@
   ],
   "guava": [
     "Guava",
-    "guava"
+    "guava",
+    "amrood",
+    "amarood",
+    "अमरूद"
   ],
   "karbuja(musk melon)": [
     "Karbuja",
@@ -840,7 +995,9 @@
   ],
   "pomegranate": [
     "Pomegranate",
-    "pomegranate"
+    "pomegranate",
+    "anar",
+    "अनार"
   ],
   "tender coconut": [
     "Tender Coconut",
@@ -1388,7 +1545,9 @@
   ],
   "lemon": [
     "Lemon",
-    "lemon"
+    "lemon",
+    "nimbu",
+    "नींबू"
   ],
   "sponge gourd": [
     "Sponge gourd",
@@ -1408,7 +1567,11 @@
     "Papaya",
     "Papaya(Raw)",
     "papaya",
-    "papaya(raw)"
+    "papaya(raw)",
+    "kaccha papita",
+    "raw papaya",
+    "कच्चा पपीता",
+    "पपीता"
   ],
   "groundnut(split)": [
     "Groundnut",
@@ -1532,11 +1695,15 @@
   ],
   "turnip": [
     "Turnip",
-    "turnip"
+    "turnip",
+    "shalgam",
+    "शलगम"
   ],
   "spinach": [
     "Spinach",
-    "spinach"
+    "spinach",
+    "palak",
+    "पालक"
   ],
   "walnut": [
     "Walnut",
@@ -1622,7 +1789,10 @@
     "Onion Green",
     "OnionGreen",
     "onion green",
-    "oniongreen"
+    "oniongreen",
+    "hara pyaz",
+    "green onion",
+    "हरा प्याज"
   ],
   "gram raw(chholia)": [
     "Gram Raw",
@@ -2975,5 +3145,46 @@
     "Khandsari(Desi Khand)",
     "khandsari",
     "khandsari(desi khand)"
+  ],
+  "okra(ladies finger)": [
+    "Okra",
+    "Okra(Ladies Finger)",
+    "bhindi",
+    "okra",
+    "ladies finger",
+    "भिंडी"
+  ],
+  "pea": [
+    "Pea",
+    "pea",
+    "matar",
+    "मटर"
+  ],
+  "guar seed(lobia/karamani)": [
+    "Guar Seed",
+    "Guar Seed(Lobia/Karamani)",
+    "guar seed",
+    "guarseed",
+    "guar",
+    "cluster bean seed",
+    "ग्वार"
+  ],
+  "rapeseed &mustard": [
+    "Rapeseed & Mustard",
+    "rapeseed &mustard",
+    "rapeseed and mustard",
+    "mustard",
+    "sarso",
+    "sarson",
+    "सरसों"
+  ],
+  "cucumber(kheera)": [
+    "Cucumber",
+    "Cucumber(Kheera)",
+    "cucumber",
+    "cucumber(kheera)",
+    "kheera",
+    "khira",
+    "खीरा"
   ]
 }

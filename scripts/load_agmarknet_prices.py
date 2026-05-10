@@ -33,6 +33,15 @@ def main() -> None:
                 "Price_Unit": "price_unit",
             }
         )
+    elif {"district_name", "cmdt_name", "as_on", "reported_date"}.issubset(df.columns):
+        df = df.rename(
+            columns={
+                "district_name": "district",
+                "cmdt_name": "commodity",
+                "as_on": "modal_price",
+                "reported_date": "arrival_date",
+            }
+        )
     elif {"district_name", "cmdt_name", "model_price_wt", "rep_date"}.issubset(df.columns):
         df = df.rename(
             columns={

@@ -33,6 +33,24 @@ def _get_lookup() -> pd.DataFrame:
     return _load_lookup(mtime)
 
 
+def _safe_str(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
+def _match_qualifiers(row: pd.Series | dict, qualifiers: list[str]) -> bool:
+    if not qualifiers:
+        return True
+    hay = " ".join(
+        [
+            _normalize_place(_safe_str(row.get("place", ""))),
+            _normalize_place(_safe_str(row.get("sub_district", ""))),
+            _normalize_place(_safe_str(row.get("district", ""))),
+            _normalize_place(_safe_str(row.get("state", ""))),
+        ]
+    )
+    return all(q in hay for q in qualifiers)
+
+
 def lookup_place(place: str) -> dict[str, Any] | None:
     if not place:
         return None
@@ -49,6 +67,60 @@ def lookup_place(place: str) -> dict[str, Any] | None:
     return _row_to_result(row, place)
 
 
+def resolve_location_hierarchy(name: str) -> dict[str, Any] | None:
+    if not name:
+        return None
+    df = _get_lookup()
+    if df.empty:
+        return None
+    parts = [p.strip() for p in str(name).split(",") if p.strip()]
+    target = parts[0] if parts else str(name).strip()
+    qualifiers = [_normalize_place(p) for p in parts[1:]]
+    target_norm = _normalize_place(target)
+    if not target_norm:
+        return None
+
+    # 1) District exact match
+    if "district" in df.columns:
+        district_matches = df[df["district"].astype(str).map(_normalize_place) == target_norm]
+        if qualifiers:
+            district_matches = district_matches[
+                district_matches.apply(lambda r: _match_qualifiers(r, qualifiers), axis=1)
+            ]
+        if not district_matches.empty:
+            row = district_matches.iloc[0].to_dict()
+            row["place"] = row.get("district", target)
+            row["lat"] = row.get("district_lat", row.get("lat", ""))
+            row["lon"] = row.get("district_lon", row.get("lon", ""))
+            row["match_level"] = "district"
+            return _row_to_result(row, target)
+
+    # 2) Sub-district exact match
+    if "sub_district" in df.columns:
+        sub_matches = df[df["sub_district"].astype(str).map(_normalize_place) == target_norm]
+        if qualifiers:
+            sub_matches = sub_matches[sub_matches.apply(lambda r: _match_qualifiers(r, qualifiers), axis=1)]
+        if not sub_matches.empty:
+            row = sub_matches.iloc[0].to_dict()
+            row["place"] = row.get("sub_district", target)
+            row["lat"] = row.get("sub_district_lat", row.get("lat", ""))
+            row["lon"] = row.get("sub_district_lon", row.get("lon", ""))
+            row["match_level"] = "sub_district"
+            return _row_to_result(row, target)
+
+    # 3) Village/place exact match
+    if "place_norm" in df.columns:
+        place_matches = df[df["place_norm"].astype(str) == target_norm]
+        if qualifiers:
+            place_matches = place_matches[place_matches.apply(lambda r: _match_qualifiers(r, qualifiers), axis=1)]
+        if not place_matches.empty:
+            row = place_matches.iloc[0].to_dict()
+            row["match_level"] = "place"
+            return _row_to_result(row, target)
+
+    return None
+
+
 def _row_to_result(row: dict | pd.Series, place_fallback: str) -> dict[str, Any]:
     return {
         "place": row.get("place", place_fallback),
@@ -57,6 +129,13 @@ def _row_to_result(row: dict | pd.Series, place_fallback: str) -> dict[str, Any]
         "state": row.get("state", ""),
         "lat": row.get("lat", ""),
         "lon": row.get("lon", ""),
+        "sub_district_lat": row.get("sub_district_lat", ""),
+        "sub_district_lon": row.get("sub_district_lon", ""),
+        "district_lat": row.get("district_lat", ""),
+        "district_lon": row.get("district_lon", ""),
+        "place_formatted_address": row.get("place_formatted_address", ""),
+        "sub_district_formatted_address": row.get("sub_district_formatted_address", ""),
+        "district_formatted_address": row.get("district_formatted_address", ""),
         "source_file": row.get("source_file", ""),
     }
 

@@ -3,20 +3,21 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
+import re
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_GROUP_MAP = ROOT / "data" / "raw" / "agmarknet_group_commodities.json"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.agmarknet_client import build_url, extract_rows, fetch_page
+from app.agmarknet_client import ALL_DISTRICTS, build_snapshot_payload, build_url, extract_rows, fetch_page
 
 
 def parse_ids(val: str) -> list[str]:
@@ -68,6 +69,50 @@ def load_group_map(path: str | None) -> dict[str, list[str]]:
     return out
 
 
+def iter_dates(from_date: str, to_date: str) -> list[str]:
+    start = datetime.strptime(from_date, "%Y-%m-%d").date()
+    end = datetime.strptime(to_date, "%Y-%m-%d").date()
+    if end < start:
+        start, end = end, start
+    cur = start
+    out: list[str] = []
+    while cur <= end:
+        out.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return out
+
+
+def extract_units(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    data = payload.get("data") or {}
+    columns = data.get("columns") if isinstance(data, dict) else None
+    if not isinstance(columns, list):
+        return None, None
+
+    def unit_from_title(title: str) -> str | None:
+        if not isinstance(title, str):
+            return None
+        m = re.search(r"\(([^()]+)\)", title)
+        if not m:
+            return None
+        val = m.group(1).strip()
+        return val or None
+
+    price_unit: str | None = None
+    arrival_unit: str | None = None
+    for col in columns:
+        if not isinstance(col, dict):
+            continue
+        key = str(col.get("key") or "")
+        title = str(col.get("title") or "")
+        if key == "wt_avg_price" and not price_unit:
+            price_unit = unit_from_title(title)
+        if key == "arrival" and not arrival_unit:
+            arrival_unit = unit_from_title(title)
+        if price_unit and arrival_unit:
+            break
+    return price_unit, arrival_unit
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--from_date", default="", help="YYYY-MM-DD (optional if --keep_years set)")
@@ -88,7 +133,7 @@ def main() -> None:
     parser.add_argument("--commodity_ids_file", default="", help="File with commodity IDs, one per line")
     parser.add_argument(
         "--group_commodities_json",
-        default="",
+        default=str(DEFAULT_GROUP_MAP),
         help="JSON map of group_id -> [commodity_id,...]",
     )
     parser.add_argument("--period", default="date")
@@ -100,6 +145,11 @@ def main() -> None:
     parser.add_argument("--sleep_sec", type=float, default=0.3)
     parser.add_argument("--timeout_sec", type=int, default=30)
     parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument(
+        "--all_districts",
+        action="store_true",
+        help="Use Agmarknet's live all-district sentinel instead of local district IDs.",
+    )
     parser.add_argument("--fail_log", default="data/raw/live/agmarknet_failures.csv")
     parser.add_argument("--merge_existing", action="store_true", help="Merge with existing CSV at --out")
     parser.add_argument("--trim_years", type=int, default=0, help="After merge, keep last N years only")
@@ -120,89 +170,77 @@ def main() -> None:
 
     state_ids = parse_ids(args.state_ids)
     district_ids = parse_ids(args.district_ids) + load_id_list(args.district_ids_file)
-    group_ids = parse_ids(args.group_ids) + load_id_list(args.group_ids_file)
-    if not group_ids:
-        raise SystemExit("Provide --group_ids or --group_ids_file.")
-    commodity_ids = parse_ids(args.commodity_ids) + load_id_list(args.commodity_ids_file)
-    option_ids = parse_ids(args.options)
-    group_map = load_group_map(args.group_commodities_json)
-
-    if not district_ids:
-        district_ids = [""]
-    if not commodity_ids:
-        commodity_ids = [""]
+    # Keep parsing legacy args for CLI compatibility, but the live dashboard
+    # snapshot flow no longer depends on stale local group/commodity/district ids.
+    _ = parse_ids(args.group_ids) + load_id_list(args.group_ids_file)
+    _ = parse_ids(args.commodity_ids) + load_id_list(args.commodity_ids_file)
+    _ = parse_ids(args.options)
+    _ = load_group_map(args.group_commodities_json)
 
     all_rows: list[dict[str, Any]] = []
     failed_rows: list[dict[str, Any]] = []
+    date_values = iter_dates(from_date, to_date)
 
-    if args.districts_as_list and district_ids != [""]:
-        district_ids = [",".join(district_ids)]
+    use_all_districts = args.all_districts or not district_ids
+    live_district_ids = None if use_all_districts else district_ids
 
     for state_id in state_ids:
-        for district_id in district_ids:
-            for group_id in group_ids:
-                per_group_commodities = commodity_ids
-                if group_map:
-                    per_group_commodities = group_map.get(str(group_id), [])
-                if not per_group_commodities:
-                    continue
-                for commodity_id in per_group_commodities:
-                    for option in option_ids:
-                        page = 1
-                        while page <= args.max_pages:
-                            params = {
-                                "type": args.type,
-                                "from_date": from_date,
-                                "to_date": to_date,
-                                "msp": args.msp,
-                                "period": args.period,
-                                "group": f"[{group_id}]",
-                                "commodity": f"[{commodity_id}]",
-                                "state": f"[{state_id}]",
-                                "district": f"[{district_id}]",
-                                "market": "[]",
-                                "page": page,
-                                "options": option,
-                                "limit": args.limit,
-                            }
-                            try:
-                                payload = fetch_page(
-                                    params,
-                                    timeout_sec=args.timeout_sec,
-                                    retries=args.retries,
-                                )
-                            except Exception as exc:
-                                if args.debug:
-                                    url = build_url(params)
-                                    print(f"Fetch failed: {exc} | {url}", file=sys.stderr)
-                                failed_rows.append(
-                                    {
-                                        "state_id": state_id,
-                                        "district_id": district_id,
-                                        "group_id": group_id,
-                                        "commodity_id": commodity_id,
-                                        "option": option,
-                                        "page": page,
-                                        "error": str(exc),
-                                        "url": build_url(params),
-                                    }
-                                )
-                                break
-                            rows = extract_rows(payload)
-                            if not rows:
-                                break
-                            for r in rows:
-                                r = dict(r)
-                                r["_state_id"] = state_id
-                                r["_district_id"] = district_id
-                                r["_group_id"] = group_id
-                                r["_commodity_id"] = commodity_id
-                                r["_option"] = option
-                                all_rows.append(r)
-                            if len(rows) < args.limit:
-                                break
-                            page += 1
-                            time.sleep(args.sleep_sec)
+        for date_str in date_values:
+            page = 1
+            while page <= args.max_pages:
+                params = build_snapshot_payload(
+                    state_id=state_id,
+                    date_str=date_str,
+                    page=page,
+                    limit=args.limit,
+                    district_ids=live_district_ids,
+                )
+                try:
+                    payload = fetch_page(
+                        params,
+                        timeout_sec=args.timeout_sec,
+                        retries=args.retries,
+                    )
+                except Exception as exc:
+                    if args.debug:
+                        print(f"Fetch failed: {exc} | {build_url(params)}", file=sys.stderr)
+                    failed_rows.append(
+                        {
+                            "state_id": state_id,
+                            "date": date_str,
+                            "page": page,
+                            "error": str(exc),
+                            "url": build_url(params),
+                            "request_json": json.dumps(params, ensure_ascii=False),
+                        }
+                    )
+                    break
+                rows = extract_rows(payload)
+                if not rows:
+                    break
+                price_unit, arrival_unit = extract_units(payload)
+                for r in rows:
+                    r = dict(r)
+                    r["_state_id"] = state_id
+                    r["_requested_date"] = date_str
+                    # Normalize to the legacy column names that the app already expects.
+                    if "reported_date" in r and "rep_date" not in r:
+                        r["rep_date"] = r["reported_date"]
+                    if "as_on" in r and "model_price_wt" not in r:
+                        r["model_price_wt"] = r["as_on"]
+                    if price_unit and (not r.get("unit_name_price") or str(r.get("unit_name_price")).strip().lower() == "nan"):
+                        r["unit_name_price"] = price_unit
+                    if arrival_unit and (not r.get("unit_name_arrival") or str(r.get("unit_name_arrival")).strip().lower() == "nan"):
+                        r["unit_name_arrival"] = arrival_unit
+                    all_rows.append(r)
+                pagination = payload.get("pagination") or {}
+                total_pages = int(pagination.get("total_pages") or 0)
+                if total_pages and page >= total_pages:
+                    break
+                if len(rows) < args.limit:
+                    break
+                page += 1
+                time.sleep(args.sleep_sec)
 
     if not all_rows:
         print("No records returned.")
@@ -216,12 +254,40 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(all_rows)
+    fetched_price_units = (
+        [u for u in df.get("unit_name_price", pd.Series(dtype=object)).dropna().astype(str) if u and u.lower() != "nan"]
+        if "unit_name_price" in df.columns
+        else []
+    )
+    fetched_arrival_units = (
+        [u for u in df.get("unit_name_arrival", pd.Series(dtype=object)).dropna().astype(str) if u and u.lower() != "nan"]
+        if "unit_name_arrival" in df.columns
+        else []
+    )
+    inferred_price_unit = fetched_price_units[0] if fetched_price_units else None
+    inferred_arrival_unit = fetched_arrival_units[0] if fetched_arrival_units else None
     if args.merge_existing and out_path.exists():
         try:
             old = pd.read_csv(out_path)
             df = pd.concat([old, df], ignore_index=True)
         except Exception:
             pass
+    if inferred_price_unit:
+        if "unit_name_price" not in df.columns:
+            df["unit_name_price"] = inferred_price_unit
+        else:
+            mask = df["unit_name_price"].isna() | (df["unit_name_price"].astype(str).str.strip() == "") | (
+                df["unit_name_price"].astype(str).str.lower() == "nan"
+            )
+            df.loc[mask, "unit_name_price"] = inferred_price_unit
+    if inferred_arrival_unit:
+        if "unit_name_arrival" not in df.columns:
+            df["unit_name_arrival"] = inferred_arrival_unit
+        else:
+            mask = df["unit_name_arrival"].isna() | (df["unit_name_arrival"].astype(str).str.strip() == "") | (
+                df["unit_name_arrival"].astype(str).str.lower() == "nan"
+            )
+            df.loc[mask, "unit_name_arrival"] = inferred_arrival_unit
     if not df.empty:
         # Deduplicate on common key columns if present.
         key_cols = [
