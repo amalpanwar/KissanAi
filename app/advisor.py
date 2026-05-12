@@ -274,6 +274,21 @@ class RAGAdvisor:
             return {"answer": self._time_based_greeting(), "references": [], "retrieved": [], "topic": "greeting"}
 
         normalized_question = self._normalize_hinglish(farmer_question)
+        emergency_cost_answer = (
+            self._answer_crop_cost_method_query(farmer_question, context_part)
+            or self._answer_crop_cost_method_query(normalized_question, context_part)
+            or self._answer_sugarcane_cost_query(farmer_question, context_part)
+            or self._answer_sugarcane_cost_query(normalized_question, context_part)
+            or self._answer_generic_cacp_cost_query(farmer_question, context_part)
+            or self._answer_generic_cacp_cost_query(normalized_question, context_part)
+        )
+        if emergency_cost_answer:
+            return {
+                "answer": emergency_cost_answer,
+                "references": ["CACP official report", "UPAG yield data"],
+                "retrieved": [],
+                "topic": "crop_profitability_followup",
+            }
         loc_ctx = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
         if loc_ctx:
             district = loc_ctx.get("district")
@@ -2853,10 +2868,26 @@ class RAGAdvisor:
 
     def _ensure_rag_components(self, load_generator: bool = True) -> None:
         if self.embedder is None:
-            self.embedder = Embedder(self.cfg.embedding_model)
+            try:
+                self.embedder = Embedder(self.cfg.embedding_model)
+            except Exception:
+                self.embedder = None
+                self.retriever = None
+                if load_generator:
+                    self.generator = None
+                return
         if self.retriever is None:
-            store = NumpyVectorStore(self.cfg.index_path, self.cfg.metadata_path)
-            vectors, metadata = store.load()
-            self.retriever = Retriever(vectors=vectors, metadata=metadata)
+            try:
+                store = NumpyVectorStore(self.cfg.index_path, self.cfg.metadata_path)
+                vectors, metadata = store.load()
+                self.retriever = Retriever(vectors=vectors, metadata=metadata)
+            except Exception:
+                self.retriever = None
+                if load_generator:
+                    self.generator = None
+                return
         if load_generator and self.generator is None:
-            self.generator = LocalGenerator(self.cfg.generator_model)
+            try:
+                self.generator = LocalGenerator(self.cfg.generator_model)
+            except Exception:
+                self.generator = None
