@@ -1,0 +1,35 @@
+{
+  "report_kind": "rabi",
+  "season": "2026-27",
+  "rows": {
+    "Wheat": {
+      "a2_per_qtl": 994.0,
+      "a2fl_per_qtl": 1239.0,
+      "c2_per_qtl": 1804.0
+    },
+    "Barley": {
+      "a2_per_qtl": 912.0,
+      "a2fl_per_qtl": 1361.0,
+      "c2_per_qtl": 1862.0
+    },
+    "Gram": {
+      "a2_per_qtl": 2886.0,
+      "a2fl_per_qtl": 3699.0,
+      "c2_per_qtl": 4875.0
+    },
+    "Rapeseed & Mustard": {
+      "a2_per_qtl": 2219.0,
+      "a2fl_per_qtl": 3210.0,
+      "c2_per_qtl": 4558.0
+    },
+    "Safflower": {
+      "a2_per_qtl": 3376.0,
+      "a2fl_per_qtl": 4360.0,
+      "c2_per_qtl": 5738.0
+    }
+  },
+  "english_url": "https://cacp.da.gov.in//Document/EnglishReports/ViewQuestionare (2)_20251110111404262.pdf",
+  "hindi_url": "https://cacp.da.gov.in//Document/HindiReports/Final Hindi Rabi Report for Prtg 28-01-26_20260202143439325.pdf",
+  "english_path": "data/raw/official_sources/cacp_rabi_latest_en.pdf",
+  "hindi_path": "data/raw/official_sources/cacp_rabi_latest_hi.pdf"
+}

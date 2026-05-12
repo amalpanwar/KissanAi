@@ -1,0 +1,13 @@
+{
+  "season": "2026-27",
+  "frp_per_qtl": 365.0,
+  "a2_basic_per_qtl": 151.0,
+  "a2fl_basic_per_qtl": 182.0,
+  "c2_basic_per_qtl": 258.0,
+  "modified_a2_per_qtl": 180.0,
+  "modified_a2fl_per_qtl": 211.0,
+  "modified_c2_per_qtl": 287.0,
+  "transport_insurance_per_qtl": 29.0,
+  "source_file": "data/raw/official_sources/cacp_sugarcane_latest.pdf",
+  "source_name": "CACP Sugarcane Price Policy 2026-27"
+}

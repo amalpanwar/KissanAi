@@ -1,0 +1,80 @@
+{
+  "report_kind": "kharif",
+  "season": "2025-26",
+  "rows": {
+    "Paddy": {
+      "a2_per_qtl": 1238.0,
+      "a2fl_per_qtl": 1579.0,
+      "c2_per_qtl": 2090.0
+    },
+    "Jowar": {
+      "a2_per_qtl": 1859.0,
+      "a2fl_per_qtl": 2466.0,
+      "c2_per_qtl": 3206.0
+    },
+    "Bajra": {
+      "a2_per_qtl": 1046.0,
+      "a2fl_per_qtl": 1703.0,
+      "c2_per_qtl": 2209.0
+    },
+    "Maize": {
+      "a2_per_qtl": 1183.0,
+      "a2fl_per_qtl": 1508.0,
+      "c2_per_qtl": 1952.0
+    },
+    "Ragi": {
+      "a2_per_qtl": 2337.0,
+      "a2fl_per_qtl": 3257.0,
+      "c2_per_qtl": 3976.0
+    },
+    "Arhar (Tur)": {
+      "a2_per_qtl": 3848.0,
+      "a2fl_per_qtl": 5038.0,
+      "c2_per_qtl": 6839.0
+    },
+    "Moong": {
+      "a2_per_qtl": 3510.0,
+      "a2fl_per_qtl": 5845.0,
+      "c2_per_qtl": 7476.0
+    },
+    "Urad": {
+      "a2_per_qtl": 3874.0,
+      "a2fl_per_qtl": 5114.0,
+      "c2_per_qtl": 6829.0
+    },
+    "Groundnut": {
+      "a2_per_qtl": 4065.0,
+      "a2fl_per_qtl": 4842.0,
+      "c2_per_qtl": 6047.0
+    },
+    "Soybean": {
+      "a2_per_qtl": 3082.0,
+      "a2fl_per_qtl": 3552.0,
+      "c2_per_qtl": 4638.0
+    },
+    "Sunflower": {
+      "a2_per_qtl": 4379.0,
+      "a2fl_per_qtl": 5147.0,
+      "c2_per_qtl": 6364.0
+    },
+    "Sesamum": {
+      "a2_per_qtl": 3957.0,
+      "a2fl_per_qtl": 6564.0,
+      "c2_per_qtl": 8632.0
+    },
+    "Nigerseed": {
+      "a2_per_qtl": 1960.0,
+      "a2fl_per_qtl": 6358.0,
+      "c2_per_qtl": 8025.0
+    },
+    "Cotton": {
+      "a2_per_qtl": 4130.0,
+      "a2fl_per_qtl": 5140.0,
+      "c2_per_qtl": 6717.0
+    }
+  },
+  "english_url": "https://cacp.da.gov.in/Document/EnglishReports/KharifReports2025-26_20250825125215821.pdf",
+  "hindi_url": "https://cacp.da.gov.in/Document/HindiReports/KharifReportshindi2025-26_20250825125215873.pdf",
+  "english_path": "data/raw/official_sources/cacp_kharif_latest_en.pdf",
+  "hindi_path": "data/raw/official_sources/cacp_kharif_latest_hi.pdf"
+}

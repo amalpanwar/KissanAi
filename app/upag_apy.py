@@ -29,7 +29,11 @@ def load_latest_up_yield_qtl_per_acre(
 ) -> dict | None:
     path = Path(csv_path)
     if not path.exists():
-        return None
+        fallback = Path("data/raw/live/upag_statewise_apy.csv")
+        if fallback.exists():
+            path = fallback
+        else:
+            return None
     try:
         df = pd.read_csv(path)
     except Exception:
