@@ -11,12 +11,18 @@ class Embedder:
         online = os.getenv("KISAANAI_HF_ONLINE", "").strip().lower() in {"1", "true", "yes"}
         try:
             self.model = SentenceTransformer(model_name, local_files_only=not online)
-        except Exception:
+        except Exception as first_exc:
             if not online:
-                raise RuntimeError(
-                    f"Embedding model '{model_name}' is not available in the local cache. "
-                    "Run once with KISAANAI_HF_ONLINE=1 when internet is available."
-                )
+                try:
+                    # Streamlit Cloud does not share the local Hugging Face cache
+                    # from the developer machine, so allow a one-time download fallback.
+                    self.model = SentenceTransformer(model_name, local_files_only=False)
+                    return
+                except Exception as second_exc:
+                    raise RuntimeError(
+                        f"Embedding model '{model_name}' is not available in the local cache and could not be "
+                        f"downloaded automatically. Local error: {first_exc}. Download error: {second_exc}"
+                    ) from second_exc
             raise
 
     def encode(self, texts: list[str]) -> np.ndarray:
