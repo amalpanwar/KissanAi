@@ -329,6 +329,34 @@ def authenticate_user_status(
         conn.close()
 
 
+def get_user_by_id(db_path: str | Path, user_id: int) -> dict[str, Any] | None:
+    conn = get_conn(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, username, email, display_name, role, is_active, is_verified
+            FROM users
+            WHERE id = ?
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        if int(row["is_active"] or 0) != 1 or int(row["is_verified"] or 0) != 1:
+            return None
+        return {
+            "id": int(row["id"]),
+            "username": str(row["username"]),
+            "email": str(row["email"] or ""),
+            "display_name": str(row["display_name"] or row["username"]),
+            "role": str(row["role"] or "user"),
+        }
+    finally:
+        conn.close()
+
+
 def verify_user_by_token(db_path: str | Path, token: str) -> tuple[bool, str]:
     token = (token or "").strip()
     if not token:

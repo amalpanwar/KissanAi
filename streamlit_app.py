@@ -6,6 +6,9 @@ import sys
 import sqlite3
 import smtplib
 import uuid
+import hmac
+import hashlib
+import base64
 from datetime import date
 from time import time
 from pathlib import Path
@@ -30,6 +33,7 @@ from app.db import (
     feedback_exists,
     get_conn,
     get_feedback_queue,
+    get_user_by_id,
     get_user_by_email,
     init_db,
     review_feedback,
@@ -65,6 +69,7 @@ FETCH_MAX_RECORDS_STATE = 50000
 FETCH_COOLDOWN_SEC = 600
 FAST_FETCH_LIMIT = 200
 TRAINING_FEEDBACK_PATH = Path("data/processed/accepted_feedback.jsonl")
+AUTH_COOKIE_NAME = "krishiai_auth"
 
 
 def _safe_text(value: object, fallback: str = "") -> str:
@@ -1149,6 +1154,68 @@ def current_user() -> dict | None:
     return st.session_state.get("auth_user")
 
 
+def _auth_cookie_secret() -> str:
+    env_vals = load_local_env(Path(".env"))
+    secret = get_setting("AUTH_COOKIE_SECRET", env_vals)
+    if secret:
+        return secret
+    return "krishiai-dev-secret-change-me"
+
+
+def _sign_auth_value(raw_value: str) -> str:
+    secret = _auth_cookie_secret().encode("utf-8")
+    sig = hmac.new(secret, raw_value.encode("utf-8"), hashlib.sha256).hexdigest()
+    payload = f"{raw_value}.{sig}"
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("utf-8")
+
+
+def _verify_auth_value(token: str) -> str | None:
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode("utf-8")).decode("utf-8")
+        raw_value, sig = decoded.rsplit(".", 1)
+    except Exception:
+        return None
+    expected = hmac.new(
+        _auth_cookie_secret().encode("utf-8"),
+        raw_value.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return None
+    return raw_value
+
+
+def set_auth_cookie(user: dict) -> None:
+    try:
+        st.context.cookies[AUTH_COOKIE_NAME] = _sign_auth_value(str(user["id"]))
+    except Exception:
+        pass
+
+
+def clear_auth_cookie() -> None:
+    try:
+        st.context.cookies[AUTH_COOKIE_NAME] = ""
+    except Exception:
+        pass
+
+
+def restore_auth_from_cookie(db_path: str) -> None:
+    if current_user():
+        return
+    try:
+        token = st.context.cookies.get(AUTH_COOKIE_NAME)
+    except Exception:
+        token = None
+    if not token:
+        return
+    raw = _verify_auth_value(str(token))
+    if not raw or not raw.isdigit():
+        return
+    user = get_user_by_id(db_path, int(raw))
+    if user:
+        st.session_state["auth_user"] = user
+
+
 def build_verification_link(token: str) -> str | None:
     env_vals = load_local_env(Path(".env"))
     base_url = get_setting("APP_BASE_URL", env_vals)
@@ -1245,6 +1312,7 @@ def render_auth_sidebar(db_path: str) -> None:
         st.success(f"Signed in as {user.get('display_name')}")
         st.caption(f"Role: {user.get('role', 'user')}")
         if st.button("Sign Out", use_container_width=True):
+            clear_auth_cookie()
             for key in ("auth_user", "chat_history", "last_structured_topic", "last_structured_context", "last_location_context"):
                 st.session_state.pop(key, None)
             st.rerun()
@@ -1316,6 +1384,7 @@ def render_auth_sidebar(db_path: str) -> None:
                 st.session_state["auth_notice"] = ("warning", "Please verify your email before signing in.")
             else:
                 st.session_state["auth_user"] = user
+                set_auth_cookie(user)
                 st.rerun()
             st.rerun()
     verification_link = st.session_state.get("auth_verification_link")
@@ -1567,6 +1636,7 @@ if not ok:
     st.stop()
 init_db(cfg.paths["sqlite_db"])
 handle_email_verification(cfg.paths["sqlite_db"])
+restore_auth_from_cookie(cfg.paths["sqlite_db"])
 
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())
