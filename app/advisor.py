@@ -322,8 +322,15 @@ class RAGAdvisor:
                     "topic": "weather",
                 }
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": [], "topic": "weather"}
-        if self._is_profitability_followup_intent(normalized_question):
-            crop_cost_method_answer = self._answer_crop_cost_method_query(normalized_question, context_part)
+        profitability_followup = (
+            self._is_profitability_followup_intent(normalized_question)
+            or self._is_profitability_followup_intent(farmer_question)
+        )
+        if profitability_followup:
+            crop_cost_method_answer = (
+                self._answer_crop_cost_method_query(normalized_question, context_part)
+                or self._answer_crop_cost_method_query(farmer_question, context_part)
+            )
             if crop_cost_method_answer:
                 return {
                     "answer": crop_cost_method_answer,
@@ -332,12 +339,15 @@ class RAGAdvisor:
                     "topic": "crop_profitability_followup",
                 }
             return {
-                "answer": self._explain_profitability_method(context_part, normalized_question),
+                "answer": self._explain_profitability_method(context_part, farmer_question),
                 "references": [],
                 "retrieved": [],
                 "topic": "crop_profitability_followup",
             }
-        sugarcane_cost_answer = self._answer_sugarcane_cost_query(normalized_question, context_part)
+        sugarcane_cost_answer = (
+            self._answer_sugarcane_cost_query(normalized_question, context_part)
+            or self._answer_sugarcane_cost_query(farmer_question, context_part)
+        )
         if sugarcane_cost_answer:
             return {
                 "answer": sugarcane_cost_answer,
@@ -345,7 +355,10 @@ class RAGAdvisor:
                 "retrieved": [],
                 "topic": "crop_profitability_followup",
             }
-        generic_cacp_cost_answer = self._answer_generic_cacp_cost_query(normalized_question, context_part)
+        generic_cacp_cost_answer = (
+            self._answer_generic_cacp_cost_query(normalized_question, context_part)
+            or self._answer_generic_cacp_cost_query(farmer_question, context_part)
+        )
         if generic_cacp_cost_answer:
             return {
                 "answer": generic_cacp_cost_answer,
@@ -402,7 +415,15 @@ class RAGAdvisor:
             else normalized_question
         )
 
-        self._ensure_rag_components(load_generator=False)
+        try:
+            self._ensure_rag_components(load_generator=False)
+        except Exception:
+            return {
+                "answer": "अभी यह सवाल local source से नहीं निकल पाया और RAG model उपलब्ध नहीं है। कृपया सवाल में फसल/जिला साफ लिखें या थोड़ी देर बाद फिर प्रयास करें।",
+                "references": [],
+                "retrieved": [],
+                "topic": "rag",
+            }
         if self.embedder is None or self.retriever is None or self.generator is None:
             return {
                 "answer": "मॉडल अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।",
