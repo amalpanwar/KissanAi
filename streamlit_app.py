@@ -23,31 +23,32 @@ import difflib
 
 from app.advisor import AdvisorConfig, RAGAdvisor, WESTERN_UP_CROP_BASELINES
 from app.config import load_config
-from app.db import (
-    authenticate_user,
-    authenticate_user_status,
-    create_password_reset_otp,
-    create_query_log,
-    create_user,
-    export_training_feedback,
-    feedback_exists,
-    get_conn,
-    get_feedback_queue,
-    get_user_by_id,
-    get_user_by_email,
-    init_db,
-    review_feedback,
-    save_feedback,
-    set_verification_token_for_email,
-    reset_password_with_otp,
-    verify_user_by_token,
-)
+import app.db as db_mod
 from app.datagov_client import DataGovClient
 from app.feedback import compact_evidence_text, validate_feedback_with_local_sources
 from app.lstm_forecast import prepare_daily_series, train_and_forecast
 from app.weather import get_current_weather_hindi
 from app.cacp import get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
+
+
+authenticate_user = db_mod.authenticate_user
+authenticate_user_status = db_mod.authenticate_user_status
+create_password_reset_otp = db_mod.create_password_reset_otp
+create_query_log = db_mod.create_query_log
+create_user = db_mod.create_user
+export_training_feedback = db_mod.export_training_feedback
+feedback_exists = db_mod.feedback_exists
+get_conn = db_mod.get_conn
+get_feedback_queue = db_mod.get_feedback_queue
+get_user_by_email = db_mod.get_user_by_email
+get_user_by_id = db_mod.get_user_by_id
+init_db = db_mod.init_db
+reset_password_with_otp = db_mod.reset_password_with_otp
+review_feedback = db_mod.review_feedback
+save_feedback = db_mod.save_feedback
+set_verification_token_for_email = db_mod.set_verification_token_for_email
+verify_user_by_token = db_mod.verify_user_by_token
 
 
 BRAND_IMAGE = Path(

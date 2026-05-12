@@ -4,10 +4,17 @@ import json
 from pathlib import Path
 
 import pandas as pd
-from pypdf import PdfReader
 
 
 SUPPORTED = {".txt", ".md", ".csv", ".json", ".pdf"}
+
+
+def _get_pdf_reader():
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise ImportError("pypdf is required for PDF document ingestion.") from exc
+    return PdfReader
 
 
 def read_text_file(path: Path) -> str:
@@ -21,7 +28,7 @@ def read_text_file(path: Path) -> str:
         obj = json.loads(path.read_text(encoding="utf-8"))
         return json.dumps(obj, ensure_ascii=False)
     if ext == ".pdf":
-        reader = PdfReader(str(path))
+        reader = _get_pdf_reader()(str(path))
         pages = []
         for page in reader.pages:
             text = page.extract_text() or ""

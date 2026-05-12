@@ -8,8 +8,6 @@ import tempfile
 from urllib.request import urlopen
 from urllib.parse import quote
 
-from pypdf import PdfReader
-
 
 BASE_URL = "https://cacp.da.gov.in/"
 SUGARCANE_REPORTS_URL = "https://cacp.da.gov.in/Home/sugarcanereports"
@@ -32,6 +30,14 @@ REPORT_CROP_NAMES = {
     "copra": ["Copra"],
 }
 QUESTIONNAIRE_TOKENS = ("viewquestionare", "questionnaire", "questionare", "annexure")
+
+
+def _get_pdf_reader():
+    try:
+        from pypdf import PdfReader
+    except ImportError as exc:
+        raise ImportError("pypdf is required for CACP PDF parsing.") from exc
+    return PdfReader
 
 
 def _current_and_previous_labels(report_kind: str, year: int) -> list[str]:
@@ -155,7 +161,7 @@ def _candidate_report_links(paths: list[str], report_kind: str) -> list[str]:
 
 def _pdf_has_report_signature(pdf_path: Path, report_kind: str, language: str) -> bool:
     try:
-        reader = PdfReader(str(pdf_path))
+        reader = _get_pdf_reader()(str(pdf_path))
     except Exception:
         return False
     text = ""
@@ -183,7 +189,7 @@ def _pdf_has_report_signature(pdf_path: Path, report_kind: str, language: str) -
 
 def _pdf_preview_text(pdf_path: Path, max_pages: int = 8) -> str:
     try:
-        reader = PdfReader(str(pdf_path))
+        reader = _get_pdf_reader()(str(pdf_path))
     except Exception:
         return ""
     parts: list[str] = []
@@ -314,7 +320,7 @@ def get_cacp_cost_table(report_kind: str, cache_path: Path | str | None = None) 
         return None
     pdf_path = Path(str(eng_path))
     try:
-        reader = PdfReader(str(pdf_path))
+        reader = _get_pdf_reader()(str(pdf_path))
     except Exception:
         return None
     text_parts: list[str] = []
@@ -404,7 +410,7 @@ def get_cacp_cost_for_crop(crop_name: str) -> dict | None:
 
 def _extract_frp_from_pdf(pdf_path: Path) -> dict | None:
     try:
-        reader = PdfReader(str(pdf_path))
+        reader = _get_pdf_reader()(str(pdf_path))
     except Exception:
         return None
     # Scan first 30 pages for FRP sentence
@@ -453,7 +459,7 @@ def get_sugarcane_cost_snapshot(cache_path: Path | str = "data/processed/cacp_su
     if not pdf_path.exists():
         return None
     try:
-        reader = PdfReader(str(pdf_path))
+        reader = _get_pdf_reader()(str(pdf_path))
     except Exception:
         return None
 
