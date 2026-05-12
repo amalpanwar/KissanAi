@@ -1227,10 +1227,10 @@ def handle_email_verification(db_path: str) -> None:
     ok, msg = verify_user_by_token(db_path, str(token))
     if ok:
         st.session_state["auth_notice"] = ("success", f"Email verified for {msg}. You can now sign in.")
-        st.session_state["auth_mode"] = "Sign In"
+        st.session_state["auth_mode_state"] = "Sign In"
     else:
         st.session_state["auth_notice"] = ("error", msg)
-        st.session_state["auth_mode"] = "Create Account"
+        st.session_state["auth_mode_state"] = "Create Account"
     try:
         st.query_params.clear()
     except Exception:
@@ -1250,7 +1250,17 @@ def render_auth_sidebar(db_path: str) -> None:
             st.rerun()
         return
 
-    auth_mode = st.radio("Access", ["Sign In", "Create Account"], horizontal=True, key="auth_mode")
+    if "auth_mode_state" not in st.session_state:
+        st.session_state["auth_mode_state"] = "Sign In"
+    auth_mode = st.radio(
+        "Access",
+        ["Sign In", "Create Account"],
+        horizontal=True,
+        key="auth_mode_widget",
+        index=0 if st.session_state.get("auth_mode_state") == "Sign In" else 1,
+    )
+    if auth_mode != st.session_state.get("auth_mode_state"):
+        st.session_state["auth_mode_state"] = auth_mode
     notice = st.session_state.get("auth_notice")
     if notice:
         level, text = notice
@@ -1272,7 +1282,7 @@ def render_auth_sidebar(db_path: str) -> None:
                 payload = msg if isinstance(msg, dict) else {}
                 token = str(payload.get("verification_token") or "")
                 sent, send_msg = send_verification_email(str(payload.get("email") or email), token)
-                st.session_state["auth_mode"] = "Sign In"
+                st.session_state["auth_mode_state"] = "Sign In"
                 st.session_state["auth_password"] = ""
                 st.session_state["auth_confirm_password"] = ""
                 st.session_state["auth_username"] = username
@@ -1292,7 +1302,7 @@ def render_auth_sidebar(db_path: str) -> None:
                         st.session_state["auth_verification_link"] = fallback_link
                 st.rerun()
             else:
-                st.session_state["auth_mode"] = "Create Account"
+                st.session_state["auth_mode_state"] = "Create Account"
                 st.session_state["auth_notice"] = ("error", str(msg))
                 st.rerun()
     else:
@@ -1305,7 +1315,7 @@ def render_auth_sidebar(db_path: str) -> None:
             if status == "invalid" or not user:
                 st.session_state["auth_notice"] = ("error", "Invalid username/email or password.")
             elif status == "unverified":
-                st.session_state["auth_mode"] = "Sign In"
+                st.session_state["auth_mode_state"] = "Sign In"
                 st.session_state["auth_notice"] = ("warning", "Please verify your email before signing in.")
             else:
                 st.session_state["auth_user"] = user
@@ -1363,7 +1373,7 @@ def render_auth_sidebar(db_path: str) -> None:
                     ok, msg = reset_password_with_otp(db_path, active_reset_email, otp, new_password)
                     if ok:
                         st.success(msg)
-                        st.session_state["auth_mode"] = "Sign In"
+                        st.session_state["auth_mode_state"] = "Sign In"
                         for key in ("reset_email_active", "reset_otp", "reset_new_password", "reset_confirm_password", "reset_otp_preview"):
                             st.session_state.pop(key, None)
                     else:
