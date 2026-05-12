@@ -265,6 +265,28 @@ def get_setting(name: str, env_vals: dict[str, str] | None = None, default: str 
     return str(val).strip()
 
 
+def smtp_config_status() -> dict[str, bool | str]:
+    env_vals = load_local_env(Path(".env"))
+    app_base_url = get_setting("APP_BASE_URL", env_vals)
+    smtp_host = get_setting("SMTP_HOST", env_vals)
+    smtp_port = get_setting("SMTP_PORT", env_vals, "587")
+    smtp_user = get_setting("SMTP_USER", env_vals)
+    smtp_pass = get_setting("SMTP_PASS", env_vals)
+    smtp_from = get_setting("SMTP_FROM", env_vals, smtp_user)
+    return {
+        "app_base_url": bool(app_base_url),
+        "smtp_host": bool(smtp_host),
+        "smtp_port": bool(smtp_port),
+        "smtp_user": bool(smtp_user),
+        "smtp_pass": bool(smtp_pass),
+        "smtp_from": bool(smtp_from),
+        "smtp_ready": bool(app_base_url and smtp_host and smtp_port and smtp_user and smtp_pass and smtp_from),
+        "app_base_url_value": app_base_url,
+        "smtp_host_value": smtp_host,
+        "smtp_from_value": smtp_from,
+    }
+
+
 def merge_market_data(existing_path: Path, new_df: pd.DataFrame) -> pd.DataFrame:
     if existing_path.exists():
         try:
@@ -1217,6 +1239,7 @@ def handle_email_verification(db_path: str) -> None:
 
 def render_auth_sidebar(db_path: str) -> None:
     st.subheader("Account Access")
+    smtp_status = smtp_config_status()
     user = current_user()
     if user:
         st.success(f"Signed in as {user.get('display_name')}")
@@ -1349,6 +1372,28 @@ def render_auth_sidebar(db_path: str) -> None:
         if otp_preview:
             st.caption("OTP preview")
             st.code(otp_preview)
+    with st.expander("Email Delivery Diagnostics", expanded=False):
+        st.write(f"APP_BASE_URL configured: {'Yes' if smtp_status['app_base_url'] else 'No'}")
+        st.write(f"SMTP host configured: {'Yes' if smtp_status['smtp_host'] else 'No'}")
+        st.write(f"SMTP user configured: {'Yes' if smtp_status['smtp_user'] else 'No'}")
+        st.write(f"SMTP password configured: {'Yes' if smtp_status['smtp_pass'] else 'No'}")
+        st.write(f"SMTP from configured: {'Yes' if smtp_status['smtp_from'] else 'No'}")
+        if smtp_status["app_base_url"]:
+            st.caption(f"APP_BASE_URL: {smtp_status['app_base_url_value']}")
+        if smtp_status["smtp_host"]:
+            st.caption(f"SMTP_HOST: {smtp_status['smtp_host_value']}")
+        if smtp_status["smtp_from"]:
+            st.caption(f"SMTP_FROM: {smtp_status['smtp_from_value']}")
+        test_email = st.text_input("Send test email to", key="smtp_test_email")
+        if st.button("Send Test Email", key="send_test_email_btn", use_container_width=True):
+            if not test_email.strip():
+                st.warning("Enter an email address first.")
+            else:
+                sent, msg = send_password_reset_otp_email(test_email.strip(), "123456")
+                if sent:
+                    st.success("Test email sent.")
+                else:
+                    st.error(msg)
     st.caption("Corrections are validated against local sources before they are reused for future tuning.")
 
 
