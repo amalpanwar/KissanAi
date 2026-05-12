@@ -1283,9 +1283,6 @@ def render_auth_sidebar(db_path: str) -> None:
                 token = str(payload.get("verification_token") or "")
                 sent, send_msg = send_verification_email(str(payload.get("email") or email), token)
                 st.session_state["auth_mode_state"] = "Sign In"
-                st.session_state["auth_password"] = ""
-                st.session_state["auth_confirm_password"] = ""
-                st.session_state["auth_username"] = username
                 if sent:
                     st.session_state["auth_notice"] = (
                         "success",
@@ -1374,8 +1371,8 @@ def render_auth_sidebar(db_path: str) -> None:
                     if ok:
                         st.success(msg)
                         st.session_state["auth_mode_state"] = "Sign In"
-                        for key in ("reset_email_active", "reset_otp", "reset_new_password", "reset_confirm_password", "reset_otp_preview"):
-                            st.session_state.pop(key, None)
+                        st.session_state.pop("reset_email_active", None)
+                        st.session_state.pop("reset_otp_preview", None)
                     else:
                         st.error(msg)
         otp_preview = st.session_state.get("reset_otp_preview")
