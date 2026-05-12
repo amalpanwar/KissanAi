@@ -323,6 +323,14 @@ class RAGAdvisor:
                 }
             return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": [], "topic": "weather"}
         if self._is_profitability_followup_intent(normalized_question):
+            crop_cost_method_answer = self._answer_crop_cost_method_query(normalized_question, context_part)
+            if crop_cost_method_answer:
+                return {
+                    "answer": crop_cost_method_answer,
+                    "references": ["CACP official report", "UPAG yield data"],
+                    "retrieved": [],
+                    "topic": "crop_profitability_followup",
+                }
             return {
                 "answer": self._explain_profitability_method(context_part, normalized_question),
                 "references": [],
@@ -529,7 +537,87 @@ class RAGAdvisor:
             "कैसे निकाली",
             "कैसे निकाला",
         ]
-        return any(p in t for p in phrases)
+        if any(p in t for p in phrases):
+            return True
+        has_cost_word = any(p in t for p in ("lagat", "cost", "लागत", "profit", "लाभ", "hisab", "हिसाब", "calculation"))
+        has_how_word = any(p in t for p in ("kaise", "kese", "कैसे"))
+        has_derived_word = any(p in t for p in ("nikali", "nikala", "निकाली", "निकाला"))
+        return has_cost_word and has_how_word and has_derived_word
+
+    def _answer_crop_cost_method_query(self, question: str, context_part: str) -> str | None:
+        crop = self._extract_crop_from_query(question) or self._extract_preferred_crop_from_context(context_part)
+        if not crop:
+            return None
+        q = question.strip().lower()
+        has_cost_word = any(p in q for p in ("lagat", "cost", "लागत", "hisab", "हिसाब", "calculation"))
+        has_how_word = any(p in q for p in ("kaise", "kese", "कैसे"))
+        has_derived_word = any(p in q for p in ("nikali", "nikala", "निकाली", "निकाला"))
+        if not (has_cost_word and has_how_word and has_derived_word):
+            return None
+
+        crop_label = self._crop_display_label(crop)
+        if crop.lower() == "sugarcane":
+            snap = get_sugarcane_cost_snapshot()
+            yield_info = load_latest_up_yield_qtl_per_acre("Sugarcane", season="Annual") or load_latest_up_yield_qtl_per_acre("Sugarcane", season="Rabi")
+            if not snap:
+                return None
+            lower_qtl = snap.get("modified_a2fl_per_qtl") or snap.get("a2fl_basic_per_qtl")
+            upper_qtl = snap.get("modified_c2_per_qtl") or snap.get("c2_basic_per_qtl") or snap.get("c2_per_qtl")
+            if lower_qtl is None or upper_qtl is None:
+                return None
+            season = str(snap.get("season") or "").strip()
+            lines = [
+                f"{crop_label} की लागत का हिसाब इस तरह निकाला गया:",
+                f"- base source: CACP Sugarcane report {season}".strip(),
+                f"- lower cost band: paid-out cost + family labour + transport/insurance मिलाकर लगभग ₹{int(float(lower_qtl))}/क्विंटल।",
+                f"- upper cost band: पूरी लागत के हिसाब से लगभग ₹{int(float(upper_qtl))}/क्विंटल।",
+            ]
+            if yield_info and yield_info.get("yield_qtl_per_acre"):
+                y = float(yield_info["yield_qtl_per_acre"])
+                lines.extend([
+                    f"- UPAG के अनुसार yield लगभग {y:.1f} qtl/acre ली गई।",
+                    f"- इसलिए per acre लागत लगभग ₹{int(y * float(lower_qtl))} से ₹{int(y * float(upper_qtl))} निकाली गई।",
+                ])
+            lines.extend([
+                "",
+                "आसान मतलब:",
+                "- lower band practical working cost दिखाती है।",
+                "- upper band में जमीन और capital जैसी broader लागत भी जुड़ती है।",
+            ])
+            return "\n".join(lines)
+
+        snap = get_cacp_cost_for_crop(crop)
+        if not snap:
+            return None
+        a2 = snap.get("a2_per_qtl")
+        a2fl = snap.get("a2fl_per_qtl")
+        c2 = snap.get("c2_per_qtl")
+        if a2 is None or a2fl is None or c2 is None:
+            return None
+        yield_info = load_latest_up_yield_qtl_per_acre(crop, season="Rabi") or load_latest_up_yield_qtl_per_acre(crop, season="Kharif") or load_latest_up_yield_qtl_per_acre(crop)
+        report_kind = str(snap.get("report_kind", "")).title().strip()
+        season = str(snap.get("season", "")).strip()
+        lines = [
+            f"{crop_label} की लागत का हिसाब इस तरह निकाला गया:",
+            f"- base source: CACP {report_kind} report {season}".strip(),
+            f"- A2 लगभग ₹{int(float(a2))}/क्विंटल लिया गया।",
+            f"- A2+FL लगभग ₹{int(float(a2fl))}/क्विंटल लिया गया।",
+            f"- C2 लगभग ₹{int(float(c2))}/क्विंटल लिया गया।",
+        ]
+        if yield_info and yield_info.get("yield_qtl_per_acre"):
+            y = float(yield_info["yield_qtl_per_acre"])
+            lines.extend([
+                f"- UPAG के अनुसार yield लगभग {y:.1f} qtl/acre ली गई।",
+                f"- इसलिए per acre लागत लगभग ₹{int(y * float(a2fl))} से ₹{int(y * float(c2))} निकाली गई।",
+            ])
+        lines.extend([
+            "",
+            "आसान मतलब:",
+            "- A2: जेब से होने वाला सीधा खर्च।",
+            "- A2+FL: A2 के साथ परिवार की मेहनत जोड़कर निकाली गई practical लागत।",
+            "- C2: A2+FL के ऊपर जमीन का किराया और fixed capital का ब्याज जोड़कर निकाली गई पूरी लागत।",
+        ])
+        return "\n".join(lines)
 
     def _official_cost_range_for_profitability(self, crop: str, yield_qtl_per_acre: float) -> dict | None:
         if (crop or '').lower() == 'sugarcane':
