@@ -1228,19 +1228,22 @@ def render_auth_sidebar(db_path: str) -> None:
         return
 
     auth_mode = st.radio("Access", ["Sign In", "Create Account"], horizontal=True, key="auth_mode")
-    notice = st.session_state.pop("auth_notice", None)
+    notice = st.session_state.get("auth_notice")
     if notice:
         level, text = notice
         getattr(st, level if level in {"success", "warning", "error", "info"} else "info")(text)
-    username = st.text_input("Username", key="auth_username")
-    password = st.text_input("Password", type="password", key="auth_password")
-    display_name = ""
-    email = ""
     if auth_mode == "Create Account":
-        display_name = st.text_input("Display name", key="auth_display_name")
-        email = st.text_input("Email", key="auth_email")
-    if st.button(auth_mode, use_container_width=True):
-        if auth_mode == "Create Account":
+        with st.form("create_account_form", clear_on_submit=False):
+            username = st.text_input("Username", key="auth_username")
+            password = st.text_input("Password", type="password", key="auth_password")
+            confirm_password = st.text_input("Confirm Password", type="password", key="auth_confirm_password")
+            display_name = st.text_input("Display name", key="auth_display_name")
+            email = st.text_input("Email", key="auth_email")
+            submitted = st.form_submit_button("Create Account", use_container_width=True)
+        if submitted:
+            if password != confirm_password:
+                st.session_state["auth_notice"] = ("error", "Password and confirm password do not match.")
+                st.rerun()
             ok, msg = create_user(db_path, username, password, display_name, email)
             if ok:
                 payload = msg if isinstance(msg, dict) else {}
@@ -1248,6 +1251,7 @@ def render_auth_sidebar(db_path: str) -> None:
                 sent, send_msg = send_verification_email(str(payload.get("email") or email), token)
                 st.session_state["auth_mode"] = "Sign In"
                 st.session_state["auth_password"] = ""
+                st.session_state["auth_confirm_password"] = ""
                 st.session_state["auth_username"] = username
                 if sent:
                     st.session_state["auth_notice"] = (
@@ -1266,18 +1270,24 @@ def render_auth_sidebar(db_path: str) -> None:
                 st.rerun()
             else:
                 st.session_state["auth_mode"] = "Create Account"
-                st.error(str(msg))
-        else:
+                st.session_state["auth_notice"] = ("error", str(msg))
+                st.rerun()
+    else:
+        with st.form("sign_in_form", clear_on_submit=False):
+            username = st.text_input("Username or Email", key="auth_username")
+            password = st.text_input("Password", type="password", key="auth_password")
+            submitted = st.form_submit_button("Sign In", use_container_width=True)
+        if submitted:
             status, user = authenticate_user_status(db_path, username, password)
             if status == "invalid" or not user:
-                st.error("Invalid username or password.")
+                st.session_state["auth_notice"] = ("error", "Invalid username/email or password.")
             elif status == "unverified":
                 st.session_state["auth_mode"] = "Sign In"
                 st.session_state["auth_notice"] = ("warning", "Please verify your email before signing in.")
-                st.rerun()
             else:
                 st.session_state["auth_user"] = user
                 st.rerun()
+            st.rerun()
     verification_link = st.session_state.get("auth_verification_link")
     if auth_mode == "Create Account" and verification_link:
         st.caption("Verification link preview")

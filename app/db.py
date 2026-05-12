@@ -293,7 +293,7 @@ def authenticate_user(db_path: str | Path, username: str, password: str) -> dict
 def authenticate_user_status(
     db_path: str | Path, username: str, password: str
 ) -> tuple[str, dict[str, Any] | None]:
-    uname = (username or "").strip().lower()
+    identity = (username or "").strip().lower()
     conn = get_conn(db_path)
     try:
         cur = conn.cursor()
@@ -301,9 +301,9 @@ def authenticate_user_status(
             """
             SELECT id, username, email, display_name, role, is_active, is_verified, password_hash
             FROM users
-            WHERE username = ?
+            WHERE lower(username) = ? OR lower(email) = ?
             """,
-            (uname,),
+            (identity, identity),
         )
         row = cur.fetchone()
         if not row or int(row["is_active"] or 0) != 1:
