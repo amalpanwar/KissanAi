@@ -15,7 +15,7 @@ from app.generator import LocalGenerator
 from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
-from app.weather import get_current_weather_hindi
+from app.weather import get_current_weather_hindi, get_tomorrow_rain_forecast_hindi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
 from app.crop_guide import build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
@@ -327,9 +327,12 @@ class RAGAdvisor:
             district = loc.get("district") if loc else self._lookup_district_from_location(place)
             state = loc.get("state") if loc else "Uttar Pradesh"
             weather_place = place if not district else f"{place}, {district}, {state}"
-            weather = get_current_weather_hindi(weather_place)
-            if not weather:
+            if self._is_tomorrow_weather_query(normalized_question):
+                weather = get_tomorrow_rain_forecast_hindi(weather_place)
+            else:
                 weather = get_current_weather_hindi(weather_place)
+                if not weather:
+                    weather = get_current_weather_hindi(weather_place)
             if not weather:
                 return {
                     "answer": "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।",
@@ -2183,6 +2186,12 @@ class RAGAdvisor:
             "humidity",
         ]
         return any(w in t for w in weather_words)
+
+    def _is_tomorrow_weather_query(self, text: str) -> bool:
+        t = text.strip().lower()
+        day_words = ["kal", "कल", "tomorrow", "agle din", "अगले दिन"]
+        rain_words = ["बारिश", "बारिस", "barish", "baarish", "rain", "rainfall", "mausam", "weather", "मौसम"]
+        return any(d in t for d in day_words) and any(r in t for r in rain_words)
 
     def _extract_district(self, context_part: str) -> str | None:
         if not context_part:

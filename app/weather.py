@@ -289,3 +289,66 @@ def get_current_weather_hindi(place: str) -> str:
         + ("\n".join(outlook_lines) if outlook_lines else "- उपलब्ध नहीं\n")
         + "\n\nकृषि सुझाव: अगर वर्षा/हवा अधिक हो तो सिंचाई और स्प्रे शेड्यूल समायोजित करें।"
     )
+
+
+def get_tomorrow_rain_forecast_hindi(place: str) -> str:
+    geo = _geocode_free(place.strip())
+    if not geo:
+        return "कल के लिए लाइव मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+    lat, lon, resolved_name = geo
+    params = urlencode(
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max",
+            "forecast_days": 3,
+            "timezone": "Asia/Kolkata",
+        }
+    )
+    url = f"https://api.open-meteo.com/v1/forecast?{params}"
+    try:
+        with urlopen(url, timeout=6) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        payload = None
+
+    if not payload:
+        return "कल के लिए लाइव मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+
+    daily = payload.get("daily", {}) or {}
+    times = daily.get("time", []) or []
+    codes = daily.get("weather_code", []) or []
+    tmax = daily.get("temperature_2m_max", []) or []
+    tmin = daily.get("temperature_2m_min", []) or []
+    rain_sum = daily.get("precipitation_sum", []) or []
+    rain_prob = daily.get("precipitation_probability_max", []) or []
+    if len(times) < 2:
+        return "कल के लिए लाइव मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+
+    idx = 1
+    summary = _weather_code_hi(int(codes[idx] if idx < len(codes) else 0))
+    prob = rain_prob[idx] if idx < len(rain_prob) else "NA"
+    mm = rain_sum[idx] if idx < len(rain_sum) else "NA"
+    hi = tmax[idx] if idx < len(tmax) else "NA"
+    lo = tmin[idx] if idx < len(tmin) else "NA"
+
+    verdict = "कल बारिश की संभावना कम है।"
+    try:
+        prob_val = float(prob)
+        rain_val = float(mm)
+        if prob_val >= 60 or rain_val >= 2:
+            verdict = "हाँ, कल बारिश होने की अच्छी संभावना है।"
+        elif prob_val >= 30 or rain_val > 0:
+            verdict = "हल्की या छिटपुट बारिश हो सकती है।"
+    except Exception:
+        pass
+
+    return (
+        f"कल का मौसम पूर्वानुमान ({resolved_name}):\n"
+        f"- निष्कर्ष: {verdict}\n"
+        f"- स्थिति: {summary}\n"
+        f"- बारिश की अधिकतम संभावना: {prob}%\n"
+        f"- अनुमानित कुल वर्षा: {mm} mm\n"
+        f"- तापमान: {lo}°C से {hi}°C\n\n"
+        "कृषि सुझाव: अगर बारिश की संभावना ज्यादा हो तो सिंचाई टालें और spray/बीज उपचार का समय मौसम देखकर रखें।"
+    )
