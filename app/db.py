@@ -180,8 +180,11 @@ def init_db(db_path: str | Path) -> None:
         _ensure_column(cur, "users", "verified_at", "TEXT")
         _ensure_column(cur, "users", "reset_otp", "TEXT")
         _ensure_column(cur, "users", "reset_otp_expires_at", "TEXT")
+        _ensure_column(cur, "users", "auth_provider", "TEXT")
+        _ensure_column(cur, "users", "external_user_id", "TEXT")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_external_user_id ON users(external_user_id)")
         conn.commit()
     finally:
         conn.close()
@@ -407,6 +410,125 @@ def get_user_by_email(db_path: str | Path, email: str) -> dict[str, Any] | None:
         )
         row = cur.fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _slug_username(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "." for ch in (value or "").strip())
+    cleaned = ".".join(part for part in cleaned.split(".") if part)
+    return cleaned or "user"
+
+
+def _next_unique_username(cur: sqlite3.Cursor, base: str, exclude_id: int | None = None) -> str:
+    candidate = _slug_username(base)
+    idx = 0
+    while True:
+        probe = candidate if idx == 0 else f"{candidate}.{idx}"
+        if exclude_id is None:
+            cur.execute("SELECT id FROM users WHERE username = ?", (probe,))
+        else:
+            cur.execute("SELECT id FROM users WHERE username = ? AND id != ?", (probe, exclude_id))
+        if not cur.fetchone():
+            return probe
+        idx += 1
+
+
+def upsert_external_user(
+    db_path: str | Path,
+    *,
+    provider: str,
+    external_user_id: str,
+    email: str,
+    display_name: str = "",
+    username: str = "",
+    is_verified: bool = True,
+) -> dict[str, Any]:
+    email_clean = (email or "").strip().lower()
+    external_id = (external_user_id or "").strip()
+    if not email_clean or not external_id:
+        raise ValueError("email and external_user_id are required")
+    conn = get_conn(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS n FROM users")
+        user_count = int(cur.fetchone()["n"])
+        role_default = "admin" if user_count == 0 else "user"
+        cur.execute(
+            """
+            SELECT id, username, email, display_name, role
+            FROM users
+            WHERE external_user_id = ? OR email = ?
+            LIMIT 1
+            """,
+            (external_id, email_clean),
+        )
+        row = cur.fetchone()
+        preferred_username = username.strip() or email_clean.split("@", 1)[0]
+        preferred_display = (display_name or "").strip() or preferred_username
+        verified_int = 1 if is_verified else 0
+        if row:
+            user_id = int(row["id"])
+            role = str(row["role"] or role_default)
+            final_username = _next_unique_username(cur, preferred_username, exclude_id=user_id)
+            cur.execute(
+                """
+                UPDATE users
+                SET username = ?,
+                    password_hash = COALESCE(NULLIF(password_hash, ''), '__supabase__'),
+                    email = ?,
+                    display_name = ?,
+                    role = ?,
+                    is_active = 1,
+                    is_verified = ?,
+                    auth_provider = ?,
+                    external_user_id = ?,
+                    verification_token = NULL,
+                    verified_at = CASE WHEN ? = 1 THEN COALESCE(verified_at, CURRENT_TIMESTAMP) ELSE verified_at END
+                WHERE id = ?
+                """,
+                (
+                    final_username,
+                    email_clean,
+                    preferred_display,
+                    role,
+                    verified_int,
+                    provider,
+                    external_id,
+                    verified_int,
+                    user_id,
+                ),
+            )
+        else:
+            final_username = _next_unique_username(cur, preferred_username)
+            cur.execute(
+                """
+                INSERT INTO users (
+                    username, password_hash, email, display_name, role,
+                    is_active, is_verified, auth_provider, external_user_id, verified_at
+                ) VALUES (?, '__supabase__', ?, ?, ?, 1, ?, ?, ?, CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END)
+                """,
+                (
+                    final_username,
+                    email_clean,
+                    preferred_display,
+                    role_default,
+                    verified_int,
+                    provider,
+                    external_id,
+                    verified_int,
+                ),
+            )
+            user_id = int(cur.lastrowid)
+            role = role_default
+        conn.commit()
+        return {
+            "id": user_id,
+            "username": final_username,
+            "email": email_clean,
+            "display_name": preferred_display,
+            "role": role,
+        }
     finally:
         conn.close()
 

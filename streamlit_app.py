@@ -30,6 +30,17 @@ from app.lstm_forecast import prepare_daily_series, train_and_forecast
 from app.weather import get_current_weather_hindi
 from app.cacp import get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
+from app.supabase_auth import (
+    SupabaseConfig,
+    get_user as supabase_get_user,
+    is_configured as supabase_is_configured,
+    refresh_session as supabase_refresh_session,
+    resend_signup_email as supabase_resend_signup_email,
+    send_password_reset_email as supabase_send_password_reset_email,
+    sign_in_with_password as supabase_sign_in_with_password,
+    sign_out as supabase_sign_out,
+    sign_up as supabase_sign_up,
+)
 
 
 authenticate_user = db_mod.authenticate_user
@@ -48,6 +59,7 @@ reset_password_with_otp = db_mod.reset_password_with_otp
 review_feedback = db_mod.review_feedback
 save_feedback = db_mod.save_feedback
 set_verification_token_for_email = db_mod.set_verification_token_for_email
+upsert_external_user = db_mod.upsert_external_user
 verify_user_by_token = db_mod.verify_user_by_token
 
 
@@ -1155,6 +1167,15 @@ def current_user() -> dict | None:
     return st.session_state.get("auth_user")
 
 
+def get_supabase_config() -> SupabaseConfig | None:
+    env_vals = load_local_env(Path(".env"))
+    url = get_setting("SUPABASE_URL", env_vals, "").strip()
+    anon_key = get_setting("SUPABASE_ANON_KEY", env_vals, "").strip()
+    app_base_url = get_setting("APP_BASE_URL", env_vals, "").strip()
+    cfg = SupabaseConfig(url=url, anon_key=anon_key, redirect_url=app_base_url)
+    return cfg if supabase_is_configured(cfg) else None
+
+
 def _auth_cookie_secret() -> str:
     env_vals = load_local_env(Path(".env"))
     secret = get_setting("AUTH_COOKIE_SECRET", env_vals)
@@ -1186,9 +1207,24 @@ def _verify_auth_value(token: str) -> str | None:
     return raw_value
 
 
-def set_auth_cookie(user: dict) -> None:
+def _encode_auth_payload(payload: dict[str, object]) -> str:
+    return _sign_auth_value(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
+
+
+def _decode_auth_payload(token: str) -> dict[str, object] | None:
+    raw = _verify_auth_value(token)
+    if not raw:
+        return None
     try:
-        st.context.cookies[AUTH_COOKIE_NAME] = _sign_auth_value(str(user["id"]))
+        value = json.loads(raw)
+    except Exception:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def set_auth_cookie_payload(payload: dict[str, object]) -> None:
+    try:
+        st.context.cookies[AUTH_COOKIE_NAME] = _encode_auth_payload(payload)
     except Exception:
         pass
 
@@ -1209,12 +1245,75 @@ def restore_auth_from_cookie(db_path: str) -> None:
         token = None
     if not token:
         return
-    raw = _verify_auth_value(str(token))
-    if not raw or not raw.isdigit():
+    payload = _decode_auth_payload(str(token))
+    if payload and payload.get("provider") == "supabase":
+        supa = get_supabase_config()
+        if not supa:
+            return
+        access_token = str(payload.get("access_token") or "")
+        refresh_token = str(payload.get("refresh_token") or "")
+        ok = False
+        session = None
+        if access_token:
+            ok, session = supabase_get_user(supa, access_token)
+            if ok and isinstance(session, dict):
+                local_user = _mirror_supabase_user(db_path, session)
+                if local_user:
+                    st.session_state["auth_user"] = local_user
+                    st.session_state["auth_session"] = {
+                        "provider": "supabase",
+                        "access_token": access_token,
+                        "refresh_token": refresh_token,
+                    }
+                    return
+        if refresh_token:
+            ok, session = supabase_refresh_session(supa, refresh_token)
+            if ok and isinstance(session, dict):
+                access_token = str(session.get("access_token") or "")
+                refresh_token = str(session.get("refresh_token") or refresh_token)
+                user_payload = session.get("user") or {}
+                local_user = _mirror_supabase_user(db_path, user_payload)
+                if local_user and access_token:
+                    st.session_state["auth_user"] = local_user
+                    st.session_state["auth_session"] = {
+                        "provider": "supabase",
+                        "access_token": access_token,
+                        "refresh_token": refresh_token,
+                    }
+                    set_auth_cookie_payload(st.session_state["auth_session"])
+                    return
+        clear_auth_cookie()
         return
-    user = get_user_by_id(db_path, int(raw))
-    if user:
-        st.session_state["auth_user"] = user
+    raw = _verify_auth_value(str(token))
+    if raw and raw.isdigit():
+        user = get_user_by_id(db_path, int(raw))
+        if user:
+            st.session_state["auth_user"] = user
+
+
+def _mirror_supabase_user(db_path: str, user_payload: dict[str, object] | None) -> dict | None:
+    if not isinstance(user_payload, dict):
+        return None
+    external_id = str(user_payload.get("id") or "").strip()
+    email = str(user_payload.get("email") or "").strip().lower()
+    metadata = user_payload.get("user_metadata") if isinstance(user_payload.get("user_metadata"), dict) else {}
+    username = str(metadata.get("username") or "").strip()
+    display_name = str(metadata.get("display_name") or metadata.get("full_name") or "").strip()
+    email_confirmed = bool(user_payload.get("email_confirmed_at") or user_payload.get("confirmed_at"))
+    if not external_id or not email:
+        return None
+    try:
+        return upsert_external_user(
+            db_path,
+            provider="supabase",
+            external_user_id=external_id,
+            email=email,
+            display_name=display_name,
+            username=username,
+            is_verified=email_confirmed or True,
+        )
+    except Exception:
+        return None
 
 
 def build_verification_link(token: str) -> str | None:
@@ -1288,6 +1387,13 @@ def send_password_reset_otp_email(email: str, otp: str) -> tuple[bool, str]:
         return False, f"Could not send password reset OTP: {exc}"
 
 
+def _set_signed_in_user(local_user: dict, session: dict[str, object] | None = None) -> None:
+    st.session_state["auth_user"] = local_user
+    if session and session.get("provider") == "supabase":
+        st.session_state["auth_session"] = session
+        set_auth_cookie_payload(session)
+
+
 def handle_email_verification(db_path: str) -> None:
     token = st.query_params.get("verify_token")
     if not token:
@@ -1308,13 +1414,21 @@ def handle_email_verification(db_path: str) -> None:
 def render_auth_sidebar(db_path: str) -> None:
     st.subheader("Account Access")
     smtp_status = smtp_config_status()
+    supabase_cfg = get_supabase_config()
+    use_supabase = supabase_cfg is not None
     user = current_user()
     if user:
         st.success(f"Signed in as {user.get('display_name')}")
         st.caption(f"Role: {user.get('role', 'user')}")
         if st.button("Sign Out", use_container_width=True):
+            auth_session = st.session_state.get("auth_session") or {}
+            if use_supabase and auth_session.get("provider") == "supabase" and auth_session.get("access_token"):
+                try:
+                    supabase_sign_out(supabase_cfg, str(auth_session.get("access_token")))
+                except Exception:
+                    pass
             clear_auth_cookie()
-            for key in ("auth_user", "chat_history", "last_structured_topic", "last_structured_context", "last_location_context"):
+            for key in ("auth_user", "auth_session", "chat_history", "last_structured_topic", "last_structured_context", "last_location_context"):
                 st.session_state.pop(key, None)
             st.rerun()
         return
@@ -1346,131 +1460,203 @@ def render_auth_sidebar(db_path: str) -> None:
             if password != confirm_password:
                 st.session_state["auth_notice"] = ("error", "Password and confirm password do not match.")
                 st.rerun()
-            ok, msg = create_user(db_path, username, password, display_name, email)
-            if ok:
-                payload = msg if isinstance(msg, dict) else {}
-                token = str(payload.get("verification_token") or "")
-                sent, send_msg = send_verification_email(str(payload.get("email") or email), token)
+            if use_supabase:
+                ok, payload = supabase_sign_up(
+                    supabase_cfg,
+                    email=(email or "").strip().lower(),
+                    password=password,
+                    username=(username or "").strip(),
+                    display_name=(display_name or "").strip() or (username or "").strip(),
+                )
                 st.session_state["auth_mode_state"] = "Sign In"
-                if sent:
+                if ok:
                     st.session_state["auth_notice"] = (
                         "success",
-                        "Account created. Verification link has been sent to your email. Please verify before signing in.",
+                        "Account created in Supabase. Please verify your email before signing in.",
                     )
                     st.session_state.pop("auth_verification_link", None)
                 else:
-                    fallback_link = build_verification_link(token)
                     st.session_state["auth_notice"] = (
-                        "warning",
-                        f"Account created, but email could not be sent yet. {send_msg}",
+                        "error",
+                        str(payload.get("msg") or payload.get("error_description") or payload.get("message") or "Could not create account in Supabase."),
                     )
-                    if fallback_link:
-                        st.session_state["auth_verification_link"] = fallback_link
                 st.rerun()
             else:
-                st.session_state["auth_mode_state"] = "Create Account"
-                st.session_state["auth_notice"] = ("error", str(msg))
-                st.rerun()
+                ok, msg = create_user(db_path, username, password, display_name, email)
+                if ok:
+                    payload = msg if isinstance(msg, dict) else {}
+                    token = str(payload.get("verification_token") or "")
+                    sent, send_msg = send_verification_email(str(payload.get("email") or email), token)
+                    st.session_state["auth_mode_state"] = "Sign In"
+                    if sent:
+                        st.session_state["auth_notice"] = (
+                            "success",
+                            "Account created. Verification link has been sent to your email. Please verify before signing in.",
+                        )
+                        st.session_state.pop("auth_verification_link", None)
+                    else:
+                        fallback_link = build_verification_link(token)
+                        st.session_state["auth_notice"] = (
+                            "warning",
+                            f"Account created, but email could not be sent yet. {send_msg}",
+                        )
+                        if fallback_link:
+                            st.session_state["auth_verification_link"] = fallback_link
+                    st.rerun()
+                else:
+                    st.session_state["auth_mode_state"] = "Create Account"
+                    st.session_state["auth_notice"] = ("error", str(msg))
+                    st.rerun()
     else:
         with st.form("sign_in_form", clear_on_submit=False):
-            username = st.text_input("Username or Email", key="auth_username")
+            username = st.text_input("Email" if use_supabase else "Username or Email", key="auth_username")
             password = st.text_input("Password", type="password", key="auth_password")
             submitted = st.form_submit_button("Sign In", use_container_width=True)
         if submitted:
-            status, user = authenticate_user_status(db_path, username, password)
-            if status == "invalid" or not user:
-                st.session_state["auth_notice"] = ("error", "Invalid username/email or password.")
-            elif status == "unverified":
-                st.session_state["auth_mode_state"] = "Sign In"
-                st.session_state["auth_notice"] = ("warning", "Please verify your email before signing in.")
+            if use_supabase:
+                ok, payload = supabase_sign_in_with_password(
+                    supabase_cfg,
+                    email=(username or "").strip().lower(),
+                    password=password,
+                )
+                if not ok:
+                    msg = str(payload.get("msg") or payload.get("error_description") or payload.get("message") or "")
+                    if "Email not confirmed" in msg:
+                        st.session_state["auth_notice"] = ("warning", "Please verify your email before signing in.")
+                    else:
+                        st.session_state["auth_notice"] = ("error", msg or "Invalid email or password.")
+                else:
+                    user_payload = payload.get("user") or {}
+                    local_user = _mirror_supabase_user(db_path, user_payload)
+                    if not local_user:
+                        st.session_state["auth_notice"] = ("error", "Could not prepare your local profile after Supabase sign-in.")
+                    else:
+                        _set_signed_in_user(
+                            local_user,
+                            {
+                                "provider": "supabase",
+                                "access_token": str(payload.get("access_token") or ""),
+                                "refresh_token": str(payload.get("refresh_token") or ""),
+                            },
+                        )
+                        st.rerun()
             else:
-                st.session_state["auth_user"] = user
-                set_auth_cookie(user)
-                st.rerun()
+                status, user = authenticate_user_status(db_path, username, password)
+                if status == "invalid" or not user:
+                    st.session_state["auth_notice"] = ("error", "Invalid username/email or password.")
+                elif status == "unverified":
+                    st.session_state["auth_mode_state"] = "Sign In"
+                    st.session_state["auth_notice"] = ("warning", "Please verify your email before signing in.")
+                else:
+                    _set_signed_in_user(user, {"provider": "local", "user_id": str(user["id"])})
+                    st.rerun()
             st.rerun()
     verification_link = st.session_state.get("auth_verification_link")
-    if auth_mode == "Create Account" and verification_link:
+    if not use_supabase and auth_mode == "Create Account" and verification_link:
         st.caption("Verification link preview")
         st.code(verification_link)
     with st.expander("Resend Verification Email", expanded=False):
         resend_email = st.text_input("Email for verification", key="resend_verify_email")
         if st.button("Resend Verification Link", key="resend_verify_btn", use_container_width=True):
-            ok, payload = set_verification_token_for_email(db_path, resend_email)
-            if not ok:
-                st.warning(str(payload))
-            else:
-                data = payload if isinstance(payload, dict) else {}
-                token = str(data.get("verification_token") or "")
-                sent, send_msg = send_verification_email(str(data.get("email") or resend_email), token)
-                if sent:
+            if use_supabase:
+                ok, payload = supabase_resend_signup_email(supabase_cfg, resend_email.strip().lower())
+                if ok:
                     st.success("Verification link sent.")
-                    st.session_state.pop("auth_verification_link", None)
                 else:
-                    fallback_link = build_verification_link(token)
-                    st.warning(send_msg)
-                    if fallback_link:
-                        st.code(fallback_link)
+                    st.warning(str(payload.get("msg") or payload.get("error_description") or payload.get("message") or "Could not resend verification email."))
+            else:
+                ok, payload = set_verification_token_for_email(db_path, resend_email)
+                if not ok:
+                    st.warning(str(payload))
+                else:
+                    data = payload if isinstance(payload, dict) else {}
+                    token = str(data.get("verification_token") or "")
+                    sent, send_msg = send_verification_email(str(data.get("email") or resend_email), token)
+                    if sent:
+                        st.success("Verification link sent.")
+                        st.session_state.pop("auth_verification_link", None)
+                    else:
+                        fallback_link = build_verification_link(token)
+                        st.warning(send_msg)
+                        if fallback_link:
+                            st.code(fallback_link)
     with st.expander("Forgot Password", expanded=False):
         reset_email = st.text_input("Registered email", key="forgot_email")
-        if st.button("Send OTP", key="send_reset_otp", use_container_width=True):
-            ok, payload = create_password_reset_otp(db_path, reset_email)
-            if not ok:
-                st.warning(str(payload))
+        if st.button("Send reset email" if use_supabase else "Send OTP", key="send_reset_otp", use_container_width=True):
+            if use_supabase:
+                ok, payload = supabase_send_password_reset_email(supabase_cfg, reset_email.strip().lower())
+                if ok:
+                    st.success("Password reset email sent. Please use the link from your inbox.")
+                else:
+                    st.warning(str(payload.get("msg") or payload.get("error_description") or payload.get("message") or "Could not send password reset email."))
             else:
-                data = payload if isinstance(payload, dict) else {}
-                sent, send_msg = send_password_reset_otp_email(str(data.get("email") or reset_email), str(data.get("otp") or ""))
-                if sent:
-                    st.success("OTP sent to your email.")
-                    st.session_state["reset_email_active"] = str(data.get("email") or reset_email).strip().lower()
-                    st.session_state.pop("reset_otp_preview", None)
+                ok, payload = create_password_reset_otp(db_path, reset_email)
+                if not ok:
+                    st.warning(str(payload))
                 else:
-                    st.warning(send_msg)
-                    st.session_state["reset_email_active"] = str(data.get("email") or reset_email).strip().lower()
-                    st.session_state["reset_otp_preview"] = str(data.get("otp") or "")
-        active_reset_email = st.session_state.get("reset_email_active", "")
-        if active_reset_email:
-            st.caption(f"Resetting password for: {active_reset_email}")
-            otp = st.text_input("OTP", key="reset_otp")
-            new_password = st.text_input("New password", type="password", key="reset_new_password")
-            confirm_password = st.text_input("Confirm new password", type="password", key="reset_confirm_password")
-            if st.button("Update Password", key="update_password_btn", use_container_width=True):
-                if new_password != confirm_password:
-                    st.error("Passwords do not match.")
-                else:
-                    ok, msg = reset_password_with_otp(db_path, active_reset_email, otp, new_password)
-                    if ok:
-                        st.success(msg)
-                        st.session_state["auth_mode_state"] = "Sign In"
-                        st.session_state.pop("reset_email_active", None)
+                    data = payload if isinstance(payload, dict) else {}
+                    sent, send_msg = send_password_reset_otp_email(str(data.get("email") or reset_email), str(data.get("otp") or ""))
+                    if sent:
+                        st.success("OTP sent to your email.")
+                        st.session_state["reset_email_active"] = str(data.get("email") or reset_email).strip().lower()
                         st.session_state.pop("reset_otp_preview", None)
                     else:
-                        st.error(msg)
-        otp_preview = st.session_state.get("reset_otp_preview")
-        if otp_preview:
-            st.caption("OTP preview")
-            st.code(otp_preview)
-    with st.expander("Email Delivery Diagnostics", expanded=False):
-        st.write(f"APP_BASE_URL configured: {'Yes' if smtp_status['app_base_url'] else 'No'}")
-        st.write(f"SMTP host configured: {'Yes' if smtp_status['smtp_host'] else 'No'}")
-        st.write(f"SMTP user configured: {'Yes' if smtp_status['smtp_user'] else 'No'}")
-        st.write(f"SMTP password configured: {'Yes' if smtp_status['smtp_pass'] else 'No'}")
-        st.write(f"SMTP from configured: {'Yes' if smtp_status['smtp_from'] else 'No'}")
-        if smtp_status["app_base_url"]:
-            st.caption(f"APP_BASE_URL: {smtp_status['app_base_url_value']}")
-        if smtp_status["smtp_host"]:
-            st.caption(f"SMTP_HOST: {smtp_status['smtp_host_value']}")
-        if smtp_status["smtp_from"]:
-            st.caption(f"SMTP_FROM: {smtp_status['smtp_from_value']}")
-        test_email = st.text_input("Send test email to", key="smtp_test_email")
-        if st.button("Send Test Email", key="send_test_email_btn", use_container_width=True):
-            if not test_email.strip():
-                st.warning("Enter an email address first.")
-            else:
-                sent, msg = send_password_reset_otp_email(test_email.strip(), "123456")
-                if sent:
-                    st.success("Test email sent.")
+                        st.warning(send_msg)
+                        st.session_state["reset_email_active"] = str(data.get("email") or reset_email).strip().lower()
+                        st.session_state["reset_otp_preview"] = str(data.get("otp") or "")
+            active_reset_email = st.session_state.get("reset_email_active", "")
+            if active_reset_email:
+                st.caption(f"Resetting password for: {active_reset_email}")
+                otp = st.text_input("OTP", key="reset_otp")
+                new_password = st.text_input("New password", type="password", key="reset_new_password")
+                confirm_password = st.text_input("Confirm new password", type="password", key="reset_confirm_password")
+                if st.button("Update Password", key="update_password_btn", use_container_width=True):
+                    if new_password != confirm_password:
+                        st.error("Passwords do not match.")
+                    else:
+                        ok, msg = reset_password_with_otp(db_path, active_reset_email, otp, new_password)
+                        if ok:
+                            st.success(msg)
+                            st.session_state["auth_mode_state"] = "Sign In"
+                            st.session_state.pop("reset_email_active", None)
+                            st.session_state.pop("reset_otp_preview", None)
+                        else:
+                            st.error(msg)
+            otp_preview = st.session_state.get("reset_otp_preview")
+            if otp_preview:
+                st.caption("OTP preview")
+                st.code(otp_preview)
+    with st.expander("Auth Diagnostics", expanded=False):
+        if use_supabase:
+            st.write("Auth provider: Supabase")
+            st.write(f"SUPABASE_URL configured: {'Yes' if bool(supabase_cfg.url) else 'No'}")
+            st.write(f"SUPABASE_ANON_KEY configured: {'Yes' if bool(supabase_cfg.anon_key) else 'No'}")
+            st.write(f"APP_BASE_URL configured: {'Yes' if bool(supabase_cfg.redirect_url) else 'No'}")
+            if supabase_cfg.redirect_url:
+                st.caption(f"APP_BASE_URL: {supabase_cfg.redirect_url}")
+        else:
+            st.write("Auth provider: Local + SMTP")
+            st.write(f"APP_BASE_URL configured: {'Yes' if smtp_status['app_base_url'] else 'No'}")
+            st.write(f"SMTP host configured: {'Yes' if smtp_status['smtp_host'] else 'No'}")
+            st.write(f"SMTP user configured: {'Yes' if smtp_status['smtp_user'] else 'No'}")
+            st.write(f"SMTP password configured: {'Yes' if smtp_status['smtp_pass'] else 'No'}")
+            st.write(f"SMTP from configured: {'Yes' if smtp_status['smtp_from'] else 'No'}")
+            if smtp_status["app_base_url"]:
+                st.caption(f"APP_BASE_URL: {smtp_status['app_base_url_value']}")
+            if smtp_status["smtp_host"]:
+                st.caption(f"SMTP_HOST: {smtp_status['smtp_host_value']}")
+            if smtp_status["smtp_from"]:
+                st.caption(f"SMTP_FROM: {smtp_status['smtp_from_value']}")
+            test_email = st.text_input("Send test email to", key="smtp_test_email")
+            if st.button("Send Test Email", key="send_test_email_btn", use_container_width=True):
+                if not test_email.strip():
+                    st.warning("Enter an email address first.")
                 else:
-                    st.error(msg)
+                    sent, msg = send_password_reset_otp_email(test_email.strip(), "123456")
+                    if sent:
+                        st.success("Test email sent.")
+                    else:
+                        st.error(msg)
     st.caption("Corrections are validated against local sources before they are reused for future tuning.")
 
 
