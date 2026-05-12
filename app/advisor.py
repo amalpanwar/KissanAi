@@ -8,6 +8,7 @@ import sqlite3
 from zoneinfo import ZoneInfo
 import csv
 from pathlib import Path
+import numpy as np
 
 from app.embeddings import Embedder
 from app.generator import LocalGenerator
@@ -447,8 +448,7 @@ class RAGAdvisor:
                 "topic": "rag",
             }
 
-        qvec = self.embedder.encode([normalized_question])[0]
-        retrieved = self.retriever.retrieve(qvec, k=self.top_k)
+        retrieved = self._retrieve_with_hyde_and_rerank(normalized_question, context_part)
         prompt = build_prompt(normalized_query, retrieved)
         try:
             response = self.generator.generate(prompt)
@@ -462,6 +462,120 @@ class RAGAdvisor:
             "retrieved": retrieved,
             "topic": "rag",
         }
+
+    def _query_tokens(self, text: str) -> set[str]:
+        tokens = re.findall(r"[a-z0-9\u0900-\u097F]+", (text or "").lower())
+        return {t for t in tokens if len(t) > 1}
+
+    def _is_price_query(self, text: str) -> bool:
+        t = (text or "").lower()
+        keys = [
+            "price", "rate", "mandi", "bhav", "daam", "dam", "keemat", "kimat", "qeemat",
+            "भाव", "कीमत", "दाम", "मंडी",
+        ]
+        return any(k in t for k in keys)
+
+    def _is_hyde_candidate(self, question: str) -> bool:
+        q = (question or "").strip().lower()
+        if not q or len(self._query_tokens(q)) > 10:
+            return False
+        if self._is_weather_intent(q) or self._is_weather_impact_intent(q):
+            return False
+        if self._is_price_query(q) or self._is_cost_of_production_query(q):
+            return False
+        vague_markers = {
+            "rog", "रोग", "dawai", "दवाई", "problem", "dikat", "दिक्कत",
+            "guide", "kaise", "कैसे", "konsi", "कौनसी", "kya", "क्या",
+            "pest", "fungus", "symptom", "lakshan", "लक्षण",
+        }
+        return any(m in q for m in vague_markers)
+
+    def _build_hyde_query(self, question: str, context_part: str) -> str:
+        crop = self._extract_crop_from_query(question) or self._extract_preferred_crop_from_context(context_part) or "crop"
+        disease_terms = self._extract_disease_terms_from_query(question)
+        issue_mode = self._generic_issue_mode(question)
+        if disease_terms:
+            issue_text = ", ".join(disease_terms[:2])
+            return (
+                f"Farmer needs source-grounded advisory for {crop} focusing on {issue_text}, "
+                "including symptoms, likely causes, recommended treatment, dose, and safety guidance."
+            )
+        if issue_mode == "fungal":
+            return (
+                f"Farmer needs source-grounded fungal disease advisory for {crop}, including likely diseases, "
+                "symptoms, pesticide or seed-treatment options, dose, and precautions."
+            )
+        if issue_mode == "pest":
+            return (
+                f"Farmer needs source-grounded pest advisory for {crop}, including likely insects, symptoms, "
+                "recommended control measures, pesticide options, dose, and precautions."
+            )
+        if self._is_crop_guide_intent(question):
+            return (
+                f"Farmer needs a crop cultivation guide for {crop}, including season, field preparation, seed rate, "
+                "seed treatment, fertilizer, irrigation, weed management, plant protection, and harvesting."
+            )
+        return (
+            f"Farmer needs source-grounded advisory for {crop}, with relevant agronomy, disease or input guidance, "
+            "written in simple Hindi for field use."
+        )
+
+    def _rerank_retrieved(self, question: str, candidates: list[dict], top_k: int) -> list[dict]:
+        q_tokens = self._query_tokens(question)
+        crop = self._extract_crop_from_query(question)
+        disease_terms = [d.lower() for d in self._extract_disease_terms_from_query(question)]
+        ranked: list[tuple[float, dict]] = []
+        for cand in candidates:
+            text = str(cand.get("text") or "")
+            source = str(cand.get("source_file") or "")
+            hay = f"{text}\n{source}".lower()
+            c_tokens = self._query_tokens(hay)
+            overlap = 0.0
+            if q_tokens:
+                overlap = len(q_tokens & c_tokens) / max(len(q_tokens), 1)
+            crop_bonus = 0.0
+            if crop and crop.lower() in hay:
+                crop_bonus = 0.2
+            disease_bonus = 0.0
+            if disease_terms and any(term in hay for term in disease_terms):
+                disease_bonus = 0.2
+            hyde_bonus = 0.05 if cand.get("_from_hyde") else 0.0
+            vector_score = float(cand.get("_vector_score", 0.0))
+            final_score = (0.65 * vector_score) + (0.25 * overlap) + crop_bonus + disease_bonus + hyde_bonus
+            item = dict(cand)
+            item["_score"] = final_score
+            ranked.append((final_score, item))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        trimmed = []
+        for _score, item in ranked[:top_k]:
+            trimmed.append({k: v for k, v in item.items() if not str(k).startswith("_") or k == "_score"})
+        return trimmed
+
+    def _retrieve_with_hyde_and_rerank(self, question: str, context_part: str) -> list[dict]:
+        if self.embedder is None or self.retriever is None:
+            return []
+        fetch_k = max(self.top_k * 3, 8)
+        qvec = self.embedder.encode([question])[0]
+        base = self.retriever.retrieve_with_scores(qvec, k=fetch_k)
+        merged: dict[int, dict] = {}
+        for row in base:
+            merged[int(row.get("_doc_id", -1))] = dict(row)
+        if self._is_hyde_candidate(question):
+            hyde_query = self._build_hyde_query(question, context_part)
+            hvec = self.embedder.encode([hyde_query])[0]
+            hyde_rows = self.retriever.retrieve_with_scores(hvec, k=fetch_k)
+            for row in hyde_rows:
+                doc_id = int(row.get("_doc_id", -1))
+                item = dict(row)
+                item["_from_hyde"] = True
+                prev = merged.get(doc_id)
+                if prev is None or float(item.get("_vector_score", 0.0)) > float(prev.get("_vector_score", 0.0)):
+                    if prev and prev.get("_from_hyde") is None:
+                        item["_from_hyde"] = True
+                    merged[doc_id] = item
+                elif prev is not None:
+                    prev["_from_hyde"] = prev.get("_from_hyde") or True
+        return self._rerank_retrieved(question, list(merged.values()), self.top_k)
 
     def _is_cost_of_production_query(self, text: str) -> bool:
         t = text.strip().lower()

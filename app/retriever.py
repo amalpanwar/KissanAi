@@ -19,6 +19,18 @@ class Retriever:
         self.metadata = metadata
 
     def retrieve(self, query_vec: np.ndarray, k: int = 5) -> list[dict]:
+        return [
+            {key: value for key, value in row.items() if not str(key).startswith("_")}
+            for row in self.retrieve_with_scores(query_vec, k=k)
+        ]
+
+    def retrieve_with_scores(self, query_vec: np.ndarray, k: int = 5) -> list[dict]:
         ids = cosine_top_k(query_vec, self.vectors, k=k)
         rows = self.metadata.iloc[ids]
-        return rows.to_dict(orient="records")
+        out = []
+        for idx, row in zip(ids, rows.to_dict(orient="records")):
+            scored = dict(row)
+            scored["_doc_id"] = int(idx)
+            scored["_vector_score"] = float(self.vectors[idx] @ query_vec)
+            out.append(scored)
+        return out
