@@ -1737,23 +1737,22 @@ def render_feedback_widget(item: dict, advisor: RAGAdvisor) -> None:
         st.caption("Feedback saved for this answer.")
         return
     with st.expander("Give feedback on this answer", expanded=False):
-        with st.form(f"feedback_form_{query_log_id}", clear_on_submit=False):
-            rating = st.radio(
-                "Was this answer helpful?",
-                ["Helpful", "Not helpful", "Provide correction"],
-                key=f"rating_{query_log_id}",
-                horizontal=True,
+        rating = st.radio(
+            "Was this answer helpful?",
+            ["Helpful", "Not helpful", "Provide correction"],
+            key=f"rating_{query_log_id}",
+            horizontal=True,
+        )
+        correction = ""
+        if rating in {"Not helpful", "Provide correction"}:
+            correction = st.text_area(
+                "What should the answer say instead?",
+                key=f"correction_{query_log_id}",
+                placeholder="Write the corrected answer, missing fact, or better explanation.",
+                height=180,
             )
-            correction = ""
-            if rating in {"Not helpful", "Provide correction"}:
-                correction = st.text_area(
-                    "What should the answer say instead?",
-                    key=f"correction_{query_log_id}",
-                    placeholder="Write the corrected answer, missing fact, or better explanation.",
-                    height=160,
-                )
-                st.caption("Please write the corrected version or the missing source-backed detail.")
-            submitted = st.form_submit_button("Submit feedback", use_container_width=True)
+            st.caption("Please write the corrected version or the missing source-backed detail.")
+        submitted = st.button("Submit feedback", key=f"submit_feedback_{query_log_id}", use_container_width=True)
         if submitted:
             if rating in {"Not helpful", "Provide correction"} and not correction.strip():
                 st.warning("Please add the correction before submitting feedback.")
