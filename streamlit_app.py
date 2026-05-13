@@ -5,6 +5,7 @@ import re
 import sys
 import sqlite3
 import smtplib
+import html
 import uuid
 import hmac
 import hashlib
@@ -27,7 +28,7 @@ import app.db as db_mod
 from app.datagov_client import DataGovClient
 from app.feedback import compact_evidence_text, validate_feedback_with_local_sources
 from app.lstm_forecast import prepare_daily_series, train_and_forecast
-from app.weather import get_current_weather_hindi
+from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi
 from app.cacp import get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
 from app.supabase_auth import (
@@ -104,6 +105,65 @@ def _safe_float(value: object) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _weather_theme_from_text(text: str) -> str:
+    t = (text or "").lower()
+    if any(token in t for token in ["बारिश", "फुहार", "वर्षा", "rain", "showers", "तूफान", "आंधी"]):
+        return "rain"
+    if any(token in t for token in ["बादल", "कोहरा", "cloud", "fog", "धुंध"]):
+        return "cloud"
+    if any(token in t for token in ["आसमान साफ", "मुख्यतः साफ", "sunny", "clear"]):
+        return "sun"
+    return "cloud"
+
+
+def render_weather_chat_card(text: str) -> None:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        st.write(text)
+        return
+    title = html.escape(lines[0])
+    body = "<br>".join(html.escape(line) for line in lines[1:]) if len(lines) > 1 else ""
+    theme = _weather_theme_from_text(text)
+    themes = {
+        "rain": {
+            "bg": "linear-gradient(135deg, #0f3554 0%, #1f5c85 55%, #4f8fb7 100%)",
+            "border": "#8dc7ec",
+            "label": "Rain Forecast",
+        },
+        "cloud": {
+            "bg": "linear-gradient(135deg, #435365 0%, #66798a 60%, #97aab8 100%)",
+            "border": "#d7e2ea",
+            "label": "Cloud Forecast",
+        },
+        "sun": {
+            "bg": "linear-gradient(135deg, #7f4a00 0%, #c87a00 55%, #f6c54f 100%)",
+            "border": "#ffe7a8",
+            "label": "Sunny Forecast",
+        },
+    }
+    cfg_theme = themes.get(theme, themes["cloud"])
+    st.markdown(
+        f"""
+        <div style="
+            background: {cfg_theme['bg']};
+            border: 1px solid {cfg_theme['border']};
+            border-radius: 18px;
+            padding: 16px 18px;
+            color: #ffffff;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.16);
+            margin: 4px 0 6px 0;
+        ">
+            <div style="font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.88; margin-bottom: 8px;">
+                {cfg_theme['label']}
+            </div>
+            <div style="font-size: 1.05rem; font-weight: 700; margin-bottom: 8px;">{title}</div>
+            <div style="font-size: 0.96rem; line-height: 1.65;">{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | None = None, auto_table: pd.DataFrame | None = None) -> None:
@@ -2161,6 +2221,13 @@ for item in st.session_state.chat_history:
                 auto_chart=item.get("market_chart"),
                 auto_table=item.get("market_table"),
             )
+        elif item.get("role") == "assistant" and str(item.get("topic") or "").strip().lower() == "weather":
+            render_weather_chat_card(item["text"])
+            refs = item.get("references", [])
+            if refs:
+                with st.expander("Sources Used"):
+                    for src in refs:
+                        st.write(f"- {src}")
         else:
             st.write(item["text"])
             refs = item.get("references", [])
@@ -2196,16 +2263,30 @@ if user_query:
         st.stop()
 
     # If the previous response asked only for a weather location, treat this input as the location.
-    if st.session_state.pop("pending_weather_location", False):
+    pending_weather_request = st.session_state.pop("pending_weather_location", None)
+    if pending_weather_request:
         place = user_query.strip()
         lookup_path = Path("data/processed/location_lookup.csv")
         lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
         lookup = load_location_lookup(lookup_mtime)
         district, _state = _lookup_district_from_location(place, lookup)
         weather_place = place if not district else f"{place}, {district}, Uttar Pradesh"
-        weather = get_current_weather_hindi(weather_place)
-        if not weather:
+        original_weather_query = (
+            pending_weather_request.get("original_query", "")
+            if isinstance(pending_weather_request, dict)
+            else ""
+        )
+        forecast_target = advisor._extract_weather_forecast_target(original_weather_query) if original_weather_query else None
+        if forecast_target:
+            weather = get_daily_weather_forecast_hindi(
+                weather_place,
+                day_offset=int(forecast_target.get("day_offset", 0)),
+                label=str(forecast_target.get("label") or "").strip() or None,
+            )
+        else:
             weather = get_current_weather_hindi(weather_place)
+            if not weather:
+                weather = get_current_weather_hindi(weather_place)
         final_answer = (
             weather
             if weather
@@ -2226,7 +2307,7 @@ if user_query:
             {"role": "assistant", "text": final_answer, "references": ["Open-Meteo API"], "query_log_id": query_log_id, "topic": "weather", "user_query": user_query}
         )
         with st.chat_message("assistant"):
-            st.write(final_answer)
+            render_weather_chat_card(final_answer)
         st.stop()
 
     last_ctx = st.session_state.get("last_structured_context", {}) or {}
@@ -2529,7 +2610,7 @@ if user_query:
             crop_name=preferred_crop_for_query or "unknown",
         )
         if final_answer.startswith("कृपया मौसम के लिए स्थान बताएं"):
-            st.session_state["pending_weather_location"] = True
+            st.session_state["pending_weather_location"] = {"original_query": user_query}
         query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
         if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide"}:
             st.session_state["last_structured_topic"] = topic
@@ -2572,7 +2653,10 @@ if user_query:
     )
 
     with st.chat_message("assistant"):
-        st.write(final_answer)
+        if not intent_price and str(topic or "").strip().lower() == "weather":
+            render_weather_chat_card(final_answer)
+        else:
+            st.write(final_answer)
         if not intent_price:
             with st.expander("Sources Used"):
                 for src in result.get("references", []):

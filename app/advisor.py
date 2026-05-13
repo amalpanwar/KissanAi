@@ -2204,6 +2204,60 @@ class RAGAdvisor:
             return None
         if not self._is_weather_intent(t):
             return None
+        month_map = {
+            "jan": 1, "january": 1, "जनवरी": 1,
+            "feb": 2, "february": 2, "फरवरी": 2, "फ़रवरी": 2,
+            "mar": 3, "march": 3, "मार्च": 3,
+            "apr": 4, "april": 4, "अप्रैल": 4,
+            "may": 5, "मई": 5,
+            "jun": 6, "june": 6, "जून": 6,
+            "jul": 7, "july": 7, "जुलाई": 7,
+            "aug": 8, "august": 8, "अगस्त": 8,
+            "sep": 9, "sept": 9, "september": 9, "सितंबर": 9, "सितम्बर": 9,
+            "oct": 10, "october": 10, "अक्टूबर": 10,
+            "nov": 11, "november": 11, "नवंबर": 11, "नवम्बर": 11,
+            "dec": 12, "december": 12, "दिसंबर": 12, "दिसम्बर": 12,
+        }
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
+        numeric_date = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", t)
+        if numeric_date:
+            try:
+                day = int(numeric_date.group(1))
+                month = int(numeric_date.group(2))
+                year_raw = numeric_date.group(3)
+                year = int(year_raw) if year_raw else now.year
+                if year < 100:
+                    year += 2000
+                target = datetime(year, month, day).date()
+                if not year_raw and target < now.date():
+                    target = datetime(now.year + 1, month, day).date()
+                offset = (target - now.date()).days
+                if offset < 0:
+                    return None
+                return {"day_offset": offset, "label": target.strftime("%d-%m-%Y")}
+            except Exception:
+                pass
+
+        month_names = "|".join(sorted((re.escape(k) for k in month_map.keys()), key=len, reverse=True))
+        text_date = re.search(rf"\b(\d{{1,2}})\s+({month_names})(?:\s+(\d{{4}}))?\b", t)
+        if text_date:
+            try:
+                day = int(text_date.group(1))
+                month_token = text_date.group(2)
+                month = month_map[month_token]
+                year = int(text_date.group(3)) if text_date.group(3) else now.year
+                target = datetime(year, month, day).date()
+                if not text_date.group(3) and target < now.date():
+                    target = datetime(now.year + 1, month, day).date()
+                offset = (target - now.date()).days
+                if offset < 0:
+                    return None
+                label = f"{day:02d}-{month:02d}-{target.year}"
+                return {"day_offset": offset, "label": label}
+            except Exception:
+                pass
+
         if any(x in t for x in ["परसों", "parso", "parsō", "day after tomorrow"]):
             return {"day_offset": 2, "label": "परसों"}
         if any(x in t for x in ["कल", "kal", "tomorrow", "agle din", "अगले दिन"]):
@@ -2223,7 +2277,6 @@ class RAGAdvisor:
         }
         for label, target_wd in weekday_map.items():
             if label in t:
-                now = datetime.now(ZoneInfo("Asia/Kolkata"))
                 delta = (target_wd - now.weekday()) % 7
                 if delta == 0 and "next" in t:
                     delta = 7
