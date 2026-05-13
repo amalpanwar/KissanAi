@@ -15,7 +15,7 @@ from app.generator import LocalGenerator
 from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
-from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_tomorrow_rain_forecast_hindi
+from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_rain_day_forecast_hindi, get_tomorrow_rain_forecast_hindi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
 from app.crop_guide import build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
@@ -314,6 +314,27 @@ class RAGAdvisor:
             loc = lookup_place(place) if place else None
             if not loc:
                 loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
+            if place and not loc:
+                generic_weather_tokens = {
+                    "baarish", "barish", "rain", "rainfall", "mausam", "weather",
+                    "konse", "kaunse", "kis", "din", "kab", "ki", "ka", "ke",
+                    "hai", "h", "hoga", "hogi", "ho", "आज", "कल", "परसों",
+                    "बारिश", "बारिस", "मौसम", "किस", "दिन", "कौनसे", "कौन", "कब",
+                    "है", "होगा", "होगी",
+                }
+                raw_tokens = [tok.strip(" ?!.,") for tok in re.split(r"\s+", place) if tok.strip(" ?!.,")]
+                filtered_tokens = [tok for tok in raw_tokens if tok.lower() not in generic_weather_tokens and tok not in generic_weather_tokens]
+                sanitized_candidates = []
+                if filtered_tokens:
+                    sanitized_candidates.append(" ".join(filtered_tokens))
+                    sanitized_candidates.append(filtered_tokens[0])
+                for cand in sanitized_candidates:
+                    loc = lookup_place(cand) or lookup_place_in_text(cand)
+                    if loc:
+                        place = loc.get("place") or cand
+                        break
+                if not loc and not filtered_tokens:
+                    place = None
             if loc and loc.get("place"):
                 place = loc.get("place")
             if not place and not loc:
@@ -328,7 +349,9 @@ class RAGAdvisor:
             state = loc.get("state") if loc else "Uttar Pradesh"
             weather_place = place if not district else f"{place}, {district}, {state}"
             forecast_target = self._extract_weather_forecast_target(normalized_question) or self._extract_weather_forecast_target(farmer_question)
-            if forecast_target:
+            if self._is_rain_day_forecast_query(normalized_question) or self._is_rain_day_forecast_query(farmer_question):
+                weather = get_rain_day_forecast_hindi(weather_place, days=7)
+            elif forecast_target:
                 weather = get_daily_weather_forecast_hindi(
                     weather_place,
                     day_offset=int(forecast_target["day_offset"]),
@@ -2198,6 +2221,14 @@ class RAGAdvisor:
         rain_words = ["बारिश", "बारिस", "barish", "baarish", "rain", "rainfall", "mausam", "weather", "मौसम"]
         return any(d in t for d in day_words) and any(r in t for r in rain_words)
 
+    def _is_rain_day_forecast_query(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        rain_words = ["बारिश", "बारिस", "barish", "baarish", "rain", "rainfall"]
+        timing_words = ["किस दिन", "कौनसे दिन", "कौन से दिन", "konse din", "kaunse din", "kis din", "kab", "which day", "when"]
+        return any(r in t for r in rain_words) and any(w in t for w in timing_words)
+
     def _extract_weather_forecast_target(self, text: str) -> dict | None:
         t = (text or "").strip().lower()
         if not t:
@@ -2330,6 +2361,7 @@ class RAGAdvisor:
                 "hai",
                 "ho",
                 "hoga",
+                "hogi",
                 "hoon",
                 "kesa",
                 "kaisa",
@@ -2361,6 +2393,16 @@ class RAGAdvisor:
                 "weather?",
                 "weather.",
                 "weather,",
+                "konse",
+                "kaunse",
+                "kis",
+                "din",
+                "kab",
+                "दिन",
+                "किस",
+                "कौनसे",
+                "कौन",
+                "कब",
             }
             tokens = [t.strip(" ?!.,") for t in re.split(r"\s+", q) if t.strip()]
             kept = [t for t in tokens if t.strip(" ?!.,").lower() not in drop]
@@ -2394,6 +2436,7 @@ class RAGAdvisor:
                 "sakta",
                 "ho",
                 "hoga",
+                "hogi",
                 "kesa",
                 "kaisa",
                 "hai",
@@ -2402,10 +2445,15 @@ class RAGAdvisor:
                 "barish",
                 "baarish",
                 "rain",
+                "konse",
+                "kaunse",
+                "kis",
+                "din",
+                "kab",
             }
             for tok in tokens:
                 t = tok.lower()
-                if t in stop or t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather", "बारिश", "बारिस", "क्या", "सकती", "सकता", "अभी", "है"}:
+                if t in stop or t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather", "बारिश", "बारिस", "क्या", "सकती", "सकता", "अभी", "है", "दिन", "किस", "कौनसे", "कौन", "कब"}:
                     continue
                 return tok
         # Try explicit location phrases first
@@ -2445,6 +2493,26 @@ class RAGAdvisor:
             "hai",
             "h",
             "?",
+            "barish",
+            "baarish",
+            "rain",
+            "rainfall",
+            "बारिश",
+            "बारिस",
+            "hoga",
+            "hogi",
+            "होगा",
+            "होगी",
+            "konse",
+            "kaunse",
+            "kis",
+            "din",
+            "kab",
+            "दिन",
+            "किस",
+            "कौनसे",
+            "कौन",
+            "कब",
         }
         for idx, tok in enumerate(tokens):
             t = tok.strip(" ?!.," ).lower()
@@ -2487,6 +2555,26 @@ class RAGAdvisor:
             "mausm",
             "मौसम",
             "weather",
+            "barish",
+            "baarish",
+            "rain",
+            "rainfall",
+            "बारिश",
+            "बारिस",
+            "hoga",
+            "hogi",
+            "होगा",
+            "होगी",
+            "konse",
+            "kaunse",
+            "kis",
+            "din",
+            "kab",
+            "दिन",
+            "किस",
+            "कौनसे",
+            "कौन",
+            "कब",
         }
         for tok in tokens:
             t = tok.lower()

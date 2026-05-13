@@ -2340,9 +2340,17 @@ if user_query:
         last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care) else preferred_crop
     )
 
+    question_for_advisor = user_query.strip()
+    if (
+        advisor._is_weather_intent(advisor._normalize_hinglish(user_query))
+        and not extract_place_from_query(user_query)
+        and last_location_ctx.get("place")
+    ):
+        question_for_advisor = f"{last_location_ctx['place']} में {question_for_advisor}"
+
     composed_query = (
         f"जिला: {resolved_district} | मौसम: {season_for_query} | पसंदीदा फसल: {preferred_crop_for_query or 'कोई नहीं'} | "
-        f"किसान का प्रश्न: {user_query.strip()}"
+        f"किसान का प्रश्न: {question_for_advisor}"
     )
 
     market_df = load_agmarknet_df()
