@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from app.location_lookup import lookup_place_in_text, lookup_place, resolve_location_hierarchy
 
@@ -345,6 +347,75 @@ def get_tomorrow_rain_forecast_hindi(place: str) -> str:
 
     return (
         f"कल का मौसम पूर्वानुमान ({resolved_name}):\n"
+        f"- निष्कर्ष: {verdict}\n"
+        f"- स्थिति: {summary}\n"
+        f"- बारिश की अधिकतम संभावना: {prob}%\n"
+        f"- अनुमानित कुल वर्षा: {mm} mm\n"
+        f"- तापमान: {lo}°C से {hi}°C\n\n"
+        "कृषि सुझाव: अगर बारिश की संभावना ज्यादा हो तो सिंचाई टालें और spray/बीज उपचार का समय मौसम देखकर रखें।"
+    )
+
+
+def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | None = None) -> str:
+    geo = _geocode_free(place.strip())
+    if not geo:
+        return "मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+    lat, lon, resolved_name = geo
+    offset = max(0, int(day_offset))
+    params = urlencode(
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max",
+            "forecast_days": min(max(offset + 2, 3), 16),
+            "timezone": "Asia/Kolkata",
+        }
+    )
+    url = f"https://api.open-meteo.com/v1/forecast?{params}"
+    try:
+        with urlopen(url, timeout=6) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        payload = None
+    if not payload:
+        return "मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+
+    daily = payload.get("daily", {}) or {}
+    times = daily.get("time", []) or []
+    codes = daily.get("weather_code", []) or []
+    tmax = daily.get("temperature_2m_max", []) or []
+    tmin = daily.get("temperature_2m_min", []) or []
+    rain_sum = daily.get("precipitation_sum", []) or []
+    rain_prob = daily.get("precipitation_probability_max", []) or []
+    if len(times) <= offset:
+        return "उस दिन का मौसम पूर्वानुमान अभी उपलब्ध नहीं है।"
+
+    idx = offset
+    summary = _weather_code_hi(int(codes[idx] if idx < len(codes) else 0))
+    prob = rain_prob[idx] if idx < len(rain_prob) else "NA"
+    mm = rain_sum[idx] if idx < len(rain_sum) else "NA"
+    hi = tmax[idx] if idx < len(tmax) else "NA"
+    lo = tmin[idx] if idx < len(tmin) else "NA"
+    try:
+        target_dt = datetime.fromisoformat(str(times[idx])).replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+        date_text = target_dt.strftime("%d-%m-%Y")
+    except Exception:
+        date_text = str(times[idx])
+    heading = label or f"{date_text}"
+
+    verdict = "बारिश की संभावना कम है।"
+    try:
+        prob_val = float(prob)
+        rain_val = float(mm)
+        if prob_val >= 60 or rain_val >= 2:
+            verdict = "बारिश होने की अच्छी संभावना है।"
+        elif prob_val >= 30 or rain_val > 0:
+            verdict = "हल्की या छिटपुट बारिश हो सकती है।"
+    except Exception:
+        pass
+
+    return (
+        f"{heading} का मौसम पूर्वानुमान ({resolved_name}):\n"
         f"- निष्कर्ष: {verdict}\n"
         f"- स्थिति: {summary}\n"
         f"- बारिश की अधिकतम संभावना: {prob}%\n"

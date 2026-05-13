@@ -15,7 +15,7 @@ from app.generator import LocalGenerator
 from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
-from app.weather import get_current_weather_hindi, get_tomorrow_rain_forecast_hindi
+from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_tomorrow_rain_forecast_hindi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
 from app.crop_guide import build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
@@ -327,8 +327,13 @@ class RAGAdvisor:
             district = loc.get("district") if loc else self._lookup_district_from_location(place)
             state = loc.get("state") if loc else "Uttar Pradesh"
             weather_place = place if not district else f"{place}, {district}, {state}"
-            if self._is_tomorrow_weather_query(normalized_question):
-                weather = get_tomorrow_rain_forecast_hindi(weather_place)
+            forecast_target = self._extract_weather_forecast_target(normalized_question) or self._extract_weather_forecast_target(farmer_question)
+            if forecast_target:
+                weather = get_daily_weather_forecast_hindi(
+                    weather_place,
+                    day_offset=int(forecast_target["day_offset"]),
+                    label=str(forecast_target["label"]),
+                )
             else:
                 weather = get_current_weather_hindi(weather_place)
                 if not weather:
@@ -2192,6 +2197,41 @@ class RAGAdvisor:
         day_words = ["kal", "कल", "tomorrow", "agle din", "अगले दिन"]
         rain_words = ["बारिश", "बारिस", "barish", "baarish", "rain", "rainfall", "mausam", "weather", "मौसम"]
         return any(d in t for d in day_words) and any(r in t for r in rain_words)
+
+    def _extract_weather_forecast_target(self, text: str) -> dict | None:
+        t = (text or "").strip().lower()
+        if not t:
+            return None
+        if not self._is_weather_intent(t):
+            return None
+        if any(x in t for x in ["परसों", "parso", "parsō", "day after tomorrow"]):
+            return {"day_offset": 2, "label": "परसों"}
+        if any(x in t for x in ["कल", "kal", "tomorrow", "agle din", "अगले दिन"]):
+            return {"day_offset": 1, "label": "कल"}
+        m = re.search(r"(\d+)\s*(?:दिन|din)\s*(?:baad|बाद)", t)
+        if m:
+            days = max(0, min(int(m.group(1)), 14))
+            return {"day_offset": days, "label": f"{days} दिन बाद"}
+        weekday_map = {
+            "monday": 0, "सोमवार": 0,
+            "tuesday": 1, "मंगलवार": 1,
+            "wednesday": 2, "बुधवार": 2,
+            "thursday": 3, "गुरुवार": 3, "brihaspativar": 3,
+            "friday": 4, "शुक्रवार": 4,
+            "saturday": 5, "शनिवार": 5,
+            "sunday": 6, "रविवार": 6,
+        }
+        for label, target_wd in weekday_map.items():
+            if label in t:
+                now = datetime.now(ZoneInfo("Asia/Kolkata"))
+                delta = (target_wd - now.weekday()) % 7
+                if delta == 0 and "next" in t:
+                    delta = 7
+                elif delta == 0:
+                    delta = 7
+                pretty = label.title() if re.fullmatch(r"[a-z]+", label) else label
+                return {"day_offset": delta, "label": pretty}
+        return None
 
     def _extract_district(self, context_part: str) -> str | None:
         if not context_part:
