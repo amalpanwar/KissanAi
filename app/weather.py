@@ -5,7 +5,7 @@ import math
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -31,6 +31,78 @@ def _weather_code_hi(code: int) -> str:
         95: "आंधी/तूफान",
     }
     return mapping.get(code, "मौसम सामान्य")
+
+
+def _http_json(url: str, timeout: int = 6, headers: dict[str, str] | None = None):
+    request_headers = {
+        "User-Agent": "KisaanAI/1.0",
+        "Accept": "application/json,text/plain,*/*",
+    }
+    if headers:
+        request_headers.update(headers)
+    req = Request(url, headers=request_headers)
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _weather_response_cache_path() -> Path:
+    return Path("data/processed/weather_response_cache.json")
+
+
+def _load_weather_response_cache() -> dict:
+    cache_path = _weather_response_cache_path()
+    try:
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_weather_response_cache(cache: dict) -> None:
+    cache_path = _weather_response_cache_path()
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _get_cached_weather_response(cache_key: str, max_age_sec: int) -> str | None:
+    cache = _load_weather_response_cache()
+    item = cache.get(cache_key) or {}
+    try:
+        ts = float(item.get("ts", 0))
+    except Exception:
+        ts = 0
+    text = str(item.get("text") or "").strip()
+    if not text or not ts or (time.time() - ts) > max_age_sec:
+        return None
+    return _mark_weather_response_as_cached(text)
+
+
+def _put_cached_weather_response(cache_key: str, text: str) -> None:
+    cache = _load_weather_response_cache()
+    cache[cache_key] = {"text": text, "ts": time.time()}
+    _save_weather_response_cache(cache)
+
+
+def _mark_weather_response_as_cached(text: str) -> str:
+    lines = [line for line in str(text or "").splitlines()]
+    if not lines:
+        return text
+    replacements = {
+        "आज का मौसम": "हाल का मौसम",
+        "कल का मौसम पूर्वानुमान": "हाल का मौसम पूर्वानुमान",
+        "अगले सप्ताह का मौसम पूर्वानुमान": "हाल का मौसम पूर्वानुमान",
+    }
+    for src, dst in replacements.items():
+        if lines[0].startswith(src):
+            lines[0] = lines[0].replace(src, dst, 1)
+            break
+    note = "- नोट: लाइव मौसम डेटा न मिलने पर यह पिछले उपलब्ध अपडेट के आधार पर दिखाया जा रहा है।"
+    if note not in lines:
+        insert_at = 1 if len(lines) > 1 else len(lines)
+        lines.insert(insert_at, note)
+    return "\n".join(lines)
 
 
 def _geocode_free(place: str) -> tuple[float, float, str] | None:
@@ -90,9 +162,7 @@ def _geocode_free(place: str) -> tuple[float, float, str] | None:
         try:
             osm_params = urlencode({"q": cand, "format": "json", "limit": 1, "addressdetails": 1})
             osm_url = f"https://nominatim.openstreetmap.org/search?{osm_params}"
-            req = Request(osm_url, headers={"User-Agent": "KisaanAi/1.0"})
-            with urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            data = _http_json(osm_url, timeout=4)
             if data:
                 top = data[0]
                 if not _result_matches_lookup(top, loc):
@@ -115,8 +185,7 @@ def _geocode_free(place: str) -> tuple[float, float, str] | None:
         params = urlencode({"name": cand, "count": 1, "language": "hi", "format": "json"})
         url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
         try:
-            with urlopen(url, timeout=4) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            payload = _http_json(url, timeout=4)
             results = payload.get("results") or []
             if results:
                 top = results[0]
@@ -202,6 +271,7 @@ def get_current_weather_hindi(place: str) -> str:
     if not geo:
         return "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
     lat, lon, resolved_name = geo
+    cache_key = f"current::{round(lat, 4)}::{round(lon, 4)}"
     # Primary: Open-Meteo
     params = urlencode(
         {
@@ -215,23 +285,21 @@ def get_current_weather_hindi(place: str) -> str:
     )
     url = f"https://api.open-meteo.com/v1/forecast?{params}"
     try:
-        with urlopen(url, timeout=6) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        payload = _http_json(url, timeout=6)
     except Exception:
         payload = None
 
     if not payload:
         # Fallback: wttr.in (free)
         try:
-            wttr_url = f"https://wttr.in/{resolved_name}?format=j1"
-            with urlopen(wttr_url, timeout=6) as resp:
-                wdata = json.loads(resp.read().decode("utf-8"))
+            wttr_url = f"https://wttr.in/{quote(resolved_name, safe='')}?format=j1"
+            wdata = _http_json(wttr_url, timeout=6)
             current = (wdata.get("current_condition") or [{}])[0]
             temp = current.get("temp_C", "NA")
             humidity = current.get("humidity", "NA")
             wind = current.get("windspeedKmph", "NA")
             desc = (current.get("weatherDesc") or [{}])[0].get("value", "मौसम सामान्य")
-            return (
+            answer = (
                 f"आज का मौसम ({resolved_name}):\n"
                 f"- स्थिति: {desc}\n"
                 f"- तापमान: {temp}°C\n"
@@ -239,7 +307,12 @@ def get_current_weather_hindi(place: str) -> str:
                 f"- हवा की गति: {wind} km/h\n\n"
                 "कृषि सुझाव: अगर वर्षा/हवा अधिक हो तो सिंचाई और स्प्रे शेड्यूल समायोजित करें।"
             )
+            _put_cached_weather_response(cache_key, answer)
+            return answer
         except Exception:
+            cached = _get_cached_weather_response(cache_key, max_age_sec=6 * 60 * 60)
+            if cached:
+                return cached
             return "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
 
     current = payload.get("current", {})
@@ -280,7 +353,7 @@ def get_current_weather_hindi(place: str) -> str:
     except Exception:
         pass
 
-    return (
+    answer = (
         f"आज का मौसम ({resolved_name}):\n"
         f"- स्थिति: {summary}\n"
         f"- तापमान: {temp}°C\n"
@@ -291,6 +364,8 @@ def get_current_weather_hindi(place: str) -> str:
         + ("\n".join(outlook_lines) if outlook_lines else "- उपलब्ध नहीं\n")
         + "\n\nकृषि सुझाव: अगर वर्षा/हवा अधिक हो तो सिंचाई और स्प्रे शेड्यूल समायोजित करें।"
     )
+    _put_cached_weather_response(cache_key, answer)
+    return answer
 
 
 def get_tomorrow_rain_forecast_hindi(place: str) -> str:
@@ -298,6 +373,7 @@ def get_tomorrow_rain_forecast_hindi(place: str) -> str:
     if not geo:
         return "कल के लिए लाइव मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
     lat, lon, resolved_name = geo
+    cache_key = f"tomorrow::{round(lat, 4)}::{round(lon, 4)}"
     params = urlencode(
         {
             "latitude": lat,
@@ -309,12 +385,14 @@ def get_tomorrow_rain_forecast_hindi(place: str) -> str:
     )
     url = f"https://api.open-meteo.com/v1/forecast?{params}"
     try:
-        with urlopen(url, timeout=6) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        payload = _http_json(url, timeout=6)
     except Exception:
         payload = None
 
     if not payload:
+        cached = _get_cached_weather_response(cache_key, max_age_sec=18 * 60 * 60)
+        if cached:
+            return cached
         return "कल के लिए लाइव मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
 
     daily = payload.get("daily", {}) or {}
@@ -345,7 +423,7 @@ def get_tomorrow_rain_forecast_hindi(place: str) -> str:
     except Exception:
         pass
 
-    return (
+    answer = (
         f"कल का मौसम पूर्वानुमान ({resolved_name}):\n"
         f"- निष्कर्ष: {verdict}\n"
         f"- स्थिति: {summary}\n"
@@ -354,6 +432,8 @@ def get_tomorrow_rain_forecast_hindi(place: str) -> str:
         f"- तापमान: {lo}°C से {hi}°C\n\n"
         "कृषि सुझाव: अगर बारिश की संभावना ज्यादा हो तो सिंचाई टालें और spray/बीज उपचार का समय मौसम देखकर रखें।"
     )
+    _put_cached_weather_response(cache_key, answer)
+    return answer
 
 
 def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | None = None) -> str:
@@ -362,6 +442,7 @@ def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | N
         return "मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
     lat, lon, resolved_name = geo
     offset = max(0, int(day_offset))
+    cache_key = f"daily::{offset}::{round(lat, 4)}::{round(lon, 4)}"
     params = urlencode(
         {
             "latitude": lat,
@@ -373,11 +454,13 @@ def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | N
     )
     url = f"https://api.open-meteo.com/v1/forecast?{params}"
     try:
-        with urlopen(url, timeout=6) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        payload = _http_json(url, timeout=6)
     except Exception:
         payload = None
     if not payload:
+        cached = _get_cached_weather_response(cache_key, max_age_sec=18 * 60 * 60)
+        if cached:
+            return cached
         return "मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
 
     daily = payload.get("daily", {}) or {}
@@ -414,7 +497,7 @@ def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | N
     except Exception:
         pass
 
-    return (
+    answer = (
         f"{heading} का मौसम पूर्वानुमान ({resolved_name}):\n"
         f"- निष्कर्ष: {verdict}\n"
         f"- स्थिति: {summary}\n"
@@ -423,6 +506,8 @@ def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | N
         f"- तापमान: {lo}°C से {hi}°C\n\n"
         "कृषि सुझाव: अगर बारिश की संभावना ज्यादा हो तो सिंचाई टालें और spray/बीज उपचार का समय मौसम देखकर रखें।"
     )
+    _put_cached_weather_response(cache_key, answer)
+    return answer
 
 
 def get_rain_day_forecast_hindi(place: str, days: int = 7) -> str:
@@ -431,6 +516,7 @@ def get_rain_day_forecast_hindi(place: str, days: int = 7) -> str:
         return "बारिश का दिन बताने के लिए लाइव मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
     lat, lon, resolved_name = geo
     horizon = min(max(int(days), 3), 10)
+    cache_key = f"rain_day::{horizon}::{round(lat, 4)}::{round(lon, 4)}"
     params = urlencode(
         {
             "latitude": lat,
@@ -442,11 +528,13 @@ def get_rain_day_forecast_hindi(place: str, days: int = 7) -> str:
     )
     url = f"https://api.open-meteo.com/v1/forecast?{params}"
     try:
-        with urlopen(url, timeout=6) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        payload = _http_json(url, timeout=6)
     except Exception:
         payload = None
     if not payload:
+        cached = _get_cached_weather_response(cache_key, max_age_sec=18 * 60 * 60)
+        if cached:
+            return cached
         return "बारिश का दिन बताने के लिए लाइव मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
 
     daily = payload.get("daily", {}) or {}
@@ -471,10 +559,12 @@ def get_rain_day_forecast_hindi(place: str, days: int = 7) -> str:
             rainy_days.append((idx, date_label, prob, mm, summary))
 
     if not rainy_days:
-        return (
+        answer = (
             f"अगले {horizon} दिनों में ({resolved_name}) बारिश की मजबूत संभावना नहीं दिख रही है।\n"
             "अगर आप चाहें, तो मैं किसी खास दिन का पूरा मौसम भी बता सकता हूँ।"
         )
+        _put_cached_weather_response(cache_key, answer)
+        return answer
 
     best = max(rainy_days, key=lambda x: (x[2], x[3]))
     lines = [
@@ -487,7 +577,9 @@ def get_rain_day_forecast_hindi(place: str, days: int = 7) -> str:
         f"\nसबसे ज्यादा संभावना {('आज' if best[0] == 0 else 'कल' if best[0] == 1 else 'परसों' if best[0] == 2 else best[1])} को दिख रही है।"
     )
     lines.append("कृषि सुझाव: बारिश वाले दिन spray और सिंचाई का समय थोड़ा समायोजित रखें।")
-    return "\n".join(lines)
+    answer = "\n".join(lines)
+    _put_cached_weather_response(cache_key, answer)
+    return answer
 
 
 def get_weekly_weather_forecast_hindi(place: str, days: int = 7) -> str:
@@ -496,6 +588,7 @@ def get_weekly_weather_forecast_hindi(place: str, days: int = 7) -> str:
         return "अगले सप्ताह का मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
     lat, lon, resolved_name = geo
     horizon = min(max(int(days), 5), 10)
+    cache_key = f"weekly::{horizon}::{round(lat, 4)}::{round(lon, 4)}"
     params = urlencode(
         {
             "latitude": lat,
@@ -507,11 +600,13 @@ def get_weekly_weather_forecast_hindi(place: str, days: int = 7) -> str:
     )
     url = f"https://api.open-meteo.com/v1/forecast?{params}"
     try:
-        with urlopen(url, timeout=6) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        payload = _http_json(url, timeout=6)
     except Exception:
         payload = None
     if not payload:
+        cached = _get_cached_weather_response(cache_key, max_age_sec=18 * 60 * 60)
+        if cached:
+            return cached
         return "अगले सप्ताह का मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
 
     daily = payload.get("daily", {}) or {}
@@ -566,4 +661,6 @@ def get_weekly_weather_forecast_hindi(place: str, days: int = 7) -> str:
     if wettest_label and wettest_mm > 0:
         lines.append(f"सबसे ज्यादा अनुमानित वर्षा: {wettest_label} को ~{wettest_mm:.1f} mm")
     lines.append("कृषि सुझाव: जिन दिनों बारिश की संभावना ज्यादा हो, उन दिनों सिंचाई टालें और spray/दवा का समय मौसम देखकर रखें।")
-    return "\n".join(lines)
+    answer = "\n".join(lines)
+    _put_cached_weather_response(cache_key, answer)
+    return answer
