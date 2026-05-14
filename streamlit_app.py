@@ -75,6 +75,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
+APP_BUILD_VERSION = "2026-05-14-weather-routing-v3"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -246,7 +247,8 @@ def check_ready() -> tuple[bool, str]:
 
 
 @st.cache_resource(show_spinner=False)
-def get_advisor() -> RAGAdvisor:
+def get_advisor(_build_version: str = APP_BUILD_VERSION) -> RAGAdvisor:
+    _ = _build_version
     return RAGAdvisor(
         AdvisorConfig(
             embedding_model=cfg.embedding_model,
@@ -2211,7 +2213,7 @@ if "pending_chat_items" in st.session_state:
     pending_items = st.session_state.pop("pending_chat_items") or []
     st.session_state.chat_history.extend(pending_items)
 
-advisor = get_advisor()
+advisor = get_advisor(APP_BUILD_VERSION)
 
 for item in st.session_state.chat_history:
     with st.chat_message(item["role"]):

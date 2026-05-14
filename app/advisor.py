@@ -2222,8 +2222,27 @@ class RAGAdvisor:
                 "बारिश", "बारिस", "मौसम", "किस", "दिन", "कौनसे", "कौन", "कब",
                 "है", "होगा", "होगी",
             }
+            calendar_tokens = {
+                "today", "tomorrow", "day", "after", "next", "coming",
+                "aaj", "aj", "kal", "parso", "agle", "agla",
+                "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+                "सोमवार", "मंगलवार", "बुधवार", "गुरुवार", "शुक्रवार", "शनिवार", "रविवार",
+                "jan", "january", "feb", "february", "mar", "march", "apr", "april", "may",
+                "jun", "june", "jul", "july", "aug", "august", "sep", "sept", "september",
+                "oct", "october", "nov", "november", "dec", "december",
+                "जनवरी", "फ़रवरी", "फरवरी", "मार्च", "अप्रैल", "मई", "जून", "जुलाई",
+                "अगस्त", "सितंबर", "सितम्बर", "अक्टूबर", "नवंबर", "नवम्बर", "दिसंबर", "दिसम्बर",
+            }
             raw_tokens = [tok.strip(" ?!.,") for tok in re.split(r"\s+", place) if tok.strip(" ?!.,")]
-            filtered_tokens = [tok for tok in raw_tokens if tok.lower() not in generic_weather_tokens and tok not in generic_weather_tokens]
+            filtered_tokens = [
+                tok
+                for tok in raw_tokens
+                if tok.lower() not in generic_weather_tokens
+                and tok not in generic_weather_tokens
+                and tok.lower() not in calendar_tokens
+                and tok not in calendar_tokens
+                and not re.fullmatch(r"\d{1,4}", tok)
+            ]
             sanitized_candidates = []
             if filtered_tokens:
                 sanitized_candidates.append(" ".join(filtered_tokens))
