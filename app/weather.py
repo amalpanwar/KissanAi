@@ -488,3 +488,82 @@ def get_rain_day_forecast_hindi(place: str, days: int = 7) -> str:
     )
     lines.append("कृषि सुझाव: बारिश वाले दिन spray और सिंचाई का समय थोड़ा समायोजित रखें।")
     return "\n".join(lines)
+
+
+def get_weekly_weather_forecast_hindi(place: str, days: int = 7) -> str:
+    geo = _geocode_free(place.strip())
+    if not geo:
+        return "अगले सप्ताह का मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+    lat, lon, resolved_name = geo
+    horizon = min(max(int(days), 5), 10)
+    params = urlencode(
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max",
+            "forecast_days": horizon,
+            "timezone": "Asia/Kolkata",
+        }
+    )
+    url = f"https://api.open-meteo.com/v1/forecast?{params}"
+    try:
+        with urlopen(url, timeout=6) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        payload = None
+    if not payload:
+        return "अगले सप्ताह का मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+
+    daily = payload.get("daily", {}) or {}
+    times = daily.get("time", []) or []
+    codes = daily.get("weather_code", []) or []
+    tmax = daily.get("temperature_2m_max", []) or []
+    tmin = daily.get("temperature_2m_min", []) or []
+    rain_sum = daily.get("precipitation_sum", []) or []
+    rain_prob = daily.get("precipitation_probability_max", []) or []
+    if not times:
+        return "अगले सप्ताह का मौसम पूर्वानुमान उपलब्ध नहीं है।"
+
+    lines = [f"अगले {horizon} दिनों का मौसम पूर्वानुमान ({resolved_name}):"]
+    max_prob = -1.0
+    max_prob_label = ""
+    wettest_mm = -1.0
+    wettest_label = ""
+    max_vals = []
+    min_vals = []
+    for idx, day_str in enumerate(times[:horizon]):
+        try:
+            target_dt = datetime.fromisoformat(str(day_str)).replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+            date_label = target_dt.strftime("%d-%m")
+        except Exception:
+            date_label = str(day_str)
+        day_name = "आज" if idx == 0 else "कल" if idx == 1 else "परसों" if idx == 2 else date_label
+        summary = _weather_code_hi(int(codes[idx] if idx < len(codes) else 0))
+        hi = tmax[idx] if idx < len(tmax) else "NA"
+        lo = tmin[idx] if idx < len(tmin) else "NA"
+        prob = float(rain_prob[idx]) if idx < len(rain_prob) and rain_prob[idx] not in (None, "") else 0.0
+        mm = float(rain_sum[idx]) if idx < len(rain_sum) and rain_sum[idx] not in (None, "") else 0.0
+        try:
+            max_vals.append(float(hi))
+        except Exception:
+            pass
+        try:
+            min_vals.append(float(lo))
+        except Exception:
+            pass
+        if prob > max_prob:
+            max_prob = prob
+            max_prob_label = day_name
+        if mm > wettest_mm:
+            wettest_mm = mm
+            wettest_label = day_name
+        lines.append(f"- {day_name} ({date_label}): {summary}, {lo}°C से {hi}°C, बारिश संभावना {prob:.0f}%, वर्षा ~{mm:.1f} mm")
+
+    if max_vals and min_vals:
+        lines.append(f"\nसप्ताह का तापमान रेंज: लगभग {min(min_vals):.1f}°C से {max(max_vals):.1f}°C")
+    if max_prob_label:
+        lines.append(f"सबसे अधिक बारिश की संभावना: {max_prob_label} को लगभग {max_prob:.0f}%")
+    if wettest_label and wettest_mm > 0:
+        lines.append(f"सबसे ज्यादा अनुमानित वर्षा: {wettest_label} को ~{wettest_mm:.1f} mm")
+    lines.append("कृषि सुझाव: जिन दिनों बारिश की संभावना ज्यादा हो, उन दिनों सिंचाई टालें और spray/दवा का समय मौसम देखकर रखें।")
+    return "\n".join(lines)

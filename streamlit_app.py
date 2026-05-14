@@ -28,7 +28,7 @@ import app.db as db_mod
 from app.datagov_client import DataGovClient
 from app.feedback import compact_evidence_text, validate_feedback_with_local_sources
 from app.lstm_forecast import prepare_daily_series, train_and_forecast
-from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi
+from app.weather import get_current_weather_hindi
 from app.cacp import get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
 from app.supabase_auth import (
@@ -68,11 +68,11 @@ BRAND_IMAGE = Path(
     "data/raw/indian-agriculture-landscape-farmer-working-indian-rice-fields-rural-worker-vector-cartoon-backg_1396-599.avif"
 )
 PAGE_ICON = str(BRAND_IMAGE) if BRAND_IMAGE.exists() else "🌾"
-st.set_page_config(page_title="KrishiAI - Agriculture Assistant", page_icon=PAGE_ICON, layout="wide")
+st.set_page_config(page_title="KisaanAI - Agriculture Assistant", page_icon=PAGE_ICON, layout="wide")
 if BRAND_IMAGE.exists():
     st.image(str(BRAND_IMAGE), use_container_width=True)
 
-st.title("KrishiAI - Agriculture Assistant")
+st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
@@ -1398,12 +1398,12 @@ def send_verification_email(email: str, token: str) -> tuple[bool, str]:
     if not link:
         return False, "APP_BASE_URL is not configured."
     msg = EmailMessage()
-    msg["Subject"] = "Verify your KrishiAI account"
+    msg["Subject"] = "Verify your KisaanAI account"
     msg["From"] = smtp_from
     msg["To"] = email
     msg.set_content(
         "Namaste,\n\n"
-        "Please verify your KrishiAI account before signing in.\n\n"
+        "Please verify your KisaanAI account before signing in.\n\n"
         f"Verification link: {link}\n\n"
         "If you did not create this account, you can ignore this email.\n"
     )
@@ -1427,12 +1427,12 @@ def send_password_reset_otp_email(email: str, otp: str) -> tuple[bool, str]:
     if not smtp_host or not smtp_user or not smtp_pass or not smtp_from:
         return False, "SMTP is not configured."
     msg = EmailMessage()
-    msg["Subject"] = "KrishiAI password reset OTP"
+    msg["Subject"] = "KisaanAI password reset OTP"
     msg["From"] = smtp_from
     msg["To"] = email
     msg.set_content(
         "Namaste,\n\n"
-        "Use this OTP to reset your KrishiAI password:\n\n"
+        "Use this OTP to reset your KisaanAI password:\n\n"
         f"{otp}\n\n"
         "This OTP is valid for 15 minutes.\n"
         "If you did not request a password reset, please ignore this email.\n"
@@ -2270,23 +2270,28 @@ if user_query:
         lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
         lookup = load_location_lookup(lookup_mtime)
         district, _state = _lookup_district_from_location(place, lookup)
-        weather_place = place if not district else f"{place}, {district}, Uttar Pradesh"
+        composed_weather_query = place if not district else f"{place}, {district}, Uttar Pradesh"
         original_weather_query = (
             pending_weather_request.get("original_query", "")
             if isinstance(pending_weather_request, dict)
             else ""
         )
-        forecast_target = advisor._extract_weather_forecast_target(original_weather_query) if original_weather_query else None
-        if forecast_target:
-            weather = get_daily_weather_forecast_hindi(
-                weather_place,
-                day_offset=int(forecast_target.get("day_offset", 0)),
-                label=str(forecast_target.get("label") or "").strip() or None,
+        normalized_weather_query = advisor._normalize_hinglish(original_weather_query or user_query)
+        weather_request = advisor._parse_weather_request(original_weather_query or user_query, normalized_weather_query)
+        if weather_request:
+            weather_result = advisor._answer_weather_request(
+                weather_request,
+                original_weather_query or user_query,
+                normalized_weather_query,
+                place_override=place,
             )
+            weather = weather_result.get("answer", "")
+            weather_references = weather_result.get("references", ["Open-Meteo API"])
         else:
-            weather = get_current_weather_hindi(weather_place)
+            weather = get_current_weather_hindi(composed_weather_query)
             if not weather:
-                weather = get_current_weather_hindi(weather_place)
+                weather = get_current_weather_hindi(composed_weather_query)
+            weather_references = ["Open-Meteo API"]
         final_answer = (
             weather
             if weather
@@ -2294,17 +2299,17 @@ if user_query:
         )
         query_log_id = log_query_answer(
             user_query=user_query,
-            composed_query=weather_place,
+            composed_query=composed_weather_query,
             topic="weather",
             answer_text=final_answer,
-            references=["Open-Meteo API"],
+            references=weather_references,
             district=district or "",
             season=season,
             crop_name=preferred_crop or "unknown",
         )
         st.session_state["last_location_context"] = {"place": place, "district": district or "", "state": "Uttar Pradesh"}
         st.session_state.chat_history.append(
-            {"role": "assistant", "text": final_answer, "references": ["Open-Meteo API"], "query_log_id": query_log_id, "topic": "weather", "user_query": user_query}
+            {"role": "assistant", "text": final_answer, "references": weather_references, "query_log_id": query_log_id, "topic": "weather", "user_query": user_query}
         )
         with st.chat_message("assistant"):
             render_weather_chat_card(final_answer)
@@ -2617,7 +2622,7 @@ if user_query:
             season=season_for_query,
             crop_name=preferred_crop_for_query or "unknown",
         )
-        if final_answer.startswith("कृपया मौसम के लिए स्थान बताएं"):
+        if topic == "weather" and ("मौसम के लिए स्थान" in final_answer or "कृपया स्थान लिखें" in final_answer):
             st.session_state["pending_weather_location"] = {"original_query": user_query}
         query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
         if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide"}:

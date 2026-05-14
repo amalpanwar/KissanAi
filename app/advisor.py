@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import re
 import sqlite3
@@ -15,7 +15,7 @@ from app.generator import LocalGenerator
 from app.prompting import build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
-from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_rain_day_forecast_hindi, get_tomorrow_rain_forecast_hindi
+from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_rain_day_forecast_hindi, get_tomorrow_rain_forecast_hindi, get_weekly_weather_forecast_hindi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
 from app.crop_guide import build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
@@ -261,6 +261,26 @@ class AdvisorConfig:
     db_path: str | None = None
 
 
+@dataclass
+class WeatherRequest:
+    intent: str = "weather"
+    place: str | None = None
+    action: str = "current"
+    day_offset: int | None = None
+    label: str | None = None
+
+
+@dataclass
+class PesticideRequest:
+    intent: str = "pesticide"
+    crop: str | None = None
+    crop_from_context: bool = False
+    pesticide_name: str | None = None
+    disease_terms: list[str] = field(default_factory=list)
+    issue_mode: str = "general"
+    generic_issue: bool = False
+
+
 class RAGAdvisor:
     def __init__(self, cfg: AdvisorConfig) -> None:
         self.cfg = cfg
@@ -268,6 +288,8 @@ class RAGAdvisor:
         self.retriever: Retriever | None = None
         self.generator: LocalGenerator | None = None
         self.top_k = cfg.top_k
+        self._pdf_text_cache: dict[str, str] = {}
+        self._pdf_verification_cache: dict[str, bool] = {}
 
     def answer(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)
@@ -306,69 +328,11 @@ class RAGAdvisor:
                 "retrieved": [],
                 "topic": "weather_impact",
             }
-        if self._is_weather_intent(normalized_question):
-            place = (
-                self._extract_location_from_question(farmer_question)
-                or self._extract_location_from_question(normalized_question)
-            )
-            loc = lookup_place(place) if place else None
-            if not loc:
-                loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
-            if place and not loc:
-                generic_weather_tokens = {
-                    "baarish", "barish", "rain", "rainfall", "mausam", "weather",
-                    "konse", "kaunse", "kis", "din", "kab", "ki", "ka", "ke",
-                    "hai", "h", "hoga", "hogi", "ho", "आज", "कल", "परसों",
-                    "बारिश", "बारिस", "मौसम", "किस", "दिन", "कौनसे", "कौन", "कब",
-                    "है", "होगा", "होगी",
-                }
-                raw_tokens = [tok.strip(" ?!.,") for tok in re.split(r"\s+", place) if tok.strip(" ?!.,")]
-                filtered_tokens = [tok for tok in raw_tokens if tok.lower() not in generic_weather_tokens and tok not in generic_weather_tokens]
-                sanitized_candidates = []
-                if filtered_tokens:
-                    sanitized_candidates.append(" ".join(filtered_tokens))
-                    sanitized_candidates.append(filtered_tokens[0])
-                for cand in sanitized_candidates:
-                    loc = lookup_place(cand) or lookup_place_in_text(cand)
-                    if loc:
-                        place = loc.get("place") or cand
-                        break
-                if not loc and not filtered_tokens:
-                    place = None
-            if loc and loc.get("place"):
-                place = loc.get("place")
-            if not place and not loc:
-                return {
-                    "answer": "मौसम के लिए स्थान नहीं मिला। कृपया स्थान लिखें (जैसे: डोघाट/बड़ौत/मेरठ)।",
-                    "references": [],
-                    "retrieved": [],
-                    "topic": "weather",
-                }
-            loc = loc or (lookup_place(place) if place else None)
-            district = loc.get("district") if loc else self._lookup_district_from_location(place)
-            state = loc.get("state") if loc else "Uttar Pradesh"
-            weather_place = place if not district else f"{place}, {district}, {state}"
-            forecast_target = self._extract_weather_forecast_target(normalized_question) or self._extract_weather_forecast_target(farmer_question)
-            if self._is_rain_day_forecast_query(normalized_question) or self._is_rain_day_forecast_query(farmer_question):
-                weather = get_rain_day_forecast_hindi(weather_place, days=7)
-            elif forecast_target:
-                weather = get_daily_weather_forecast_hindi(
-                    weather_place,
-                    day_offset=int(forecast_target["day_offset"]),
-                    label=str(forecast_target["label"]),
-                )
-            else:
-                weather = get_current_weather_hindi(weather_place)
-                if not weather:
-                    weather = get_current_weather_hindi(weather_place)
-            if not weather:
-                return {
-                    "answer": "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।",
-                    "references": [],
-                    "retrieved": [],
-                    "topic": "weather",
-                }
-            return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": [], "topic": "weather"}
+        weather_request = self._parse_weather_request(farmer_question, normalized_question)
+        if weather_request:
+            weather_result = self._answer_weather_request(weather_request, farmer_question, normalized_question)
+            weather_result["topic"] = "weather"
+            return weather_result
         profitability_followup = (
             self._is_profitability_followup_intent(normalized_question)
             or self._is_profitability_followup_intent(farmer_question)
@@ -443,9 +407,14 @@ class RAGAdvisor:
                     "retrieved": [],
                     "topic": "crop_profitability",
                 }
-        if self._is_pesticide_intent(normalized_question):
+        pesticide_request = self._parse_pesticide_request(farmer_question, normalized_question, context_part)
+        if pesticide_request:
             crop_hint = self._extract_preferred_crop_from_context(context_part)
-            result = self._structured_pesticide_advice(normalized_question, crop_hint=crop_hint)
+            result = self._structured_pesticide_advice(
+                normalized_question,
+                crop_hint=crop_hint,
+                request=pesticide_request,
+            )
             result["topic"] = "pesticide"
             return result
         if self._looks_like_location_only(farmer_question):
@@ -988,6 +957,31 @@ class RAGAdvisor:
         ]
         return any(k in t for k in keys) or self._looks_like_pesticide_name_query(t)
 
+    def _has_specific_issue_term(self, text: str) -> bool:
+        t = (text or "").lower()
+        specific_terms = [
+            "red rot", "rust", "yellow rust", "brown rust", "black rust",
+            "smut", "bunt", "blight", "mildew", "wilt", "spot", "blast",
+            "stem borer", "borer", "leaf folder", "leaffolder", "hopper",
+            "planthopper", "aphid", "termite", "mite", "caterpillar",
+            "लाल सड़न", "रतुआ", "कंडुआ", "बंट", "झुलसा", "चूर्णी फफूंदी",
+            "तना छेदक", "दीमक", "माहू",
+        ]
+        return any(term in t for term in specific_terms)
+
+    def _is_generic_issue_query(self, text: str, issue_mode: str | None = None) -> bool:
+        t = text or ""
+        mode = issue_mode or self._generic_issue_mode(t)
+        if self._has_specific_issue_term(t):
+            return False
+        if mode == "fungal":
+            return self._is_fungal_query(t)
+        if mode == "pest":
+            return self._is_pest_only_query(t)
+        if mode == "disease":
+            return self._is_disease_only_query(t)
+        return self._is_generic_disease_query(t) or self._is_pest_only_query(t)
+
     def _extract_preferred_crop_from_context(self, context_part: str) -> str | None:
         if not context_part:
             return None
@@ -999,13 +993,19 @@ class RAGAdvisor:
             return None
         return self._extract_crop_from_query(raw) or raw
 
-    def _structured_pesticide_advice(self, question: str, crop_hint: str | None = None) -> dict:
-        crop = self._extract_crop_from_query(question) or crop_hint
-        pesticide_name = self._extract_pesticide_name_from_query(question)
+    def _structured_pesticide_advice(
+        self,
+        question: str,
+        crop_hint: str | None = None,
+        request: PesticideRequest | None = None,
+    ) -> dict:
+        crop = request.crop if request and request.crop else self._extract_crop_from_query(question) or crop_hint
+        pesticide_name = request.pesticide_name if request else self._extract_pesticide_name_from_query(question)
         if not pesticide_name:
             pesticide_name = self._infer_pesticide_name_from_query_tokens(question, crop=crop)
-        disease_terms = self._extract_disease_terms_from_query(question)
-        issue_mode = self._generic_issue_mode(question)
+        disease_terms = list(request.disease_terms) if request else self._extract_disease_terms_from_query(question)
+        issue_mode = request.issue_mode if request else self._generic_issue_mode(question)
+        generic_issue = request.generic_issue if request else bool(crop and not pesticide_name and self._is_generic_issue_query(question, issue_mode=issue_mode))
         if pesticide_name:
             chem_lines, chem_sources = self._extract_rows_for_pesticide_name(
                 pesticide_name,
@@ -1025,8 +1025,8 @@ class RAGAdvisor:
                 ]
                 if crop:
                     intro.append(f"- संदर्भ फसल: {self._crop_name_hi(crop)}")
-                intro.append("- यह दवा इन फसलों/रोग-कीट स्थितियों में मिलती है:")
-                intro.extend([f"  • {line}" for line in chem_lines[:4]])
+                intro.append("- यह दवा इन फसल/रोग-कीट स्थितियों में मिलती है:")
+                intro.extend(self._format_numbered_blocks(chem_lines[:4]))
                 intro.append("- अगर आप चाहें, तो फसल या रोग का नाम लिखें; फिर मैं इसी दवा का सबसे सही dose, dilution और PHI उसी case के हिसाब से बता दूँगा।")
                 return {"answer": "\n".join(intro), "references": chem_sources, "retrieved": []}
             if crop:
@@ -1041,11 +1041,11 @@ class RAGAdvisor:
                     "references": [],
                     "retrieved": [],
                 }
-        if crop and not disease_terms and self._is_generic_disease_query(question):
+        if crop and generic_issue:
             common_issues = self._extract_common_crop_issues(crop, limit=3, issue_mode=issue_mode)
             sample_sources: list[str] = []
             if common_issues:
-                issue_lines = "\n".join([f"  • {issue}" for issue in common_issues[:3]])
+                issue_lines = self._format_numbered_text_blocks(common_issues[:3])
                 mode_label = {
                     "fungal": "फफूंद/फंगल रोग",
                     "pest": "कीट",
@@ -1078,13 +1078,24 @@ class RAGAdvisor:
                     "संरचित कीटनाशक सलाह:",
                     f"- फसल: {self._crop_name_hi(crop)}",
                     f"- रोग/कीट मिलान: {disease_label}",
-                    "- सलाह:",
+                    "- दवा विकल्प:",
                 ]
-                lines.extend([f"  • {line}" for line in db_lines[:3]])
-                lines.append("- समझें: `सक्रिय तत्व (a.i.)` दवा का असर करने वाला chemical हिस्सा है, `उत्पाद मात्रा (formulation)` बाजार से खरीदी जाने वाली दवा की कुल मात्रा है, और `कितने पानी में घोलें` का मतलब spray के लिए पानी की मात्रा है।")
-                lines.append("- अगर कहीं `g/ml` एक साथ लिखा हो, तो source table में unit साफ़ नहीं है; ऐसे case में label/packet या कृषि अधिकारी से unit verify करके ही spray करें।")
+                lines.extend(self._format_numbered_blocks(db_lines[:3]))
                 lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
                 return {"answer": "\n".join(lines), "references": db_sources, "retrieved": []}
+        if crop or pesticide_name or disease_terms:
+            target = self._crop_name_hi(crop) if crop else "दिए गए प्रश्न"
+            issue_hint = ", ".join(disease_terms[:2]) if disease_terms else "रोग/कीट"
+            return {
+                "answer": (
+                    "संरचित कीटनाशक सलाह:\n"
+                    f"- संदर्भ: {target}\n"
+                    f"- {issue_hint} के लिए official MUP/PPQS PDF में साफ verified पंक्ति नहीं मिली।\n"
+                    "- कृपया फसल, रोग/कीट का नाम या लक्षण थोड़ा और साफ लिखें, फिर मैं verified रिकॉर्ड से ही दवा बताऊँगा।"
+                ),
+                "references": [],
+                "retrieved": [],
+            }
 
         self._ensure_rag_components()
         if self.embedder is None or self.retriever is None:
@@ -1130,8 +1141,8 @@ class RAGAdvisor:
         if waiting:
             lines.append(f"- सुरक्षा अवधि (PHI): {waiting}")
         if extra_lines:
-            lines.append("- स्रोत से उदाहरण पंक्तियाँ:")
-            lines.extend([f"  • {l}" for l in extra_lines[:3]])
+            lines.append("- स्रोत से उदाहरण:")
+            lines.extend(self._format_numbered_blocks(extra_lines[:3]))
         lines.append("- छिड़काव से पहले लेबल निर्देश और राज्य सलाह देखें।")
 
         return {
@@ -1776,13 +1787,9 @@ class RAGAdvisor:
         lines = []
         sources = []
         for r in rows:
-            disease = r["disease_name_hi"] or self._translate_disease_name(r["disease_name_en"] or "")
-            dose_parts = self._build_hindi_dose_parts(r)
-            waiting = self._format_value_with_unit(r["waiting_period_days"], r["waiting_period_unit"])
-            waiting_part = f" | कटाई से पहले प्रतीक्षा अवधि (PHI): {waiting}" if waiting else ""
-            detail = f" | {'; '.join(dose_parts)}" if dose_parts else ""
-            line = f"{disease} | दवा: {r['pesticide_name'] or 'नाम उपलब्ध नहीं'}{detail}{waiting_part}"
-            lines.append(line.strip())
+            if not self._verify_pesticide_row_against_pdf(r):
+                continue
+            lines.append(self._format_pesticide_record(r, include_crop=False))
             if r["source_file"]:
                 sources.append(r["source_file"])
         return lines, list(set(sources))
@@ -1834,17 +1841,15 @@ class RAGAdvisor:
         sources: list[str] = []
         seen: set[str] = set()
         for r in rows:
+            if not self._verify_pesticide_row_against_pdf(r):
+                continue
             disease = r["disease_name_hi"] or self._translate_disease_name(r["disease_name_en"] or "")
             crop_label = self._crop_name_hi(r["crop_name"] or crop or "")
             key = f"{crop_label}|{disease}"
             if key in seen:
                 continue
             seen.add(key)
-            dose_parts = self._build_hindi_dose_parts(r)
-            waiting = self._format_value_with_unit(r["waiting_period_days"], r["waiting_period_unit"])
-            waiting_part = f" | कटाई से पहले प्रतीक्षा अवधि (PHI): {waiting}" if waiting else ""
-            detail = f" | {'; '.join(dose_parts)}" if dose_parts else ""
-            lines.append(f"{crop_label}: {disease}{detail}{waiting_part}".strip())
+            lines.append(self._format_pesticide_record(r, include_crop=True, crop_override=crop))
             if r["source_file"]:
                 sources.append(r["source_file"])
             if len(lines) >= limit:
@@ -1919,6 +1924,8 @@ class RAGAdvisor:
         sources: list[str] = []
         seen: set[str] = set()
         for _score, r in scored:
+            if not self._verify_pesticide_row_against_pdf(r):
+                continue
             disease = r["disease_name_hi"] or self._translate_disease_name(r["disease_name_en"] or "")
             crop_label = self._crop_name_hi(r["crop_name"] or crop or "")
             pname = r["pesticide_name"] or "नाम उपलब्ध नहीं"
@@ -1926,11 +1933,7 @@ class RAGAdvisor:
             if key in seen:
                 continue
             seen.add(key)
-            dose_parts = self._build_hindi_dose_parts(r)
-            waiting = self._format_value_with_unit(r["waiting_period_days"], r["waiting_period_unit"])
-            waiting_part = f" | कटाई से पहले प्रतीक्षा अवधि (PHI): {waiting}" if waiting else ""
-            detail = f" | {'; '.join(dose_parts)}" if dose_parts else ""
-            lines.append(f"{crop_label}: {disease} | दवा: {pname}{detail}{waiting_part}".strip())
+            lines.append(self._format_pesticide_record(r, include_crop=True, crop_override=crop))
             if r["source_file"]:
                 sources.append(r["source_file"])
             if len(lines) >= limit:
@@ -1943,18 +1946,162 @@ class RAGAdvisor:
         formulation = self._format_value_with_unit(row["formulation"], row["formulation_unit"])
         dilution = self._format_value_with_unit(row["dilution"], row["dilution_unit"])
         dose_text = str(row["dose_text"] or "").strip()
-        if ai:
-            parts.append(f"सक्रिय तत्व (a.i.): {ai}")
-        if formulation:
-            form_label = "उत्पाद मात्रा (formulation)"
-            if self._is_ambiguous_mixed_unit(formulation):
-                form_label += " - unit अस्पष्ट"
-            parts.append(f"{form_label}: {formulation}")
+        if ai and re.search(r"\d", ai):
+            parts.append(f"खुराक (a.i.): {ai}")
+        if formulation and re.search(r"\d", formulation):
+            parts.append(f"फॉर्म्यूलेशन मात्रा: {formulation}")
         if dilution:
-            parts.append(f"कितने पानी में घोलें: {dilution}")
-        if not parts and dose_text:
-            parts.append(f"खुराक: {dose_text}")
+            parts.append(f"पानी/घोल: {dilution}")
+        if dose_text:
+            dose_text_norm = re.sub(r"\s+", " ", dose_text).strip().lower()
+            rendered_norm = " ".join(part.lower() for part in parts)
+            duplicate_markers = ["a.i.", "formulation", "dilution", "|"]
+            if (
+                dose_text_norm
+                and not any(marker in dose_text_norm for marker in duplicate_markers)
+                and dose_text_norm not in rendered_norm
+            ):
+                parts.append(f"डोज़/अतिरिक्त निर्देश: {dose_text}")
         return parts
+
+    def _source_pdf_path(self, source_file: object) -> Path | None:
+        source = str(source_file or "").strip()
+        if not source:
+            return None
+        direct = Path(source)
+        if direct.exists() and direct.suffix.lower() == ".pdf":
+            return direct
+        stem = source.split("_table_")[0]
+        candidates = [
+            Path("data/raw/all_sources") / f"{stem}.pdf",
+            Path("data/raw/ppqs_pesticides") / f"{stem}.pdf",
+        ]
+        for path in candidates:
+            if path.exists():
+                return path
+        return None
+
+    def _load_pdf_text(self, pdf_path: Path | None) -> str:
+        if not pdf_path:
+            return ""
+        key = str(pdf_path)
+        cached = self._pdf_text_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(pdf_path))
+            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+        except Exception:
+            text = ""
+        self._pdf_text_cache[key] = text
+        return text
+
+    def _compact_norm(self, text: object) -> str:
+        return re.sub(r"[^a-z0-9\u0900-\u097F]+", "", str(text or "").lower())
+
+    def _source_chemical_tokens(self, pesticide_name: str) -> list[str]:
+        stop = {"with", "plus", "min", "based", "strain", "serotype", "potency"}
+        tokens = [
+            tok.lower()
+            for tok in re.findall(r"[A-Za-z]{5,}", pesticide_name or "")
+            if tok.lower() not in stop
+        ]
+        unique: list[str] = []
+        for tok in tokens:
+            if tok not in unique:
+                unique.append(tok)
+        return unique
+
+    def _source_issue_tokens(self, row: sqlite3.Row) -> list[str]:
+        raw = " ".join(
+            [
+                str(row["disease_name_en"] or ""),
+                str(row["disease_name_hi"] or ""),
+            ]
+        )
+        stop = {
+            "disease", "leaf", "brown", "black", "yellow", "rice", "wheat", "crop",
+            "पत्ती", "रोग", "कीट",
+        }
+        tokens = [
+            tok.lower()
+            for tok in re.findall(r"[A-Za-z\u0900-\u097F]{3,}", raw)
+            if tok.lower() not in stop
+        ]
+        unique: list[str] = []
+        for tok in tokens:
+            if tok not in unique:
+                unique.append(tok)
+        return unique[:8]
+
+    def _verify_pesticide_row_against_pdf(self, row: sqlite3.Row) -> bool:
+        source_file = str(row["source_file"] or "")
+        pname = str(row["pesticide_name"] or "").strip()
+        crop = str(row["crop_name"] or "").strip()
+        cache_key = "||".join(
+            [
+                source_file,
+                pname,
+                crop,
+                str(row["disease_name_en"] or ""),
+                str(row["disease_name_hi"] or ""),
+            ]
+        )
+        cached = self._pdf_verification_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        pdf_path = self._source_pdf_path(source_file)
+        pdf_text = self._load_pdf_text(pdf_path)
+        if not pdf_text:
+            self._pdf_verification_cache[cache_key] = False
+            return False
+        pdf_compact = self._compact_norm(pdf_text)
+        crop_ok = not crop or self._compact_norm(crop) in pdf_compact
+        chem_tokens = self._source_chemical_tokens(pname)
+        chem_hits = sum(1 for tok in chem_tokens if tok in pdf_compact)
+        chem_ok = self._compact_norm(pname) in pdf_compact or chem_hits >= min(2, max(1, len(chem_tokens)))
+        issue_tokens = self._source_issue_tokens(row)
+        issue_ok = True
+        if issue_tokens:
+            issue_ok = any(self._compact_norm(tok) in pdf_compact for tok in issue_tokens)
+        verified = bool(crop_ok and chem_ok and issue_ok)
+        self._pdf_verification_cache[cache_key] = verified
+        return verified
+
+    def _format_pesticide_record(
+        self,
+        row: sqlite3.Row,
+        include_crop: bool = False,
+        crop_override: str | None = None,
+    ) -> str:
+        pname = str(row["pesticide_name"] or "नाम उपलब्ध नहीं").strip()
+        disease = row["disease_name_hi"] or self._translate_disease_name(row["disease_name_en"] or "")
+        crop_label = self._crop_name_hi(row["crop_name"] or crop_override or "")
+        dose_parts = self._build_hindi_dose_parts(row)
+        waiting = self._format_value_with_unit(row["waiting_period_days"], row["waiting_period_unit"])
+        lines = [f"दवा: {pname}"]
+        if include_crop and crop_label:
+            lines.append(f"फसल: {crop_label}")
+        if disease:
+            lines.append(f"रोग/कीट: {disease}")
+        lines.extend(dose_parts)
+        if waiting:
+            lines.append(f"PHI: {waiting}")
+        return "\n".join(lines).strip()
+
+    def _format_numbered_blocks(self, blocks: list[str]) -> list[str]:
+        output: list[str] = []
+        for idx, block in enumerate(blocks, start=1):
+            lines = [ln.strip() for ln in str(block).splitlines() if ln.strip()]
+            if not lines:
+                continue
+            output.append(f"{idx}. {lines[0]}")
+            output.extend([f"   {line}" for line in lines[1:]])
+        return output
+
+    def _format_numbered_text_blocks(self, items: list[str]) -> str:
+        return "\n".join(f"{idx}. {str(item).strip()}" for idx, item in enumerate(items, start=1) if str(item).strip())
 
     def _is_ambiguous_mixed_unit(self, text: str) -> bool:
         t = str(text).lower()
@@ -2029,6 +2176,139 @@ class RAGAdvisor:
             "3) बाजार कीमत और भंडारण जोखिम देखकर अंतिम निर्णय लें।\n\n"
             "संदर्भ अंश:\n"
             + "\n".join(snippets)
+        )
+
+    def _parse_weather_request(self, farmer_question: str, normalized_question: str) -> WeatherRequest | None:
+        raw = (farmer_question or "").strip()
+        normalized = (normalized_question or "").strip()
+        if not (self._is_weather_intent(raw) or self._is_weather_intent(normalized)):
+            return None
+        place = self._extract_location_from_question(raw) or self._extract_location_from_question(normalized)
+        forecast_target = self._extract_weather_forecast_target(normalized) or self._extract_weather_forecast_target(raw)
+        action = "current"
+        day_offset = None
+        label = None
+        if forecast_target:
+            action = "daily"
+            day_offset = int(forecast_target["day_offset"])
+            label = str(forecast_target["label"])
+        elif self._is_rain_day_forecast_query(normalized) or self._is_rain_day_forecast_query(raw):
+            action = "rain_day"
+        elif self._is_weekly_weather_query(normalized) or self._is_weekly_weather_query(raw):
+            action = "weekly"
+        return WeatherRequest(
+            place=place,
+            action=action,
+            day_offset=day_offset,
+            label=label,
+        )
+
+    def _resolve_weather_location(
+        self,
+        place: str | None,
+        farmer_question: str,
+        normalized_question: str,
+    ) -> tuple[str | None, dict | None]:
+        loc = lookup_place(place) if place else None
+        if not loc:
+            loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
+        if place and not loc:
+            generic_weather_tokens = {
+                "baarish", "barish", "rain", "rainfall", "mausam", "weather",
+                "konse", "kaunse", "kis", "din", "kab", "ki", "ka", "ke",
+                "hai", "h", "hoga", "hogi", "ho", "rahega", "rahegi", "rahenge", "rahe",
+                "agle", "agla", "hafta", "hafte", "hafte", "saptah", "week", "coming", "next",
+                "आज", "कल", "परसों", "अगले", "अगला", "सप्ताह", "हफ्ता", "हफ्ते", "रहेगा", "रहेगी",
+                "बारिश", "बारिस", "मौसम", "किस", "दिन", "कौनसे", "कौन", "कब",
+                "है", "होगा", "होगी",
+            }
+            raw_tokens = [tok.strip(" ?!.,") for tok in re.split(r"\s+", place) if tok.strip(" ?!.,")]
+            filtered_tokens = [tok for tok in raw_tokens if tok.lower() not in generic_weather_tokens and tok not in generic_weather_tokens]
+            sanitized_candidates = []
+            if filtered_tokens:
+                sanitized_candidates.append(" ".join(filtered_tokens))
+                sanitized_candidates.append(filtered_tokens[0])
+            for cand in sanitized_candidates:
+                loc = lookup_place(cand) or lookup_place_in_text(cand)
+                if loc:
+                    place = loc.get("place") or cand
+                    break
+            if not loc and not filtered_tokens:
+                place = None
+        if loc and loc.get("place"):
+            place = loc.get("place")
+        return place, loc
+
+    def _answer_weather_request(
+        self,
+        request: WeatherRequest,
+        farmer_question: str,
+        normalized_question: str,
+        place_override: str | None = None,
+    ) -> dict:
+        place, loc = self._resolve_weather_location(
+            place_override or request.place,
+            farmer_question,
+            normalized_question,
+        )
+        if not place and not loc:
+            return {
+                "answer": "मौसम के लिए स्थान नहीं मिला। कृपया स्थान लिखें (जैसे: डोघाट/बड़ौत/मेरठ)।",
+                "references": [],
+                "retrieved": [],
+            }
+        loc = loc or (lookup_place(place) if place else None)
+        district = loc.get("district") if loc else self._lookup_district_from_location(place)
+        state = loc.get("state") if loc else "Uttar Pradesh"
+        weather_place = place if not district else f"{place}, {district}, {state}"
+        if request.action == "rain_day":
+            weather = get_rain_day_forecast_hindi(weather_place, days=7)
+        elif request.action == "weekly":
+            weather = get_weekly_weather_forecast_hindi(weather_place, days=7)
+        elif request.action == "daily" and request.day_offset is not None:
+            weather = get_daily_weather_forecast_hindi(
+                weather_place,
+                day_offset=request.day_offset,
+                label=request.label,
+            )
+        else:
+            weather = get_current_weather_hindi(weather_place)
+            if not weather:
+                weather = get_current_weather_hindi(weather_place)
+        if not weather:
+            return {
+                "answer": "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।",
+                "references": [],
+                "retrieved": [],
+            }
+        return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
+
+    def _parse_pesticide_request(
+        self,
+        farmer_question: str,
+        normalized_question: str,
+        context_part: str = "",
+    ) -> PesticideRequest | None:
+        raw = (farmer_question or "").strip()
+        normalized = (normalized_question or "").strip()
+        if not (self._is_pesticide_intent(raw) or self._is_pesticide_intent(normalized)):
+            return None
+        direct_crop = self._extract_crop_from_query(raw) or self._extract_crop_from_query(normalized)
+        context_crop = self._extract_preferred_crop_from_context(context_part)
+        crop = direct_crop or context_crop
+        pesticide_name = self._extract_pesticide_name_from_query(raw) or self._extract_pesticide_name_from_query(normalized)
+        if not pesticide_name:
+            pesticide_name = self._infer_pesticide_name_from_query_tokens(raw, crop=crop) or self._infer_pesticide_name_from_query_tokens(normalized, crop=crop)
+        disease_terms = self._extract_disease_terms_from_query(normalized) or self._extract_disease_terms_from_query(raw)
+        issue_mode = self._generic_issue_mode(normalized or raw)
+        generic_issue = bool(crop and not pesticide_name and self._is_generic_issue_query(normalized or raw, issue_mode=issue_mode))
+        return PesticideRequest(
+            crop=crop,
+            crop_from_context=bool(context_crop and not direct_crop and crop),
+            pesticide_name=pesticide_name,
+            disease_terms=disease_terms,
+            issue_mode=issue_mode,
+            generic_issue=generic_issue,
         )
 
     def _is_greeting(self, text: str) -> bool:
@@ -2229,6 +2509,29 @@ class RAGAdvisor:
         timing_words = ["किस दिन", "कौनसे दिन", "कौन से दिन", "konse din", "kaunse din", "kis din", "kab", "which day", "when"]
         return any(r in t for r in rain_words) and any(w in t for w in timing_words)
 
+    def _is_weekly_weather_query(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        if not self._is_weather_intent(t):
+            return False
+        weekly_words = [
+            "agle saptah",
+            "agla saptah",
+            "next week",
+            "coming week",
+            "अगले सप्ताह",
+            "अगला सप्ताह",
+            "अगले हफ्ते",
+            "अगला हफ्ता",
+            "agle hafte",
+            "agla hafta",
+            "next 7 days",
+            "अगले 7 दिन",
+            "7 din",
+        ]
+        return any(w in t for w in weekly_words)
+
     def _extract_weather_forecast_target(self, text: str) -> dict | None:
         t = (text or "").strip().lower()
         if not t:
@@ -2383,6 +2686,24 @@ class RAGAdvisor:
                 "सकती",
                 "सकता",
                 "है",
+                "agle",
+                "agla",
+                "hafta",
+                "hafte",
+                "saptah",
+                "week",
+                "coming",
+                "next",
+                "rahega",
+                "rahegi",
+                "rahenge",
+                "रहेगा",
+                "रहेगी",
+                "अगले",
+                "अगला",
+                "सप्ताह",
+                "हफ्ता",
+                "हफ्ते",
                 "ka",
                 "?",
                 "kesa?",
@@ -2441,6 +2762,17 @@ class RAGAdvisor:
                 "kaisa",
                 "hai",
                 "h",
+                "agle",
+                "agla",
+                "hafta",
+                "hafte",
+                "saptah",
+                "week",
+                "coming",
+                "next",
+                "rahega",
+                "rahegi",
+                "rahenge",
                 "weather",
                 "barish",
                 "baarish",
@@ -2503,6 +2835,24 @@ class RAGAdvisor:
             "hogi",
             "होगा",
             "होगी",
+            "rahega",
+            "rahegi",
+            "rahenge",
+            "agle",
+            "agla",
+            "hafta",
+            "hafte",
+            "saptah",
+            "week",
+            "coming",
+            "next",
+            "रहेगा",
+            "रहेगी",
+            "अगले",
+            "अगला",
+            "सप्ताह",
+            "हफ्ता",
+            "हफ्ते",
             "konse",
             "kaunse",
             "kis",
@@ -2739,7 +3089,7 @@ class RAGAdvisor:
             return None, []
 
         district = district_override or self._extract_district(context_part) or "Meerut"
-        season = self._extract_season(context_part) or "Rabi"
+        season = self._extract_season(context_part)
         budget = self._extract_budget(question)
         sources: list[str] = []
         market_prices = self._load_agmarknet_prices(district)
@@ -2749,15 +3099,17 @@ class RAGAdvisor:
         conn = sqlite3.connect(self.cfg.db_path)
         conn.row_factory = sqlite3.Row
         try:
-            rows = conn.execute(
-                """
-                SELECT crop_name, cost_min_inr_per_acre, cost_max_inr_per_acre,
-                       market_price_inr_per_qtl, avg_yield_qtl_per_acre
-                FROM crop_economics
-                WHERE lower(district) = lower(?) AND lower(season) = lower(?)
-                """,
-                (district, season),
-            ).fetchall()
+            rows = []
+            if season:
+                rows = conn.execute(
+                    """
+                    SELECT crop_name, cost_min_inr_per_acre, cost_max_inr_per_acre,
+                           market_price_inr_per_qtl, avg_yield_qtl_per_acre
+                    FROM crop_economics
+                    WHERE lower(district) = lower(?) AND lower(season) = lower(?)
+                    """,
+                    (district, season),
+                ).fetchall()
             if not rows:
                 rows = conn.execute(
                     """
@@ -2772,7 +3124,7 @@ class RAGAdvisor:
             conn.close()
 
         if not rows:
-            baseline_answer = self._rank_from_profit_baselines(district, season, question, market_prices)
+            baseline_answer = self._rank_from_profit_baselines(district, season or "", question, market_prices)
             if baseline_answer:
                 sources.extend(["crop_profit_baselines", "pesticide_recommendations"])
                 return baseline_answer, sources
@@ -2812,7 +3164,7 @@ class RAGAdvisor:
         if not scored:
             return (
                 f"समझा गया सवाल (हिंदी): {question}\n\n"
-                f"{district} ({season}) में आपके बजट के अंदर कोई स्पष्ट फसल विकल्प नहीं मिला। "
+                f"{district} में आपके बजट के अंदर कोई स्पष्ट फसल विकल्प नहीं मिला। "
                 "कृपया बजट बढ़ाएँ या फसल विकल्प बताकर फिर पूछें।"
             ), sources
 
@@ -2829,9 +3181,11 @@ class RAGAdvisor:
             )
 
         budget_line = f"बजट: ₹{int(budget)} प्रति एकड़" if budget is not None else "बजट: उपलब्ध नहीं"
+        header_parts = [f"जिला: {district}"]
+        header_parts.append(budget_line)
         return (
             f"समझा गया सवाल (हिंदी): {question}\n\n"
-            f"जिला: {district} | मौसम: {season} | {budget_line}\n"
+            + " | ".join(header_parts) + "\n"
             "उपलब्ध अर्थशास्त्रीय डेटा के आधार पर सर्वोत्तम फसल विकल्प:\n"
             + "\n".join(lines)
             + "\n\nनोट: कीटनाशक की रुपये लागत उपलब्ध नहीं है, इसलिए उसे लाभ में जोड़ा/घटाया नहीं गया। अंतिम निर्णय से पहले स्थानीय मंडी भाव, पानी उपलब्धता और मिट्टी की स्थिति जरूर देखें।"
@@ -2904,9 +3258,10 @@ class RAGAdvisor:
         if not scored:
             return None
         scored = sorted(scored, key=lambda x: (x["profit_min"], x["profit_max"]), reverse=True)[:5]
+        header = f"जिला: {district}"
         lines = [
-            f"जिला: {district} | मौसम: {season}",
-            "लाभ रैंकिंग अब सिर्फ ₹/क्विंटल से नहीं, बल्कि उपज × भाव − लागत से निकाली गई है।",
+            header,
+            "लाभ रैंकिंग उपज × भाव − लागत के आधार पर निकाली गई है।",
             "लागत में जहाँ उपलब्ध हो वहाँ CACP के अनुसार paid-out cost + family labour से लेकर पूरी लागत तक का band लिया गया है; नहीं मिलने पर baseline indicative range रखा गया है।",
             "",
             "सबसे बेहतर विकल्प:",
