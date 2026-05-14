@@ -1,0 +1,25 @@
+{
+  "general_note": "Area in Lakh Ha, Production in Lakh Tonnes & Yield in Kg/Ha",
+  "estimate_note": "Data for the year 2025-26 is of 2nd Advance Estimates",
+  "special_production_notes": {
+    "Cotton": "Cotton production is in Lakh Bales; 1 Bale = 170 Kg",
+    "Jute": "Jute production is in Lakh Bales; 1 Bale = 180 Kg",
+    "Mesta": "Mesta production is in Lakh Bales; 1 Bale = 180 Kg",
+    "Jute & Mesta": "Jute & Mesta production is in Lakh Bales; 1 Bale = 180 Kg",
+    "Sannhemp": "Sannhemp production is in Lakh Bales; 1 Bale = 180 Kg"
+  },
+  "source": "https://dash.upag.gov.in/statewiseapy?hide=true",
+  "filters": {
+    "crops": [
+      "All"
+    ],
+    "from_year": 2021,
+    "to_year": 2025,
+    "metrics": [
+      "Area",
+      "Production",
+      "Yield"
+    ],
+    "uom": "Lakh"
+  }
+}
