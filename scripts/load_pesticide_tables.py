@@ -116,6 +116,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_xlsx", default="data/processed/pesticide_recos_usable.xlsx")
     parser.add_argument("--input_csv", default=None)
+    parser.add_argument(
+        "--tables_dir",
+        default="data/processed/pdf_tables",
+        help="Directory containing extracted table files used to recover header-level units.",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -134,7 +139,7 @@ def main() -> None:
     elif "validation_status" in df.columns:
         df = df[df["validation_status"].isin(["valid", "usable", "pass"])].copy()
     df = df[df["crop_name"].notna() & (df["crop_name"].astype(str).str.strip() != "")]
-    tables_dir = Path("data/processed/pdf_tables")
+    tables_dir = Path(args.tables_dir)
     unit_cache: dict[str, dict[str, str]] = {}
     for unit_col in ["ai_unit", "formulation_unit", "dilution_unit", "waiting_period_unit", "unit_source"]:
         if unit_col not in df.columns:

@@ -24,6 +24,7 @@ import pandas as pd
 from app.location_lookup import lookup_place, lookup_place_in_text
 
 COMMODITY_ALIAS_PATH = Path("data/raw/commodity_aliases.json")
+DISEASE_DICTIONARY_PATH = Path("data/processed/disease_dictionary.json")
 
 RAW_CROP_COMMODITIES = {
     "wheat",
@@ -73,13 +74,16 @@ PROCESSED_COMMODITY_WORDS = {
 DISEASE_ALIASES = {
     "red rot": ["red rot", "लाल सड़न", "redrot"],
     "rust": ["rust", "रतुआ"],
+    "white rust": ["white rust", "white-rust", "सफेद रतुआ"],
     "yellow rust": ["yellow rust", "stripe rust", "पीली रतुआ", "पीला रतुआ"],
     "brown rust": ["brown rust", "leaf rust", "भूरी रतुआ"],
     "black rust": ["black rust", "stem rust", "काली रतुआ"],
     "loose smut": ["loose smut", "smut", "ढीला कंडुआ", "कंडुआ"],
     "karnal bunt": ["karnal bunt", "bunt", "burnt", "करनाल बंट", "कर्नाल बंट", "बंट"],
     "powdery mildew": ["powdery mildew", "चूर्णी फफूंदी"],
+    "downy mildew": ["downy mildew", "downey mildew", "डाउनी मिल्ड्यू"],
     "leaf blight": ["leaf blight", "blight", "झुलसा"],
+    "alternaria blight": ["alternaria blight", "alternaria", "अल्टरनेरिया झुलसा"],
     "stem borer": ["stem borer", "तना छेदक"],
     "insect pest": [
         "borer",
@@ -97,6 +101,7 @@ DISEASE_ALIASES = {
 }
 DISEASE_HINDI_TERMS = {
     "red rot": "लाल सड़न",
+    "white rust": "सफेद रतुआ",
     "yellow rust": "पीली रतुआ",
     "stripe rust": "पीली रतुआ",
     "brown rust": "भूरी रतुआ",
@@ -106,14 +111,55 @@ DISEASE_HINDI_TERMS = {
     "rust": "रतुआ",
     "leaf blight": "पत्ती झुलसा",
     "blight": "झुलसा",
+    "alternaria blight": "अल्टरनेरिया झुलसा",
     "loose smut": "ढीला कंडुआ",
     "karnal bunt": "कर्नाल बंट",
     "powdery mildew": "चूर्णी फफूंदी",
+    "downy mildew": "डाउनी मिल्ड्यू",
     "stem borer": "तना छेदक",
     "insect pest": "कीट",
     "aphid": "माहू",
     "termite": "दीमक",
 }
+
+
+def _load_generated_disease_dictionary() -> tuple[dict[str, list[str]], dict[str, str], dict[str, dict[str, object]]]:
+    if not DISEASE_DICTIONARY_PATH.exists():
+        return {}, {}, {}
+    try:
+        data = json.loads(DISEASE_DICTIONARY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}, {}, {}
+
+    aliases = {}
+    for canonical, values in (data.get("aliases") or {}).items():
+        if not canonical or not isinstance(values, list):
+            continue
+        cleaned = [str(value).strip() for value in values if str(value).strip()]
+        if cleaned:
+            aliases[str(canonical).strip().lower()] = cleaned
+
+    hindi_terms = {}
+    for canonical, value in (data.get("hindi_terms") or {}).items():
+        if canonical and value:
+            hindi_terms[str(canonical).strip().lower()] = str(value).strip()
+
+    raw_display = {}
+    for raw_key, payload in (data.get("raw_label_display") or {}).items():
+        if not raw_key or not isinstance(payload, dict):
+            continue
+        raw_display[str(raw_key).strip().lower()] = payload
+    return aliases, hindi_terms, raw_display
+
+
+GENERATED_DISEASE_ALIASES, GENERATED_DISEASE_HINDI_TERMS, GENERATED_RAW_DISEASE_DISPLAY = _load_generated_disease_dictionary()
+for canonical, aliases in GENERATED_DISEASE_ALIASES.items():
+    existing = DISEASE_ALIASES.setdefault(canonical, [])
+    for alias in aliases:
+        if alias not in existing:
+            existing.append(alias)
+for canonical, hindi in GENERATED_DISEASE_HINDI_TERMS.items():
+    DISEASE_HINDI_TERMS.setdefault(canonical, hindi)
 PEST_LABEL_WORDS = {
     "aphid",
     "aphids",
@@ -1693,7 +1739,45 @@ class RAGAdvisor:
         ]
         if not terms and any(re.search(pat, t) for pat in generic_insect_patterns):
             terms.append("insect pest")
+        terms = self._dedupe_disease_terms(terms)
         return terms
+
+    def _dedupe_disease_terms(self, terms: list[str]) -> list[str]:
+        ordered: list[str] = []
+        for term in terms:
+            if term not in ordered:
+                ordered.append(term)
+        if "white rust" in ordered and "rust" in ordered:
+            ordered.remove("rust")
+        if any(term in ordered for term in ["yellow rust", "brown rust", "black rust"]) and "rust" in ordered:
+            ordered.remove("rust")
+        if "downy mildew" in ordered and "powdery mildew" in ordered and len(ordered) == 2:
+            return ordered
+        specific_insect_terms = {
+            "fruit borer",
+            "pod borer",
+            "stem borer",
+            "shoot borer",
+            "shoot fly",
+            "leaf folder",
+            "diamondback moth",
+            "aphid",
+            "whitefly",
+            "thrips",
+            "jassid",
+            "mite",
+            "red spider mite",
+            "yellow mite",
+            "termite",
+            "hopper",
+            "caterpillar",
+            "mealybug",
+            "scale insect",
+            "bollworm",
+        }
+        if "insect pest" in ordered and any(term in ordered for term in specific_insect_terms):
+            ordered.remove("insect pest")
+        return ordered
 
     def _extract_pesticides_from_pdfs(self, crop: str) -> tuple[list[str], list[str]]:
         try:
@@ -2120,9 +2204,28 @@ class RAGAdvisor:
 
     def _translate_disease_name(self, disease_en: str) -> str:
         text = disease_en or ""
-        lower = text.lower()
+        raw_entry = GENERATED_RAW_DISEASE_DISPLAY.get(str(text).strip().lower())
+        if raw_entry:
+            clean_en = str(raw_entry.get("clean_english") or "").strip()
+            clean_hi = str(raw_entry.get("clean_hindi") or "").strip()
+            if clean_hi and clean_en:
+                return f"{clean_hi} ({clean_en})"
+            if clean_hi:
+                return clean_hi
+            if clean_en:
+                return clean_en
+        lower = text.lower().replace("downey", "downy")
+        skip_keys: set[str] = set()
+        if "white rust" in lower:
+            skip_keys.add("rust")
+        if "alternaria blight" in lower:
+            skip_keys.add("blight")
+        if any(term in lower for term in ["yellow rust", "stripe rust", "brown rust", "leaf rust", "black rust", "stem rust"]):
+            skip_keys.add("rust")
         hits = []
         for key, hi in DISEASE_HINDI_TERMS.items():
+            if key in skip_keys:
+                continue
             if key in lower and hi not in hits:
                 hits.append(hi)
         if hits:
@@ -2133,11 +2236,13 @@ class RAGAdvisor:
         if not text:
             return ""
         cleaned = str(text).replace("\xa0", " ")
+        cleaned = re.sub(r"\bdowney\b", "Downy", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"[A-Za-z]{8,}", lambda m: self._split_agri_compound(m.group(0)), cleaned)
         cleaned = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", cleaned)
         cleaned = re.sub(r"\s*,\s*", ", ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned)
-        return cleaned.strip()
+        cleaned = re.sub(r"(?:\s|,)+(?:and|or|&)\s*$", "", cleaned, flags=re.IGNORECASE)
+        return cleaned.strip(" ,;/:-")
 
     def _split_agri_compound(self, token: str) -> str:
         lower = token.lower()
