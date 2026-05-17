@@ -314,6 +314,7 @@ class WeatherRequest:
     action: str = "current"
     day_offset: int | None = None
     label: str | None = None
+    focus: str = "weather"
 
 
 @dataclass
@@ -2290,22 +2291,24 @@ class RAGAdvisor:
             return None
         place = self._extract_location_from_question(raw) or self._extract_location_from_question(normalized)
         forecast_target = self._extract_weather_forecast_target(normalized) or self._extract_weather_forecast_target(raw)
+        rain_focus = self._is_rain_specific_query(normalized) or self._is_rain_specific_query(raw)
         action = "current"
         day_offset = None
         label = None
         if forecast_target:
-            action = "daily"
+            action = "daily_rain" if rain_focus else "daily"
             day_offset = int(forecast_target["day_offset"])
             label = str(forecast_target["label"])
         elif self._is_rain_day_forecast_query(normalized) or self._is_rain_day_forecast_query(raw):
             action = "rain_day"
         elif self._is_weekly_weather_query(normalized) or self._is_weekly_weather_query(raw):
-            action = "weekly"
+            action = "rain_day" if rain_focus else "weekly"
         return WeatherRequest(
             place=place,
             action=action,
             day_offset=day_offset,
             label=label,
+            focus="rain" if action in {"daily_rain", "rain_day"} else "weather",
         )
 
     def _resolve_weather_location(
@@ -2389,11 +2392,12 @@ class RAGAdvisor:
             weather = get_rain_day_forecast_hindi(weather_place, days=7)
         elif request.action == "weekly":
             weather = get_weekly_weather_forecast_hindi(weather_place, days=7)
-        elif request.action == "daily" and request.day_offset is not None:
+        elif request.action in {"daily", "daily_rain"} and request.day_offset is not None:
             weather = get_daily_weather_forecast_hindi(
                 weather_place,
                 day_offset=request.day_offset,
                 label=request.label,
+                rain_focus=request.action == "daily_rain",
             )
         else:
             weather = get_current_weather_hindi(weather_place)
@@ -2404,8 +2408,16 @@ class RAGAdvisor:
                 "answer": "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।",
                 "references": [],
                 "retrieved": [],
+                "weather_action": request.action,
+                "weather_focus": request.focus,
             }
-        return {"answer": weather, "references": ["Open-Meteo API"], "retrieved": []}
+        return {
+            "answer": weather,
+            "references": ["Open-Meteo API"],
+            "retrieved": [],
+            "weather_action": request.action,
+            "weather_focus": request.focus,
+        }
 
     def _parse_pesticide_request(
         self,
@@ -2632,6 +2644,13 @@ class RAGAdvisor:
         rain_words = ["बारिश", "बारिस", "barish", "baarish", "rain", "rainfall"]
         timing_words = ["किस दिन", "कौनसे दिन", "कौन से दिन", "konse din", "kaunse din", "kis din", "kab", "which day", "when"]
         return any(r in t for r in rain_words) and any(w in t for w in timing_words)
+
+    def _is_rain_specific_query(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        rain_words = ["बारिश", "बारिस", "barish", "baarish", "rain", "rainfall", "showers", "वर्षा"]
+        return any(token in t for token in rain_words)
 
     def _is_weekly_weather_query(self, text: str) -> bool:
         t = (text or "").strip().lower()

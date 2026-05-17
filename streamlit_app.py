@@ -75,7 +75,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-14-weather-routing-v3"
+APP_BUILD_VERSION = "2026-05-17-weather-ui-v4"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -108,18 +108,41 @@ def _safe_float(value: object) -> float | None:
         return None
 
 
+def _extract_primary_weather_condition(text: str) -> str:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    for line in lines:
+        if line.startswith("- स्थिति:"):
+            return line.split(":", 1)[1].strip()
+    for line in lines:
+        if line.startswith("- ") and "):" in line:
+            after = line.split("):", 1)[1].strip()
+            return after.split(",", 1)[0].strip()
+    return str(text or "")
+
+
 def _weather_theme_from_text(text: str) -> str:
-    t = (text or "").lower()
-    if any(token in t for token in ["बारिश", "फुहार", "वर्षा", "rain", "showers", "तूफान", "आंधी"]):
+    condition = _extract_primary_weather_condition(text).lower()
+    if any(token in condition for token in ["बारिश", "फुहार", "वर्षा", "rain", "showers", "तूफान", "आंधी"]):
         return "rain"
-    if any(token in t for token in ["बादल", "कोहरा", "cloud", "fog", "धुंध"]):
+    if any(token in condition for token in ["बादल", "कोहरा", "cloud", "fog", "धुंध"]):
         return "cloud"
-    if any(token in t for token in ["आसमान साफ", "मुख्यतः साफ", "sunny", "clear"]):
+    if any(token in condition for token in ["आसमान साफ", "मुख्यतः साफ", "sunny", "clear", "धूप"]):
         return "sun"
     return "cloud"
 
 
-def render_weather_chat_card(text: str) -> None:
+def _weather_card_label(action: str | None) -> str:
+    action_key = str(action or "").strip().lower()
+    if action_key in {"rain_day", "daily_rain"}:
+        return "Rain Forecast"
+    if action_key == "weekly":
+        return "Weekly Weather"
+    if action_key == "daily":
+        return "Weather Forecast"
+    return "Weather Update"
+
+
+def render_weather_chat_card(text: str, action: str | None = None) -> None:
     lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
     if not lines:
         st.write(text)
@@ -131,22 +154,33 @@ def render_weather_chat_card(text: str) -> None:
         "rain": {
             "bg": "linear-gradient(135deg, #0f3554 0%, #1f5c85 55%, #4f8fb7 100%)",
             "border": "#8dc7ec",
-            "label": "Rain Forecast",
+            "label": _weather_card_label(action),
+            "overlay": "🌧️  💧  ☔  🌧️  💧",
         },
         "cloud": {
             "bg": "linear-gradient(135deg, #435365 0%, #66798a 60%, #97aab8 100%)",
             "border": "#d7e2ea",
-            "label": "Cloud Forecast",
+            "label": _weather_card_label(action),
+            "overlay": "☁️  ☁️  🌥️  ☁️  ☁️",
         },
         "sun": {
             "bg": "linear-gradient(135deg, #7f4a00 0%, #c87a00 55%, #f6c54f 100%)",
             "border": "#ffe7a8",
-            "label": "Sunny Forecast",
+            "label": _weather_card_label(action),
+            "overlay": "☀️  ☀️  🌤️  ☀️  ☀️",
         },
     }
     cfg_theme = themes.get(theme, themes["cloud"])
+    overlay_rows = "<br>".join([html.escape(cfg_theme["overlay"])] * 4)
     st.markdown(
         f"""
+        <style>
+        @keyframes weatherOverlayDrift {{
+            0% {{ transform: translate3d(-6%, 0, 0) rotate(-8deg); }}
+            50% {{ transform: translate3d(4%, -4%, 0) rotate(-6deg); }}
+            100% {{ transform: translate3d(-6%, 0, 0) rotate(-8deg); }}
+        }}
+        </style>
         <div style="
             background: {cfg_theme['bg']};
             border: 1px solid {cfg_theme['border']};
@@ -155,12 +189,26 @@ def render_weather_chat_card(text: str) -> None:
             color: #ffffff;
             box-shadow: 0 10px 24px rgba(0,0,0,0.16);
             margin: 4px 0 6px 0;
+            position: relative;
+            overflow: hidden;
         ">
+            <div style="
+                position: absolute;
+                inset: -10% -5% auto -5%;
+                opacity: 0.18;
+                font-size: 2.8rem;
+                line-height: 1.8;
+                white-space: nowrap;
+                pointer-events: none;
+                animation: weatherOverlayDrift 18s linear infinite;
+            ">{overlay_rows}</div>
+            <div style="position: relative; z-index: 1;">
             <div style="font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.88; margin-bottom: 8px;">
                 {cfg_theme['label']}
             </div>
             <div style="font-size: 1.05rem; font-weight: 700; margin-bottom: 8px;">{title}</div>
             <div style="font-size: 0.96rem; line-height: 1.65;">{body}</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2224,7 +2272,7 @@ for item in st.session_state.chat_history:
                 auto_table=item.get("market_table"),
             )
         elif item.get("role") == "assistant" and str(item.get("topic") or "").strip().lower() == "weather":
-            render_weather_chat_card(item["text"])
+            render_weather_chat_card(item["text"], action=item.get("weather_action"))
             refs = item.get("references", [])
             if refs:
                 with st.expander("Sources Used"):
@@ -2289,11 +2337,13 @@ if user_query:
             )
             weather = weather_result.get("answer", "")
             weather_references = weather_result.get("references", ["Open-Meteo API"])
+            weather_action = weather_result.get("weather_action", weather_request.action)
         else:
             weather = get_current_weather_hindi(composed_weather_query)
             if not weather:
                 weather = get_current_weather_hindi(composed_weather_query)
             weather_references = ["Open-Meteo API"]
+            weather_action = "current"
         final_answer = (
             weather
             if weather
@@ -2311,10 +2361,18 @@ if user_query:
         )
         st.session_state["last_location_context"] = {"place": place, "district": district or "", "state": "Uttar Pradesh"}
         st.session_state.chat_history.append(
-            {"role": "assistant", "text": final_answer, "references": weather_references, "query_log_id": query_log_id, "topic": "weather", "user_query": user_query}
+            {
+                "role": "assistant",
+                "text": final_answer,
+                "references": weather_references,
+                "query_log_id": query_log_id,
+                "topic": "weather",
+                "user_query": user_query,
+                "weather_action": weather_action,
+            }
         )
         with st.chat_message("assistant"):
-            render_weather_chat_card(final_answer)
+            render_weather_chat_card(final_answer, action=weather_action)
         st.stop()
 
     last_ctx = st.session_state.get("last_structured_context", {}) or {}
@@ -2664,12 +2722,13 @@ if user_query:
             "query_log_id": (None if intent_price else query_log_id),
             "topic": (None if intent_price else topic),
             "user_query": user_query,
+            "weather_action": (None if intent_price else result.get("weather_action")),
         }
     )
 
     with st.chat_message("assistant"):
         if not intent_price and str(topic or "").strip().lower() == "weather":
-            render_weather_chat_card(final_answer)
+            render_weather_chat_card(final_answer, action=result.get("weather_action"))
         else:
             st.write(final_answer)
         if not intent_price:

@@ -436,13 +436,18 @@ def get_tomorrow_rain_forecast_hindi(place: str) -> str:
     return answer
 
 
-def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | None = None) -> str:
+def get_daily_weather_forecast_hindi(
+    place: str,
+    day_offset: int,
+    label: str | None = None,
+    rain_focus: bool = False,
+) -> str:
     geo = _geocode_free(place.strip())
     if not geo:
         return "मौसम पूर्वानुमान नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
     lat, lon, resolved_name = geo
     offset = max(0, int(day_offset))
-    cache_key = f"daily::{offset}::{round(lat, 4)}::{round(lon, 4)}"
+    cache_key = f"daily::{offset}::{int(rain_focus)}::{round(lat, 4)}::{round(lon, 4)}"
     params = urlencode(
         {
             "latitude": lat,
@@ -486,6 +491,8 @@ def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | N
         date_text = str(times[idx])
     heading = label or f"{date_text}"
 
+    prob_val = None
+    rain_val = None
     verdict = "बारिश की संभावना कम है।"
     try:
         prob_val = float(prob)
@@ -497,15 +504,27 @@ def get_daily_weather_forecast_hindi(place: str, day_offset: int, label: str | N
     except Exception:
         pass
 
-    answer = (
-        f"{heading} का मौसम पूर्वानुमान ({resolved_name}):\n"
-        f"- निष्कर्ष: {verdict}\n"
-        f"- स्थिति: {summary}\n"
-        f"- बारिश की अधिकतम संभावना: {prob}%\n"
-        f"- अनुमानित कुल वर्षा: {mm} mm\n"
-        f"- तापमान: {lo}°C से {hi}°C\n\n"
-        "कृषि सुझाव: अगर बारिश की संभावना ज्यादा हो तो सिंचाई टालें और spray/बीज उपचार का समय मौसम देखकर रखें।"
-    )
+    if rain_focus:
+        answer = (
+            f"{heading} का मौसम पूर्वानुमान ({resolved_name}):\n"
+            f"- निष्कर्ष: {verdict}\n"
+            f"- स्थिति: {summary}\n"
+            f"- बारिश की अधिकतम संभावना: {prob}%\n"
+            f"- अनुमानित कुल वर्षा: {mm} mm\n"
+            f"- तापमान: {lo}°C से {hi}°C\n\n"
+            "कृषि सुझाव: अगर बारिश की संभावना ज्यादा हो तो सिंचाई टालें और spray/बीज उपचार का समय मौसम देखकर रखें।"
+        )
+    else:
+        rain_line = f"- बारिश की संभावना: {prob}%"
+        if rain_val is not None:
+            rain_line += f" | अनुमानित वर्षा: {rain_val:.1f} mm"
+        answer = (
+            f"{heading} का मौसम पूर्वानुमान ({resolved_name}):\n"
+            f"- स्थिति: {summary}\n"
+            f"- तापमान: {lo}°C से {hi}°C\n"
+            f"{rain_line}\n\n"
+            "कृषि सुझाव: मौसम के अनुसार सिंचाई, spray और खेत के काम का समय तय करें।"
+        )
     _put_cached_weather_response(cache_key, answer)
     return answer
 
