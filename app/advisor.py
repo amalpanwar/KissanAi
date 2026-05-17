@@ -19,6 +19,7 @@ from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
 from app.crop_guide import build_crop_production_followup, build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
+from app.msp import get_msp_for_crop
 import pandas as pd
 
 from app.location_lookup import lookup_place, lookup_place_in_text
@@ -375,6 +376,14 @@ class RAGAdvisor:
                 "retrieved": [],
                 "topic": "weather_impact",
             }
+        msp_answer = self._answer_msp_query(farmer_question) or self._answer_msp_query(normalized_question)
+        if msp_answer:
+            return {
+                "answer": msp_answer,
+                "references": ["PIB MSP notification"],
+                "retrieved": [],
+                "topic": "price",
+            }
         weather_request = self._parse_weather_request(farmer_question, normalized_question)
         if weather_request:
             weather_result = self._answer_weather_request(weather_request, farmer_question, normalized_question)
@@ -530,8 +539,39 @@ class RAGAdvisor:
         keys = [
             "price", "rate", "mandi", "bhav", "daam", "dam", "keemat", "kimat", "qeemat",
             "भाव", "कीमत", "दाम", "मंडी",
+            "msp", "minimum support price", "support price",
+            "न्यूनतम समर्थन मूल्य", "समर्थन मूल्य", "सरकारी भाव", "सरकारी रेट",
         ]
         return any(k in t for k in keys)
+
+    def _is_msp_query(self, text: str) -> bool:
+        t = (text or "").lower()
+        keys = [
+            "msp",
+            "minimum support price",
+            "support price",
+            "support rate",
+            "न्यूनतम समर्थन मूल्य",
+            "समर्थन मूल्य",
+            "सरकारी भाव",
+            "सरकारी रेट",
+        ]
+        return any(k in t for k in keys)
+
+    def _answer_msp_query(self, text: str) -> str | None:
+        if not self._is_msp_query(text):
+            return None
+        crop = self._extract_crop_from_query(text or "")
+        if not crop:
+            return "कृपया जिस फसल का MSP चाहिए उसका नाम लिखें, जैसे: गेहूं, धान, चना।"
+        msp = get_msp_for_crop(crop)
+        crop_label = self._crop_display_label(crop)
+        if not msp:
+            return f"{crop_label} के लिए अभी MSP रिकॉर्ड उपलब्ध नहीं मिला।"
+        return (
+            f"{crop_label} के लिए MSP (राष्ट्रीय): ₹{int(msp['msp'])}/क्विंटल.\n"
+            f"स्रोत: {msp['source_url']}"
+        )
 
     def _is_hyde_candidate(self, question: str) -> bool:
         q = (question or "").strip().lower()

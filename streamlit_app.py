@@ -335,6 +335,8 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
     body_lines = max(1, len(lines) - 1)
     card_height = min(420, 120 + body_lines * 28)
     components.html(card_html, height=card_height, scrolling=False)
+    # Keep a plain-text fallback visible because custom HTML components can be flaky on Streamlit Cloud.
+    st.write(text)
 
 
 def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | None = None, auto_table: pd.DataFrame | None = None) -> None:
@@ -770,8 +772,30 @@ def is_price_query(text: str) -> bool:
         "आने वाले",
         "15 दिन",
         "पंद्रह दिन",
+        "msp",
+        "minimum support price",
+        "support price",
+        "न्यूनतम समर्थन मूल्य",
+        "समर्थन मूल्य",
+        "सरकारी भाव",
+        "सरकारी रेट",
     ]
     return any(k in t for k in keywords)
+
+
+def is_msp_query(text: str) -> bool:
+    t = (text or "").lower()
+    keys = [
+        "msp",
+        "minimum support price",
+        "support price",
+        "न्यूनतम समर्थन मूल्य",
+        "समर्थन मूल्य",
+        "सरकारी भाव",
+        "सरकारी रेट",
+        "support rate",
+    ]
+    return any(k in t for k in keys)
 
 
 def is_crop_query(text: str) -> bool:
@@ -2558,7 +2582,8 @@ if user_query:
     )
 
     market_df = load_agmarknet_df()
-    intent_price = is_price_query(user_query)
+    intent_msp = is_msp_query(user_query)
+    intent_price = is_price_query(user_query) or intent_msp
     selected_state, selected_district, selected_commodity = extract_selection_from_query(
         user_query,
         market_df,
@@ -2567,13 +2592,17 @@ if user_query:
         fallback_commodity=active_commodity if "active_commodity" in locals() else (preferred_crop or "Wheat"),
     )
 
-    if intent_price and not market_df.empty:
+    if intent_price:
         # Ensure commodity is explicitly detected for price queries.
         comm_from_query = resolve_commodity_from_query(
             user_query, load_commodity_catalog()
         )
         if not comm_from_query:
-            final_answer = "कृपया फसल/कमोडिटी का नाम बताएं (जैसे: गेहूं, गन्ना, धान)।"
+            final_answer = (
+                "कृपया फसल/कमोडिटी का नाम बताएं (जैसे: गेहूं, गन्ना, धान)।"
+                if not intent_msp
+                else "कृपया जिस फसल का MSP चाहिए उसका नाम बताएं (जैसे: गेहूं, धान, चना)।"
+            )
             query_log_id = log_query_answer(
                 user_query=user_query,
                 composed_query=composed_query,
@@ -2583,6 +2612,66 @@ if user_query:
                 district=selected_district,
                 season=season,
                 crop_name="unknown",
+            )
+            st.session_state.chat_history.append(
+                {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+            )
+            with st.chat_message("assistant"):
+                st.write(final_answer)
+            st.stop()
+        if intent_msp:
+            selected_commodity = comm_from_query or selected_commodity
+            commodity_label = commodity_display_name(selected_commodity)
+            msp = get_msp_for_crop(selected_commodity)
+            if msp:
+                final_answer = (
+                    f"{commodity_label} के लिए MSP (राष्ट्रीय): ₹{int(msp['msp'])}/क्विंटल.\n"
+                    f"स्रोत: {msp['source_url']}"
+                )
+            else:
+                final_answer = (
+                    f"{commodity_label} के लिए अभी MSP रिकॉर्ड उपलब्ध नहीं मिला। "
+                    "कृपया फसल का नाम दोबारा लिखें या दूसरी फसल पूछें।"
+                )
+            query_log_id = log_query_answer(
+                user_query=user_query,
+                composed_query=composed_query,
+                topic="price",
+                answer_text=final_answer,
+                references=[],
+                district=selected_district,
+                season=season,
+                crop_name=selected_commodity or "unknown",
+            )
+            st.session_state.chat_history.append(
+                {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+            )
+            with st.chat_message("assistant"):
+                st.write(final_answer)
+            st.stop()
+        if market_df.empty:
+            selected_commodity = comm_from_query or selected_commodity
+            commodity_label = commodity_display_name(selected_commodity)
+            msp = get_msp_for_crop(selected_commodity)
+            if msp:
+                final_answer = (
+                    f"{commodity_label} के लिए MSP (राष्ट्रीय): ₹{int(msp['msp'])}/क्विंटल.\n"
+                    f"स्रोत: {msp['source_url']}"
+                )
+            else:
+                final_answer = (
+                    f"{commodity_label} के लिए अभी मंडी/MSP डेटा उपलब्ध नहीं मिला। "
+                    "कृपया थोड़ी देर बाद फिर प्रयास करें।"
+                )
+            query_log_id = log_query_answer(
+                user_query=user_query,
+                composed_query=composed_query,
+                topic="price",
+                answer_text=final_answer,
+                references=[],
+                district=selected_district,
+                season=season,
+                crop_name=selected_commodity or "unknown",
             )
             st.session_state.chat_history.append(
                 {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
