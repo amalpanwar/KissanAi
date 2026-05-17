@@ -12,7 +12,7 @@ import numpy as np
 
 from app.embeddings import Embedder
 from app.generator import LocalGenerator
-from app.prompting import build_prompt
+from app.prompting import SYSTEM_PROMPT, build_prompt
 from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
 from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_rain_day_forecast_hindi, get_tomorrow_rain_forecast_hindi, get_weekly_weather_forecast_hindi
@@ -20,6 +20,7 @@ from app.upag_apy import load_latest_up_yield_qtl_per_acre
 from app.crop_guide import build_crop_production_followup, build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
+from app.web_search import google_search, is_google_search_configured
 import pandas as pd
 
 from app.location_lookup import lookup_place, lookup_place_in_text
@@ -501,6 +502,9 @@ class RAGAdvisor:
         try:
             self._ensure_rag_components(load_generator=False)
         except Exception:
+            web_result = self._answer_with_web_search(normalized_question, context_part)
+            if web_result:
+                return web_result
             return {
                 "answer": "अभी यह सवाल local source से नहीं निकल पाया और RAG model उपलब्ध नहीं है। कृपया सवाल में फसल/जिला साफ लिखें या थोड़ी देर बाद फिर प्रयास करें।",
                 "references": [],
@@ -508,6 +512,9 @@ class RAGAdvisor:
                 "topic": "rag",
             }
         if self.embedder is None or self.retriever is None or self.generator is None:
+            web_result = self._answer_with_web_search(normalized_question, context_part)
+            if web_result:
+                return web_result
             return {
                 "answer": "मॉडल अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।",
                 "references": [],
@@ -520,8 +527,14 @@ class RAGAdvisor:
         try:
             response = self.generator.generate(prompt)
             if self._is_low_quality_response(response):
+                web_result = self._answer_with_web_search(normalized_question, context_part)
+                if web_result:
+                    return web_result
                 response = self._fallback_answer(retrieved, normalized_question)
         except Exception:
+            web_result = self._answer_with_web_search(normalized_question, context_part)
+            if web_result:
+                return web_result
             response = self._fallback_answer(retrieved, normalized_question)
         return {
             "answer": response,
@@ -2380,6 +2393,121 @@ class RAGAdvisor:
             "संदर्भ अंश:\n"
             + "\n".join(snippets)
         )
+
+    def _web_search_domains_hint(self, question: str) -> str:
+        q = (question or "").lower()
+        if self._is_msp_query(q) or self._is_price_query(q):
+            return " site:pib.gov.in OR site:agmarknet.gov.in"
+        if self._is_crop_protection_followup_intent(q):
+            return " site:ppqs.gov.in OR site:icar.gov.in OR site:agricoop.nic.in"
+        if self._is_crop_guide_intent(q):
+            return " site:icar.gov.in OR site:tnau.ac.in OR site:agricoop.nic.in"
+        return " site:icar.gov.in OR site:agricoop.nic.in OR site:ppqs.gov.in"
+
+    def _build_web_search_queries(self, question: str, context_part: str) -> list[str]:
+        q = (question or "").strip()
+        if not q:
+            return []
+        crop = self._extract_crop_from_query(q) or self._extract_preferred_crop_from_context(context_part) or ""
+        district = self._extract_district_from_context(context_part) or ""
+        disease_terms = self._extract_disease_terms_from_query(q)
+        hint = self._web_search_domains_hint(q)
+        queries: list[str] = []
+        if disease_terms and crop:
+            queries.append(f"{crop} {' '.join(disease_terms[:2])} advisory India{hint}")
+        if crop and self._is_msp_query(q):
+            queries.append(f"{crop} MSP India official{hint}")
+        if crop and district and self._is_crop_choice_intent(q):
+            queries.append(f"{crop} farming economics {district} Uttar Pradesh India{hint}")
+        queries.append(f"{q}{hint}")
+        if crop and crop.lower() not in q.lower():
+            queries.append(f"{crop} {q}{hint}")
+        # preserve order but deduplicate
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in queries:
+            norm = re.sub(r"\s+", " ", item).strip().lower()
+            if norm and norm not in seen:
+                seen.add(norm)
+                out.append(item)
+        return out[:4]
+
+    def _rerank_web_results(self, question: str, results: list[dict], top_k: int = 4) -> list[dict]:
+        q_tokens = self._query_tokens(question)
+        crop = (self._extract_crop_from_query(question) or "").lower()
+        disease_terms = [d.lower() for d in self._extract_disease_terms_from_query(question)]
+        ranked: list[tuple[float, dict]] = []
+        for item in results:
+            hay = f"{item.get('title','')} {item.get('snippet','')} {item.get('source_file','')}".lower()
+            tokens = self._query_tokens(hay)
+            overlap = len(q_tokens & tokens) / max(len(q_tokens), 1) if q_tokens else 0.0
+            crop_bonus = 0.25 if crop and crop in hay else 0.0
+            disease_bonus = 0.2 if disease_terms and any(term in hay for term in disease_terms) else 0.0
+            official_bonus = 0.15 if any(dom in hay for dom in ["icar", "ppqs", "agricoop", "pib", "agmarknet"]) else 0.0
+            score = overlap + crop_bonus + disease_bonus + official_bonus
+            ranked.append((score, item))
+        ranked.sort(key=lambda x: x[0], reverse=True)
+        return [item for _, item in ranked[:top_k]]
+
+    def _answer_with_web_search(self, question: str, context_part: str) -> dict | None:
+        if not is_google_search_configured():
+            return None
+        if self._is_weather_intent(question) or self._is_weather_impact_intent(question):
+            return None
+        search_results: list[dict] = []
+        for query in self._build_web_search_queries(question, context_part):
+            hits = google_search(query, num=5)
+            if not hits:
+                continue
+            for hit in hits:
+                search_results.append(
+                    {
+                        "source_file": hit.link,
+                        "title": hit.title,
+                        "text": hit.snippet,
+                    }
+                )
+            if search_results:
+                break
+        if not search_results:
+            return None
+        ranked = self._rerank_web_results(question, search_results, top_k=4)
+        evidence = "\n\n".join(
+            f"[Source: {item.get('title','unknown')} | {item.get('source_file','')}]\n{item.get('text','')[:320]}"
+            for item in ranked
+        )
+        if self.generator is not None:
+            prompt = (
+                f"{SYSTEM_PROMPT}\n\n"
+                "नीचे Google Programmable Search से मिले स्रोत-स्निपेट हैं। केवल इन्हीं स्रोतों के आधार पर उत्तर दें। "
+                "अगर जानकारी अधूरी हो तो साफ बताएं।\n\n"
+                f"स्रोत:\n{evidence}\n\n"
+                f"किसान का सवाल: {question}\n\n"
+                "उत्तर हिंदी में दें। संरचना रखें:\n"
+                "1) सीधा उत्तर\n2) जरूरी संदर्भ/सीमा\n3) अगला सबसे उपयोगी कदम\n"
+            )
+            try:
+                answer = self.generator.generate(prompt)
+            except Exception:
+                answer = ""
+        else:
+            answer = ""
+        if not answer.strip():
+            bullets = "\n".join(
+                f"- {item.get('title','')}: {item.get('text','')}".strip()
+                for item in ranked[:3]
+            )
+            answer = (
+                f"समझा गया सवाल (हिंदी): {question}\n\n"
+                "स्थानीय स्रोत से सीधा उत्तर नहीं मिला, इसलिए वेब स्रोतों से ये प्रासंगिक जानकारी मिली:\n"
+                f"{bullets}"
+            )
+        return {
+            "answer": answer,
+            "references": [item.get("source_file", "") for item in ranked if item.get("source_file")],
+            "retrieved": ranked,
+            "topic": "web_search",
+        }
 
     def _parse_weather_request(self, farmer_question: str, normalized_question: str) -> WeatherRequest | None:
         raw = (farmer_question or "").strip()
