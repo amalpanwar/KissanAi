@@ -14,6 +14,7 @@ from datetime import date, datetime
 from time import time
 from pathlib import Path
 from email.message import EmailMessage
+from textwrap import dedent
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -240,39 +241,39 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
     theme_key = f"night_{theme}" if night and f"night_{theme}" in themes else theme
     cfg_theme = themes.get(theme_key, themes["cloud"])
     if theme_key.startswith("night_"):
-        overlay_html = """
+        overlay_html = dedent("""
             <div style="position:absolute; right:20px; top:16px; width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,0.97); box-shadow:0 0 24px rgba(255,255,255,0.22); pointer-events:none;"></div>
             <div style="position:absolute; right:8px; top:12px; width:50px; height:50px; border-radius:50%; background:#0b2345; pointer-events:none;"></div>
             <div style="position:absolute; left:18px; top:12px; width:100%; pointer-events:none; color:rgba(255,255,255,0.96); font-size:0.95rem; letter-spacing:0.28rem; text-shadow:0 0 10px rgba(255,255,255,0.25); animation: weatherTwinkle 3.6s ease-in-out infinite;">✦ &nbsp; · &nbsp; ✦ &nbsp; · &nbsp; ✦</div>
-        """
+        """).strip()
     else:
-        overlay_html = f"""
+        overlay_html = dedent(f"""
             <div style="position: absolute; right: 14px; top: 10px; opacity: 0.14; font-size: 4.2rem; color: {cfg_theme['overlay_color']}; text-shadow: 0 0 18px rgba(255,255,255,0.18); pointer-events: none; animation: weatherOverlayDrift 18s linear infinite;">{html.escape(cfg_theme["overlay"])}</div>
             <div style="position: absolute; right: 64px; top: 16px; opacity: 0.18; font-size: 2.1rem; color: {cfg_theme['secondary_color']}; pointer-events: none; animation: weatherOverlayFloat 14s ease-in-out infinite;">{html.escape(cfg_theme["overlay_secondary"])}</div>
             <div style="position: absolute; left: 18px; top: 10px; opacity: 0.3; font-size: 0.95rem; letter-spacing: 0.25rem; color: {cfg_theme['stars_color']}; text-shadow: 0 0 14px rgba(255,255,255,0.22); pointer-events: none;">{html.escape(cfg_theme["stars"])}</div>
-        """
+        """).strip()
     if theme_key == "night_rain":
-        pattern_html = """
+        pattern_html = dedent("""
             <div style="position:absolute; inset:0; background-image: repeating-linear-gradient(-68deg, rgba(255,255,255,0.0) 0px, rgba(255,255,255,0.0) 12px, rgba(230,242,255,0.34) 12px, rgba(230,242,255,0.34) 14px, rgba(255,255,255,0.0) 14px, rgba(255,255,255,0.0) 24px); opacity:0.52; pointer-events:none; animation: weatherRainSweep 1.5s linear infinite;"></div>
-        """
+        """).strip()
     elif theme_key == "night_cloud":
-        pattern_html = """
+        pattern_html = dedent("""
             <div style="position:absolute; left:-10px; right:-10px; top:28px; height:56px; pointer-events:none; animation: weatherCloudDrift 12s ease-in-out infinite;">
                 <div style="position:absolute; left:8%; width:120px; height:34px; border-radius:40px; background:rgba(255,255,255,0.11); filter:blur(1px);"></div>
                 <div style="position:absolute; left:28%; top:14px; width:150px; height:42px; border-radius:44px; background:rgba(255,255,255,0.10); filter:blur(1px);"></div>
                 <div style="position:absolute; left:58%; width:132px; height:36px; border-radius:40px; background:rgba(255,255,255,0.09); filter:blur(1px);"></div>
             </div>
-        """
+        """).strip()
     elif theme_key == "night_sun":
-        pattern_html = """
+        pattern_html = dedent("""
             <div style="position:absolute; inset:0; pointer-events:none; animation: weatherTwinkle 4.2s ease-in-out infinite; background-image: radial-gradient(circle at 12% 32%, rgba(255,255,255,0.95) 0 1.2px, transparent 1.6px), radial-gradient(circle at 28% 18%, rgba(255,255,255,0.92) 0 1.2px, transparent 1.6px), radial-gradient(circle at 44% 38%, rgba(255,255,255,0.9) 0 1.2px, transparent 1.6px), radial-gradient(circle at 66% 22%, rgba(255,255,255,0.94) 0 1.2px, transparent 1.6px), radial-gradient(circle at 82% 34%, rgba(255,255,255,0.92) 0 1.2px, transparent 1.6px);"></div>
-        """
+        """).strip()
     else:
         pattern_animation = "weatherPatternRain 8s linear infinite" if "rain" in theme_key else "weatherPatternSlide 16s ease-in-out infinite"
-        pattern_html = f"""
+        pattern_html = dedent(f"""
             <div style="position: absolute; left: -6px; right: -6px; bottom: 8px; opacity: 0.42; font-size: 1.1rem; letter-spacing: 0.22rem; white-space: nowrap; color: {cfg_theme['pattern_color']}; pointer-events: none; animation: {pattern_animation};">{html.escape(cfg_theme["pattern"])}</div>
-        """
-    st.markdown(
+        """).strip()
+    card_html = dedent(
         f"""
         <style>
         @keyframes weatherOverlayDrift {{
@@ -329,9 +330,9 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             <div style="font-size: 0.96rem; line-height: 1.65;">{body}</div>
             </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        """
+    ).strip()
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | None = None, auto_table: pd.DataFrame | None = None) -> None:
