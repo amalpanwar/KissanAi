@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import json
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -331,7 +332,9 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
         </div>
         """
     ).strip()
-    st.markdown(card_html, unsafe_allow_html=True)
+    body_lines = max(1, len(lines) - 1)
+    card_height = min(420, 120 + body_lines * 28)
+    components.html(card_html, height=card_height, scrolling=False)
 
 
 def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | None = None, auto_table: pd.DataFrame | None = None) -> None:
