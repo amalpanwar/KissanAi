@@ -163,48 +163,78 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "border": "#8dc7ec",
             "label": _weather_card_label(action),
             "overlay": "🌧️",
+            "overlay_color": "rgba(255,255,255,0.95)",
             "overlay_secondary": "💧",
+            "secondary_color": "rgba(255,255,255,0.78)",
             "stars": "",
+            "stars_color": "rgba(255,255,255,0.0)",
+            "pattern": "╲ ╲ ╲ ╲ ╲ ╲",
+            "pattern_color": "rgba(220, 241, 255, 0.22)",
         },
         "cloud": {
             "bg": "linear-gradient(135deg, #435365 0%, #66798a 60%, #97aab8 100%)",
             "border": "#d7e2ea",
             "label": _weather_card_label(action),
             "overlay": "☁️",
+            "overlay_color": "rgba(255,255,255,0.95)",
             "overlay_secondary": "🌥️",
+            "secondary_color": "rgba(255,255,255,0.78)",
             "stars": "",
+            "stars_color": "rgba(255,255,255,0.0)",
+            "pattern": "☁︎   ☁︎   ☁︎   ☁︎",
+            "pattern_color": "rgba(255,255,255,0.18)",
         },
         "sun": {
             "bg": "linear-gradient(135deg, #7f4a00 0%, #c87a00 55%, #f6c54f 100%)",
             "border": "#ffe7a8",
             "label": _weather_card_label(action),
             "overlay": "☀️",
+            "overlay_color": "rgba(255,255,255,0.98)",
             "overlay_secondary": "🌤️",
+            "secondary_color": "rgba(255,255,255,0.72)",
             "stars": "",
+            "stars_color": "rgba(255,255,255,0.0)",
+            "pattern": "✦   ✧   ✦   ✧",
+            "pattern_color": "rgba(255,248,215,0.18)",
         },
         "night_rain": {
             "bg": "radial-gradient(circle at 14% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px), radial-gradient(circle at 32% 28%, rgba(255,255,255,0.16) 0 1px, transparent 2px), radial-gradient(circle at 78% 16%, rgba(255,255,255,0.2) 0 1px, transparent 2px), linear-gradient(135deg, #07162d 0%, #0d2950 55%, #193d69 100%)",
             "border": "#4e6f96",
             "label": _weather_card_label(action),
-            "overlay": "🌧️",
-            "overlay_secondary": "🌙",
-            "stars": "✦ ✦ ✦",
+            "overlay": "☾",
+            "overlay_color": "rgba(250,252,255,0.96)",
+            "overlay_secondary": "✦ ✦ ✦",
+            "secondary_color": "rgba(255,255,255,0.88)",
+            "stars": "✦   ·   ✦   ·   ✦",
+            "stars_color": "rgba(255,255,255,0.95)",
+            "pattern": "╲ ╲ ╲ ╲ ╲ ╲ ╲",
+            "pattern_color": "rgba(214, 232, 255, 0.28)",
         },
         "night_cloud": {
             "bg": "radial-gradient(circle at 16% 22%, rgba(255,255,255,0.22) 0 1px, transparent 2px), radial-gradient(circle at 52% 18%, rgba(255,255,255,0.14) 0 1px, transparent 2px), radial-gradient(circle at 84% 24%, rgba(255,255,255,0.18) 0 1px, transparent 2px), linear-gradient(135deg, #08172f 0%, #173253 55%, #284a73 100%)",
             "border": "#6d87a8",
             "label": _weather_card_label(action),
-            "overlay": "☁️",
-            "overlay_secondary": "🌙",
-            "stars": "✦ ✦",
+            "overlay": "☾",
+            "overlay_color": "rgba(250,252,255,0.96)",
+            "overlay_secondary": "☁︎   ☁︎",
+            "secondary_color": "rgba(255,255,255,0.42)",
+            "stars": "✦   ✦   ·   ✦",
+            "stars_color": "rgba(255,255,255,0.92)",
+            "pattern": "☁︎   ☁︎   ☁︎   ☁︎",
+            "pattern_color": "rgba(255,255,255,0.16)",
         },
         "night_sun": {
             "bg": "radial-gradient(circle at 15% 20%, rgba(255,255,255,0.24) 0 1px, transparent 2px), radial-gradient(circle at 40% 14%, rgba(255,255,255,0.16) 0 1px, transparent 2px), radial-gradient(circle at 70% 24%, rgba(255,255,255,0.18) 0 1px, transparent 2px), radial-gradient(circle at 88% 12%, rgba(255,255,255,0.24) 0 1px, transparent 2px), linear-gradient(135deg, #041226 0%, #0b2345 50%, #163663 100%)",
             "border": "#9cb6df",
             "label": _weather_card_label(action),
-            "overlay": "🌙",
-            "overlay_secondary": "✨",
-            "stars": "✦ ✦ ✦ ✦",
+            "overlay": "☾",
+            "overlay_color": "rgba(250,252,255,0.98)",
+            "overlay_secondary": "✦ ✦ ✦ ✦",
+            "secondary_color": "rgba(255,255,255,0.86)",
+            "stars": "✦   ✦   ·   ✦   ·   ✦",
+            "stars_color": "rgba(255,255,255,0.96)",
+            "pattern": "✦   ·   ✦   ·   ✦",
+            "pattern_color": "rgba(255,255,255,0.14)",
         },
     }
     theme_key = f"night_{theme}" if night and f"night_{theme}" in themes else theme
@@ -221,6 +251,15 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             0% {{ transform: translate3d(0, 0, 0); }}
             50% {{ transform: translate3d(-4px, 6px, 0); }}
             100% {{ transform: translate3d(0, 0, 0); }}
+        }}
+        @keyframes weatherPatternSlide {{
+            0% {{ transform: translate3d(-10px, 0, 0); }}
+            50% {{ transform: translate3d(10px, 0, 0); }}
+            100% {{ transform: translate3d(-10px, 0, 0); }}
+        }}
+        @keyframes weatherPatternRain {{
+            0% {{ transform: translate3d(0, -10px, 0); }}
+            100% {{ transform: translate3d(12px, 16px, 0); }}
         }}
         </style>
         <div style="
@@ -240,6 +279,8 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
                 top: 10px;
                 opacity: 0.14;
                 font-size: 4.2rem;
+                color: {cfg_theme['overlay_color']};
+                text-shadow: 0 0 18px rgba(255,255,255,0.18);
                 pointer-events: none;
                 animation: weatherOverlayDrift 18s linear infinite;
             ">{html.escape(cfg_theme["overlay"])}</div>
@@ -249,6 +290,7 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
                 top: 16px;
                 opacity: 0.18;
                 font-size: 2.1rem;
+                color: {cfg_theme['secondary_color']};
                 pointer-events: none;
                 animation: weatherOverlayFloat 14s ease-in-out infinite;
             ">{html.escape(cfg_theme["overlay_secondary"])}</div>
@@ -256,11 +298,26 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
                 position: absolute;
                 left: 18px;
                 top: 10px;
-                opacity: 0.22;
+                opacity: 0.3;
                 font-size: 0.95rem;
                 letter-spacing: 0.25rem;
+                color: {cfg_theme['stars_color']};
+                text-shadow: 0 0 14px rgba(255,255,255,0.22);
                 pointer-events: none;
             ">{html.escape(cfg_theme["stars"])}</div>
+            <div style="
+                position: absolute;
+                left: -6px;
+                right: -6px;
+                bottom: 8px;
+                opacity: 0.42;
+                font-size: 1.1rem;
+                letter-spacing: 0.22rem;
+                white-space: nowrap;
+                color: {cfg_theme['pattern_color']};
+                pointer-events: none;
+                animation: {"weatherPatternRain 8s linear infinite" if "rain" in theme_key else "weatherPatternSlide 16s ease-in-out infinite"};
+            ">{html.escape(cfg_theme["pattern"])}</div>
             <div style="position: relative; z-index: 1;">
             <div style="font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.88; margin-bottom: 8px;">
                 {cfg_theme['label']}
