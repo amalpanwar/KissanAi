@@ -76,7 +76,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-17-weather-ui-v4"
+APP_BUILD_VERSION = "2026-05-17-followup-safe-v5"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -2496,16 +2496,29 @@ if user_query:
 
     last_ctx = st.session_state.get("last_structured_context", {}) or {}
     last_location_ctx = st.session_state.get("last_location_context", {}) or {}
+    normalized_user_query = advisor._normalize_hinglish(user_query)
+    crop_protect_followup_checker = getattr(advisor, "_is_crop_protection_followup_intent", None)
+    crop_guide_followup_checker = getattr(advisor, "_is_crop_guide_followup_intent", None)
+    if callable(crop_protect_followup_checker):
+        crop_protection_followup = bool(crop_protect_followup_checker(normalized_user_query))
+    else:
+        fallback_pesticide_intent = getattr(advisor, "_is_pesticide_intent", None)
+        crop_protection_followup = bool(callable(fallback_pesticide_intent) and fallback_pesticide_intent(normalized_user_query))
+    if callable(crop_guide_followup_checker):
+        crop_guide_followup_detected = bool(crop_guide_followup_checker(normalized_user_query))
+    else:
+        crop_guide_followup_detected = False
+
     followup_profit = (
         is_profitability_followup_query(user_query)
         and st.session_state.get("last_structured_topic") in {"crop_profitability", "crop_profitability_followup"}
     )
     followup_crop_care = (
-        advisor._is_crop_protection_followup_intent(advisor._normalize_hinglish(user_query))
+        crop_protection_followup
         and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
     )
     followup_crop_guide = (
-        advisor._is_crop_guide_followup_intent(advisor._normalize_hinglish(user_query))
+        crop_guide_followup_detected
         and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
     )
 
