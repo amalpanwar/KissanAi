@@ -161,6 +161,7 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
     themes = {
         "rain": {
             "bg": "linear-gradient(135deg, #0f3554 0%, #1f5c85 55%, #4f8fb7 100%)",
+            "bg_size": "auto",
             "border": "#8dc7ec",
             "label": _weather_card_label(action),
             "overlay": "🌧️",
@@ -171,9 +172,11 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "stars_color": "rgba(255,255,255,0.0)",
             "pattern": "╲ ╲ ╲ ╲ ╲ ╲",
             "pattern_color": "rgba(220, 241, 255, 0.22)",
+            "card_animation": "none",
         },
         "cloud": {
             "bg": "linear-gradient(135deg, #435365 0%, #66798a 60%, #97aab8 100%)",
+            "bg_size": "auto",
             "border": "#d7e2ea",
             "label": _weather_card_label(action),
             "overlay": "☁️",
@@ -184,9 +187,11 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "stars_color": "rgba(255,255,255,0.0)",
             "pattern": "☁︎   ☁︎   ☁︎   ☁︎",
             "pattern_color": "rgba(255,255,255,0.18)",
+            "card_animation": "none",
         },
         "sun": {
             "bg": "linear-gradient(135deg, #7f4a00 0%, #c87a00 55%, #f6c54f 100%)",
+            "bg_size": "auto",
             "border": "#ffe7a8",
             "label": _weather_card_label(action),
             "overlay": "☀️",
@@ -197,9 +202,11 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "stars_color": "rgba(255,255,255,0.0)",
             "pattern": "✦   ✧   ✦   ✧",
             "pattern_color": "rgba(255,248,215,0.18)",
+            "card_animation": "none",
         },
         "night_rain": {
-            "bg": "radial-gradient(circle at 14% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px), radial-gradient(circle at 32% 28%, rgba(255,255,255,0.16) 0 1px, transparent 2px), radial-gradient(circle at 78% 16%, rgba(255,255,255,0.2) 0 1px, transparent 2px), linear-gradient(135deg, #07162d 0%, #0d2950 55%, #193d69 100%)",
+            "bg": "repeating-linear-gradient(-65deg, rgba(255,255,255,0.0) 0px, rgba(255,255,255,0.0) 12px, rgba(219,236,255,0.18) 12px, rgba(219,236,255,0.18) 14px, rgba(255,255,255,0.0) 14px, rgba(255,255,255,0.0) 24px), radial-gradient(circle at 86% 18%, rgba(255,255,255,0.96) 0 18px, transparent 19px), radial-gradient(circle at 89% 16%, #0b2345 0 16px, transparent 17px), radial-gradient(circle at 14% 28%, rgba(255,255,255,0.9) 0 1.2px, transparent 1.8px), radial-gradient(circle at 24% 18%, rgba(255,255,255,0.88) 0 1.1px, transparent 1.7px), radial-gradient(circle at 38% 34%, rgba(255,255,255,0.92) 0 1.2px, transparent 1.8px), radial-gradient(circle at 56% 22%, rgba(255,255,255,0.88) 0 1.1px, transparent 1.7px), linear-gradient(135deg, #07162d 0%, #0d2950 55%, #193d69 100%)",
+            "bg_size": "160px 160px, auto, auto, auto, auto, auto, auto, auto",
             "border": "#4e6f96",
             "label": _weather_card_label(action),
             "overlay": "☾",
@@ -210,9 +217,11 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "stars_color": "rgba(255,255,255,0.95)",
             "pattern": "╲ ╲ ╲ ╲ ╲ ╲ ╲",
             "pattern_color": "rgba(214, 232, 255, 0.28)",
+            "card_animation": "weatherNightRainBg 2.2s linear infinite",
         },
         "night_cloud": {
-            "bg": "radial-gradient(circle at 16% 22%, rgba(255,255,255,0.22) 0 1px, transparent 2px), radial-gradient(circle at 52% 18%, rgba(255,255,255,0.14) 0 1px, transparent 2px), radial-gradient(circle at 84% 24%, rgba(255,255,255,0.18) 0 1px, transparent 2px), linear-gradient(135deg, #08172f 0%, #173253 55%, #284a73 100%)",
+            "bg": "radial-gradient(circle at 86% 18%, rgba(255,255,255,0.96) 0 18px, transparent 19px), radial-gradient(circle at 89% 16%, #0b2345 0 16px, transparent 17px), radial-gradient(circle at 18% 24%, rgba(255,255,255,0.92) 0 1.2px, transparent 1.8px), radial-gradient(circle at 36% 18%, rgba(255,255,255,0.88) 0 1.1px, transparent 1.7px), radial-gradient(circle at 52% 32%, rgba(255,255,255,0.9) 0 1.2px, transparent 1.8px), radial-gradient(circle at 70% 22%, rgba(255,255,255,0.88) 0 1.1px, transparent 1.7px), radial-gradient(ellipse at 20% 48%, rgba(255,255,255,0.12) 0 26px, transparent 28px), radial-gradient(ellipse at 38% 58%, rgba(255,255,255,0.10) 0 34px, transparent 36px), radial-gradient(ellipse at 64% 44%, rgba(255,255,255,0.11) 0 30px, transparent 32px), linear-gradient(135deg, #08172f 0%, #173253 55%, #284a73 100%)",
+            "bg_size": "auto, auto, auto, auto, auto, auto, 220px 100px, 260px 120px, 240px 100px, auto",
             "border": "#6d87a8",
             "label": _weather_card_label(action),
             "overlay": "☾",
@@ -223,9 +232,11 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "stars_color": "rgba(255,255,255,0.92)",
             "pattern": "☁︎   ☁︎   ☁︎   ☁︎",
             "pattern_color": "rgba(255,255,255,0.16)",
+            "card_animation": "weatherNightCloudBg 18s ease-in-out infinite",
         },
         "night_sun": {
-            "bg": "radial-gradient(circle at 15% 20%, rgba(255,255,255,0.24) 0 1px, transparent 2px), radial-gradient(circle at 40% 14%, rgba(255,255,255,0.16) 0 1px, transparent 2px), radial-gradient(circle at 70% 24%, rgba(255,255,255,0.18) 0 1px, transparent 2px), radial-gradient(circle at 88% 12%, rgba(255,255,255,0.24) 0 1px, transparent 2px), linear-gradient(135deg, #041226 0%, #0b2345 50%, #163663 100%)",
+            "bg": "radial-gradient(circle at 86% 18%, rgba(255,255,255,0.97) 0 18px, transparent 19px), radial-gradient(circle at 89% 16%, #0b2345 0 16px, transparent 17px), radial-gradient(circle at 12% 34%, rgba(255,255,255,0.96) 0 1.3px, transparent 1.8px), radial-gradient(circle at 24% 18%, rgba(255,255,255,0.92) 0 1.2px, transparent 1.7px), radial-gradient(circle at 38% 42%, rgba(255,255,255,0.9) 0 1.2px, transparent 1.7px), radial-gradient(circle at 54% 22%, rgba(255,255,255,0.95) 0 1.3px, transparent 1.8px), radial-gradient(circle at 68% 36%, rgba(255,255,255,0.9) 0 1.2px, transparent 1.7px), radial-gradient(circle at 80% 28%, rgba(255,255,255,0.94) 0 1.3px, transparent 1.8px), linear-gradient(135deg, #041226 0%, #0b2345 50%, #163663 100%)",
+            "bg_size": "auto, auto, auto, auto, auto, auto, auto, auto, auto",
             "border": "#9cb6df",
             "label": _weather_card_label(action),
             "overlay": "☾",
@@ -236,38 +247,21 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "stars_color": "rgba(255,255,255,0.96)",
             "pattern": "✦   ·   ✦   ·   ✦",
             "pattern_color": "rgba(255,255,255,0.14)",
+            "card_animation": "weatherNightStarBg 10s ease-in-out infinite",
         },
     }
     theme_key = f"night_{theme}" if night and f"night_{theme}" in themes else theme
     cfg_theme = themes.get(theme_key, themes["cloud"])
     if theme_key.startswith("night_"):
-        overlay_html = dedent("""
-            <div style="position:absolute; right:20px; top:16px; width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,0.97); box-shadow:0 0 24px rgba(255,255,255,0.22); pointer-events:none;"></div>
-            <div style="position:absolute; right:8px; top:12px; width:50px; height:50px; border-radius:50%; background:#0b2345; pointer-events:none;"></div>
-            <div style="position:absolute; left:18px; top:12px; width:100%; pointer-events:none; color:rgba(255,255,255,0.96); font-size:0.95rem; letter-spacing:0.28rem; text-shadow:0 0 10px rgba(255,255,255,0.25); animation: weatherTwinkle 3.6s ease-in-out infinite;">✦ &nbsp; · &nbsp; ✦ &nbsp; · &nbsp; ✦</div>
-        """).strip()
+        overlay_html = ""
     else:
         overlay_html = dedent(f"""
             <div style="position: absolute; right: 14px; top: 10px; opacity: 0.14; font-size: 4.2rem; color: {cfg_theme['overlay_color']}; text-shadow: 0 0 18px rgba(255,255,255,0.18); pointer-events: none; animation: weatherOverlayDrift 18s linear infinite;">{html.escape(cfg_theme["overlay"])}</div>
             <div style="position: absolute; right: 64px; top: 16px; opacity: 0.18; font-size: 2.1rem; color: {cfg_theme['secondary_color']}; pointer-events: none; animation: weatherOverlayFloat 14s ease-in-out infinite;">{html.escape(cfg_theme["overlay_secondary"])}</div>
             <div style="position: absolute; left: 18px; top: 10px; opacity: 0.3; font-size: 0.95rem; letter-spacing: 0.25rem; color: {cfg_theme['stars_color']}; text-shadow: 0 0 14px rgba(255,255,255,0.22); pointer-events: none;">{html.escape(cfg_theme["stars"])}</div>
         """).strip()
-    if theme_key == "night_rain":
-        pattern_html = dedent("""
-            <div style="position:absolute; inset:0; background-image: repeating-linear-gradient(-68deg, rgba(255,255,255,0.0) 0px, rgba(255,255,255,0.0) 12px, rgba(230,242,255,0.34) 12px, rgba(230,242,255,0.34) 14px, rgba(255,255,255,0.0) 14px, rgba(255,255,255,0.0) 24px); opacity:0.52; pointer-events:none; animation: weatherRainSweep 1.5s linear infinite;"></div>
-        """).strip()
-    elif theme_key == "night_cloud":
-        pattern_html = dedent("""
-            <div style="position:absolute; left:-10px; right:-10px; top:28px; height:56px; pointer-events:none; animation: weatherCloudDrift 12s ease-in-out infinite;">
-                <div style="position:absolute; left:8%; width:120px; height:34px; border-radius:40px; background:rgba(255,255,255,0.11); filter:blur(1px);"></div>
-                <div style="position:absolute; left:28%; top:14px; width:150px; height:42px; border-radius:44px; background:rgba(255,255,255,0.10); filter:blur(1px);"></div>
-                <div style="position:absolute; left:58%; width:132px; height:36px; border-radius:40px; background:rgba(255,255,255,0.09); filter:blur(1px);"></div>
-            </div>
-        """).strip()
-    elif theme_key == "night_sun":
-        pattern_html = dedent("""
-            <div style="position:absolute; inset:0; pointer-events:none; animation: weatherTwinkle 4.2s ease-in-out infinite; background-image: radial-gradient(circle at 12% 32%, rgba(255,255,255,0.95) 0 1.2px, transparent 1.6px), radial-gradient(circle at 28% 18%, rgba(255,255,255,0.92) 0 1.2px, transparent 1.6px), radial-gradient(circle at 44% 38%, rgba(255,255,255,0.9) 0 1.2px, transparent 1.6px), radial-gradient(circle at 66% 22%, rgba(255,255,255,0.94) 0 1.2px, transparent 1.6px), radial-gradient(circle at 82% 34%, rgba(255,255,255,0.92) 0 1.2px, transparent 1.6px);"></div>
-        """).strip()
+    if theme_key.startswith("night_"):
+        pattern_html = ""
     else:
         pattern_animation = "weatherPatternRain 8s linear infinite" if "rain" in theme_key else "weatherPatternSlide 16s ease-in-out infinite"
         pattern_html = dedent(f"""
@@ -299,18 +293,22 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             0% {{ background-position: 0 -24px; }}
             100% {{ background-position: 28px 28px; }}
         }}
-        @keyframes weatherCloudDrift {{
-            0% {{ transform: translateX(-12px); }}
-            50% {{ transform: translateX(12px); }}
-            100% {{ transform: translateX(-12px); }}
+        @keyframes weatherNightStarBg {{
+            0%, 100% {{ background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }}
+            50% {{ background-position: 0 0, 0 0, 2px 1px, -2px 2px, 1px -1px, -1px 1px, 2px 2px, -2px -1px, 0 0; }}
         }}
-        @keyframes weatherTwinkle {{
-            0%, 100% {{ opacity: 0.45; }}
-            50% {{ opacity: 0.95; }}
+        @keyframes weatherNightCloudBg {{
+            0%, 100% {{ background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0px 0px, 0px 0px, 0px 0px, 0 0; }}
+            50% {{ background-position: 0 0, 0 0, 1px 0px, -1px 1px, 0px -1px, 1px 0px, 12px 0px, -10px 0px, 8px 0px, 0 0; }}
+        }}
+        @keyframes weatherNightRainBg {{
+            0% {{ background-position: 0 -28px, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }}
+            100% {{ background-position: 24px 28px, 0 0, 0 0, 2px 1px, -1px 1px, 1px -1px, -1px 1px, 0 0; }}
         }}
         </style>
         <div style="
             background: {cfg_theme['bg']};
+            background-size: {cfg_theme['bg_size']};
             border: 1px solid {cfg_theme['border']};
             border-radius: 18px;
             padding: 16px 18px;
@@ -319,6 +317,7 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             margin: 4px 0 6px 0;
             position: relative;
             overflow: hidden;
+            animation: {cfg_theme['card_animation']};
         ">
             {overlay_html}
             {pattern_html}
