@@ -17,7 +17,7 @@ from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
 from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_rain_day_forecast_hindi, get_tomorrow_rain_forecast_hindi, get_weekly_weather_forecast_hindi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
-from app.crop_guide import build_crop_production_guide
+from app.crop_guide import build_crop_production_followup, build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
 import pandas as pd
 
@@ -464,6 +464,17 @@ class RAGAdvisor:
             )
             result["topic"] = "pesticide"
             return result
+        guide_followup_answer, guide_followup_sources = build_crop_production_followup(
+            normalized_question,
+            crop_hint=self._extract_preferred_crop_from_context(context_part),
+        )
+        if guide_followup_answer:
+            return {
+                "answer": guide_followup_answer,
+                "references": guide_followup_sources,
+                "retrieved": [],
+                "topic": "crop_guide_followup",
+            }
         if self._looks_like_location_only(farmer_question):
             return {
                 "answer": "कृपया बताएं कि आप मौसम पूछ रहे हैं या भाव/कीमत?",
@@ -967,6 +978,14 @@ class RAGAdvisor:
             "insecticide",
             "fungicide",
             "herbicide",
+            "disease",
+            "rog",
+            "bimari",
+            "lakshan",
+            "symptom",
+            "रोग",
+            "बीमारी",
+            "लक्षण",
             "dawai",
             "dawa",
             "dose",
@@ -1003,6 +1022,44 @@ class RAGAdvisor:
             "रोग",
         ]
         return any(k in t for k in keys) or self._looks_like_pesticide_name_query(t)
+
+    def _is_crop_protection_followup_intent(self, text: str) -> bool:
+        t = text or ""
+        return bool(
+            self._is_pesticide_intent(t)
+            or self._is_generic_issue_query(t)
+            or self._is_disease_only_query(t)
+            or self._is_fungal_query(t)
+            or self._is_pest_only_query(t)
+        )
+
+    def _is_crop_guide_followup_intent(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        section_terms = [
+            "किस्म", "kism", "kisam", "variety", "varieties", "बीज दर", "seed rate",
+            "खाद", "khad", "khaad", "उर्वरक", "urvarak", "fertilizer", "fym", "compost", "जैव उर्वरक",
+            "सिंचाई", "sinchai", "sichai", "sinchaai", "irrigation", "water management", "पानी",
+            "कटाई", "katai", "katayi", "katayee", "harvest", "harvesting", "maturity",
+            "खेत की तैयारी", "जुताई", "field preparation", "land preparation",
+            "बुवाई", "रोपाई", "sowing", "planting", "spacing", "seed treatment",
+        ]
+        if any(term.lower() in t for term in section_terms):
+            return True
+        try:
+            import difflib
+
+            tokens = re.findall(r"[a-z\u0900-\u097f]+", t)
+            for term in section_terms:
+                for token in re.findall(r"[a-z\u0900-\u097f]+", term.lower()):
+                    if len(token) < 4:
+                        continue
+                    if difflib.get_close_matches(token, tokens, n=1, cutoff=0.82):
+                        return True
+        except Exception:
+            pass
+        return False
 
     def _has_specific_issue_term(self, text: str) -> bool:
         t = (text or "").lower()
@@ -2427,7 +2484,7 @@ class RAGAdvisor:
     ) -> PesticideRequest | None:
         raw = (farmer_question or "").strip()
         normalized = (normalized_question or "").strip()
-        if not (self._is_pesticide_intent(raw) or self._is_pesticide_intent(normalized)):
+        if not (self._is_crop_protection_followup_intent(raw) or self._is_crop_protection_followup_intent(normalized)):
             return None
         direct_crop = self._extract_crop_from_query(raw) or self._extract_crop_from_query(normalized)
         context_crop = self._extract_preferred_crop_from_context(context_part)
@@ -2550,8 +2607,21 @@ class RAGAdvisor:
             r"\bkeede\b": "कीट",
             r"\bdawai\b": "दवा",
             r"\bdawa\b": "दवा",
+            r"\bjankari\b": "जानकारी",
+            r"\bjaankari\b": "जानकारी",
             r"\bkaise\b": "कैसे",
             r"\bkese\b": "कैसे",
+            r"\bkatai\b": "कटाई",
+            r"\bkatayi\b": "कटाई",
+            r"\bkatayee\b": "कटाई",
+            r"\bsinchai\b": "सिंचाई",
+            r"\bsichai\b": "सिंचाई",
+            r"\bsinchaai\b": "सिंचाई",
+            r"\bkhad\b": "खाद",
+            r"\bkhaad\b": "खाद",
+            r"\burvarak\b": "उर्वरक",
+            r"\bkism\b": "किस्म",
+            r"\bkisam\b": "किस्म",
             r"\bkonsi\b": "कौन सी",
             r"\bkaunsi\b": "कौन सी",
             r"\bfasal\b": "फसल",
@@ -2581,6 +2651,10 @@ class RAGAdvisor:
             r"\bbaarish\b": "बारिश",
             r"\baaj\b": "आज",
             r"\bjankari\b": "जानकारी",
+            r"\brog\b": "रोग",
+            r"\bbimari\b": "बीमारी",
+            r"\blakshan\b": "लक्षण",
+            r"\bsymptom\b": "लक्षण",
         }
         out = text
         for pattern, replacement in mapping.items():
@@ -2609,8 +2683,12 @@ class RAGAdvisor:
 
     def _is_weather_intent(self, text: str) -> bool:
         t = text.strip().lower()
+        if re.search(r"\bweath[a-z]*\b", t):
+            return True
         weather_words = [
             "weather",
+            "weathe",
+            "wether",
             "mausam",
             "maussam",
             "mausm",
@@ -2778,11 +2856,13 @@ class RAGAdvisor:
         if not question:
             return None
         q = question.strip()
+        q_lower = q.lower()
+        has_weather_word = bool(re.search(r"\bweath[a-z]*\b", q_lower))
         # Fast path: strip common weather words and stopwords, keep remaining tokens as location.
         if (
             "mausam" in q.lower()
             or "मौसम" in q
-            or "weather" in q.lower()
+            or has_weather_word
             or "बारिश" in q
             or "बारिस" in q
             or "barish" in q.lower()
@@ -2818,6 +2898,8 @@ class RAGAdvisor:
                 "mausm",
                 "मौसम",
                 "weather",
+                "weathe",
+                "wether",
                 "baarish",
                 "barish",
                 "rain",
@@ -2872,11 +2954,10 @@ class RAGAdvisor:
             kept = [t for t in tokens if t.strip(" ?!.,").lower() not in drop]
             if kept:
                 return " ".join(kept)
-        q_lower = question.lower()
         if (
             "mausam" in q_lower
             or "मौसम" in question
-            or "weather" in q_lower
+            or has_weather_word
             or "बारिश" in question
             or "बारिस" in question
             or "barish" in q_lower
@@ -2917,6 +2998,8 @@ class RAGAdvisor:
                 "rahegi",
                 "rahenge",
                 "weather",
+                "weathe",
+                "wether",
                 "barish",
                 "baarish",
                 "rain",
@@ -2934,14 +3017,18 @@ class RAGAdvisor:
         # Try explicit location phrases first
         patterns = [
             r"(?:weather in|mausam in|maussam in|mosam in)\s+([a-zA-Z\\s]+)",
+            r"(?:weathe in|wether in)\s+([a-zA-Z\\s]+)",
             r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+(?:baarish|barish|rain)",
             r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+बारिश",
             r"([\\u0900-\\u097F\\s]+?)\\s+में\\s+बारिश",
             r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+weather",
+            r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+(?:weathe|wether)",
             r"([a-zA-Z\\s]+?)\\s+(?:ka|ki|ke)\\s+(?:mausam|maussam|mosam|mausm|मौसम)",
             r"(?:aaj|aj)?\\s*(?:ka\\s+)?weather\\s+([a-zA-Z\\s]+?)\\s+(?:me|mein|में)",
+            r"(?:aaj|aj)?\\s*(?:ka\\s+)?(?:weathe|wether)\\s+([a-zA-Z\\s]+?)\\s+(?:me|mein|में)",
             r"(?:aaj|aj)?\\s*(?:ka\\s+)?(?:mausam|maussam|mosam|mausm|मौसम)\\s+([a-zA-Z\\s]+?)\\s+(?:me|mein|में)",
             r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+(?:ka\\s+)?weather",
+            r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+(?:ka\\s+)?(?:weathe|wether)",
             r"([a-zA-Z\\s]+?)\\s+(?:me|mein|में)\\s+(?:ka\\s+)?(?:mausam|maussam|mosam|mausm|मौसम)",
             r"([\\u0900-\\u097F\\s]+?)\\s+का\\s+मौसम",
             r"([\\u0900-\\u097F\\s]+?)\\s+की\\s+मौसम",
@@ -3009,21 +3096,21 @@ class RAGAdvisor:
         }
         for idx, tok in enumerate(tokens):
             t = tok.strip(" ?!.," ).lower()
-            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather"} and idx + 1 < len(tokens):
+            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather", "weathe", "wether"} and idx + 1 < len(tokens):
                 cand = tokens[idx + 1].strip(" ?!.,")
                 if cand and cand.lower() not in stop:
                     return cand
         # Fallback: token before 'mausam/मौसम'
         for idx, tok in enumerate(tokens):
             t = tok.strip(" ?!.," ).lower()
-            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather"} and idx - 1 >= 0:
+            if t in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather", "weathe", "wether"} and idx - 1 >= 0:
                 cand = tokens[idx - 1].strip(" ?!.,")
                 if cand and cand.lower() not in stop:
                     return cand
             # Handle "X ka mausam" -> pick token before ka/ki/ke
             if t in {"ka", "ki", "ke"} and idx + 1 < len(tokens):
                 nxt = tokens[idx + 1].strip(" ?!.,").lower()
-                if nxt in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather"} and idx - 1 >= 0:
+                if nxt in {"mausam", "maussam", "mosam", "mausm", "मौसम", "weather", "weathe", "wether"} and idx - 1 >= 0:
                     cand = tokens[idx - 1].strip(" ?!.,")
                     if cand and cand.lower() not in stop:
                         return cand

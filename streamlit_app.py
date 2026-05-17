@@ -10,10 +10,11 @@ import uuid
 import hmac
 import hashlib
 import base64
-from datetime import date
+from datetime import date, datetime
 from time import time
 from pathlib import Path
 from email.message import EmailMessage
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -142,6 +143,11 @@ def _weather_card_label(action: str | None) -> str:
     return "Weather Update"
 
 
+def _is_night_in_india() -> bool:
+    hour = datetime.now(ZoneInfo("Asia/Kolkata")).hour
+    return hour >= 18 or hour < 6
+
+
 def render_weather_chat_card(text: str, action: str | None = None) -> None:
     lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
     if not lines:
@@ -150,35 +156,71 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
     title = html.escape(lines[0])
     body = "<br>".join(html.escape(line) for line in lines[1:]) if len(lines) > 1 else ""
     theme = _weather_theme_from_text(text)
+    night = _is_night_in_india()
     themes = {
         "rain": {
             "bg": "linear-gradient(135deg, #0f3554 0%, #1f5c85 55%, #4f8fb7 100%)",
             "border": "#8dc7ec",
             "label": _weather_card_label(action),
-            "overlay": "🌧️  💧  ☔  🌧️  💧",
+            "overlay": "🌧️",
+            "overlay_secondary": "💧",
+            "stars": "",
         },
         "cloud": {
             "bg": "linear-gradient(135deg, #435365 0%, #66798a 60%, #97aab8 100%)",
             "border": "#d7e2ea",
             "label": _weather_card_label(action),
-            "overlay": "☁️  ☁️  🌥️  ☁️  ☁️",
+            "overlay": "☁️",
+            "overlay_secondary": "🌥️",
+            "stars": "",
         },
         "sun": {
             "bg": "linear-gradient(135deg, #7f4a00 0%, #c87a00 55%, #f6c54f 100%)",
             "border": "#ffe7a8",
             "label": _weather_card_label(action),
-            "overlay": "☀️  ☀️  🌤️  ☀️  ☀️",
+            "overlay": "☀️",
+            "overlay_secondary": "🌤️",
+            "stars": "",
+        },
+        "night_rain": {
+            "bg": "radial-gradient(circle at 14% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px), radial-gradient(circle at 32% 28%, rgba(255,255,255,0.16) 0 1px, transparent 2px), radial-gradient(circle at 78% 16%, rgba(255,255,255,0.2) 0 1px, transparent 2px), linear-gradient(135deg, #07162d 0%, #0d2950 55%, #193d69 100%)",
+            "border": "#4e6f96",
+            "label": _weather_card_label(action),
+            "overlay": "🌧️",
+            "overlay_secondary": "🌙",
+            "stars": "✦ ✦ ✦",
+        },
+        "night_cloud": {
+            "bg": "radial-gradient(circle at 16% 22%, rgba(255,255,255,0.22) 0 1px, transparent 2px), radial-gradient(circle at 52% 18%, rgba(255,255,255,0.14) 0 1px, transparent 2px), radial-gradient(circle at 84% 24%, rgba(255,255,255,0.18) 0 1px, transparent 2px), linear-gradient(135deg, #08172f 0%, #173253 55%, #284a73 100%)",
+            "border": "#6d87a8",
+            "label": _weather_card_label(action),
+            "overlay": "☁️",
+            "overlay_secondary": "🌙",
+            "stars": "✦ ✦",
+        },
+        "night_sun": {
+            "bg": "radial-gradient(circle at 15% 20%, rgba(255,255,255,0.24) 0 1px, transparent 2px), radial-gradient(circle at 40% 14%, rgba(255,255,255,0.16) 0 1px, transparent 2px), radial-gradient(circle at 70% 24%, rgba(255,255,255,0.18) 0 1px, transparent 2px), radial-gradient(circle at 88% 12%, rgba(255,255,255,0.24) 0 1px, transparent 2px), linear-gradient(135deg, #041226 0%, #0b2345 50%, #163663 100%)",
+            "border": "#9cb6df",
+            "label": _weather_card_label(action),
+            "overlay": "🌙",
+            "overlay_secondary": "✨",
+            "stars": "✦ ✦ ✦ ✦",
         },
     }
-    cfg_theme = themes.get(theme, themes["cloud"])
-    overlay_rows = "<br>".join([html.escape(cfg_theme["overlay"])] * 4)
+    theme_key = f"night_{theme}" if night and f"night_{theme}" in themes else theme
+    cfg_theme = themes.get(theme_key, themes["cloud"])
     st.markdown(
         f"""
         <style>
         @keyframes weatherOverlayDrift {{
-            0% {{ transform: translate3d(-6%, 0, 0) rotate(-8deg); }}
-            50% {{ transform: translate3d(4%, -4%, 0) rotate(-6deg); }}
-            100% {{ transform: translate3d(-6%, 0, 0) rotate(-8deg); }}
+            0% {{ transform: translate3d(0, 0, 0) rotate(-6deg); }}
+            50% {{ transform: translate3d(6px, -8px, 0) rotate(-4deg); }}
+            100% {{ transform: translate3d(0, 0, 0) rotate(-6deg); }}
+        }}
+        @keyframes weatherOverlayFloat {{
+            0% {{ transform: translate3d(0, 0, 0); }}
+            50% {{ transform: translate3d(-4px, 6px, 0); }}
+            100% {{ transform: translate3d(0, 0, 0); }}
         }}
         </style>
         <div style="
@@ -194,14 +236,31 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
         ">
             <div style="
                 position: absolute;
-                inset: -10% -5% auto -5%;
-                opacity: 0.18;
-                font-size: 2.8rem;
-                line-height: 1.8;
-                white-space: nowrap;
+                right: 14px;
+                top: 10px;
+                opacity: 0.14;
+                font-size: 4.2rem;
                 pointer-events: none;
                 animation: weatherOverlayDrift 18s linear infinite;
-            ">{overlay_rows}</div>
+            ">{html.escape(cfg_theme["overlay"])}</div>
+            <div style="
+                position: absolute;
+                right: 64px;
+                top: 16px;
+                opacity: 0.18;
+                font-size: 2.1rem;
+                pointer-events: none;
+                animation: weatherOverlayFloat 14s ease-in-out infinite;
+            ">{html.escape(cfg_theme["overlay_secondary"])}</div>
+            <div style="
+                position: absolute;
+                left: 18px;
+                top: 10px;
+                opacity: 0.22;
+                font-size: 0.95rem;
+                letter-spacing: 0.25rem;
+                pointer-events: none;
+            ">{html.escape(cfg_theme["stars"])}</div>
             <div style="position: relative; z-index: 1;">
             <div style="font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.88; margin-bottom: 8px;">
                 {cfg_theme['label']}
@@ -2382,8 +2441,12 @@ if user_query:
         and st.session_state.get("last_structured_topic") in {"crop_profitability", "crop_profitability_followup"}
     )
     followup_crop_care = (
-        advisor._is_pesticide_intent(advisor._normalize_hinglish(user_query))
-        and st.session_state.get("last_structured_topic") in {"crop_guide", "pesticide"}
+        advisor._is_crop_protection_followup_intent(advisor._normalize_hinglish(user_query))
+        and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+    )
+    followup_crop_guide = (
+        advisor._is_crop_guide_followup_intent(advisor._normalize_hinglish(user_query))
+        and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
     )
 
     # Resolve place->district for crop intent (so profit uses correct district)
@@ -2400,9 +2463,9 @@ if user_query:
     elif followup_profit and last_ctx.get("district"):
         resolved_district = last_ctx["district"]
 
-    season_for_query = last_ctx.get("season", season) if (followup_profit or followup_crop_care) else season
+    season_for_query = last_ctx.get("season", season) if (followup_profit or followup_crop_care or followup_crop_guide) else season
     preferred_crop_for_query = (
-        last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care) else preferred_crop
+        last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else preferred_crop
     )
 
     question_for_advisor = user_query.strip()
@@ -2685,7 +2748,7 @@ if user_query:
         if topic == "weather" and ("मौसम के लिए स्थान" in final_answer or "कृपया स्थान लिखें" in final_answer):
             st.session_state["pending_weather_location"] = {"original_query": user_query}
         query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
-        if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide"}:
+        if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide", "crop_guide_followup"}:
             st.session_state["last_structured_topic"] = topic
             st.session_state["last_structured_context"] = {
                 "district": resolved_district,

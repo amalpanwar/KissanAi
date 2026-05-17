@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from difflib import get_close_matches
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -321,6 +322,16 @@ TERM_REPLACEMENTS = {
     "head": "फूल का सिरा",
     "heads": "फूल के सिरों",
     "bracts": "पीछे की पत्तियां",
+}
+
+FOLLOWUP_SECTION_KEYWORDS = {
+    "variety": ["किस्म", "kism", "kisam", "variety", "varieties", "seed rate", "बीज दर"],
+    "fertilizer": ["खाद", "khad", "khaad", "उर्वरक", "urvarak", "fertilizer", "fym", "compost", "गोबर", "micronutrient", "जैव उर्वरक", "top dressing"],
+    "irrigation": ["सिंचाई", "sinchai", "sichai", "sinchaai", "पानी", "irrigation", "water management", "water"],
+    "crop_protection": ["रोग", "कीट", "disease", "pest", "fungus", "fungal", "फफूंद", "crop protection", "plant protection", "लक्षण"],
+    "harvest": ["कटाई", "katai", "katayi", "katayee", "harvest", "harvesting", "maturity", "pre-harvest"],
+    "field_preparation": ["खेत की तैयारी", "जुताई", "field preparation", "land preparation", "मेड़", "नालियां"],
+    "sowing": ["बुवाई", "रोपाई", "sowing", "planting", "transplanting", "spacing", "seed treatment"],
 }
 
 MONTH_REPLACEMENTS = {
@@ -992,6 +1003,39 @@ def _validate_and_repair_guide(crop: str, entries: list[dict[str, str]]) -> tupl
     return phase_points, issues
 
 
+def _build_guide_points_for_crop(crop: str) -> tuple[dict[str, list[str]] | None, list[dict[str, str]], list[str]]:
+    section_text = _extract_section_text(crop)
+    if not section_text:
+        return None, [], []
+    blocks = _extract_blocks(section_text)
+    entries: list[dict[str, str]] = []
+    for heading, body in blocks:
+        if _should_stop_at_heading(crop, heading):
+            break
+        if _should_skip_heading(crop, heading):
+            continue
+        phase = _assign_phase(heading)
+        if not phase:
+            continue
+        point = _summarize_block(crop, heading, body)
+        if "IMPROVING SEED SET" in _heading_key(heading):
+            point = _safe_render_block(crop, heading, body, phase)
+        if point:
+            entries.append(
+                {
+                    "phase": phase,
+                    "heading": heading,
+                    "body": body,
+                    "point": point,
+                }
+            )
+    phase_points, issues = _validate_and_repair_guide(crop, entries)
+    _append_review_queue(crop, issues)
+    if not any(phase_points.values()):
+        return None, [], []
+    return phase_points, entries, [str(GUIDE_PDF)]
+
+
 def _append_review_queue(crop: str, issues: list[dict[str, Any]]) -> None:
     if not issues:
         return
@@ -1308,34 +1352,8 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
     crop = _resolve_crop_name(question)
     if not crop:
         return None, []
-    section_text = _extract_section_text(crop)
-    if not section_text:
-        return None, []
-    blocks = _extract_blocks(section_text)
-    entries: list[dict[str, str]] = []
-    for heading, body in blocks:
-        if _should_stop_at_heading(crop, heading):
-            break
-        if _should_skip_heading(crop, heading):
-            continue
-        phase = _assign_phase(heading)
-        if not phase:
-            continue
-        point = _summarize_block(crop, heading, body)
-        if "IMPROVING SEED SET" in _heading_key(heading):
-            point = _safe_render_block(crop, heading, body, phase)
-        if point:
-            entries.append(
-                {
-                    "phase": phase,
-                    "heading": heading,
-                    "body": body,
-                    "point": point,
-                }
-            )
-    phase_points, issues = _validate_and_repair_guide(crop, entries)
-    _append_review_queue(crop, issues)
-    if not any(phase_points.values()):
+    phase_points, _entries, sources = _build_guide_points_for_crop(crop)
+    if not phase_points:
         return None, []
     crop_label = _crop_display_label(crop)
     lines = [f"{crop_label} की खेती: स्टेप-बाय-स्टेप गाइड", ""]
@@ -1348,4 +1366,123 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
             lines.append(f"- {point}")
         lines.append("")
     lines.append("अगर आप चाहें, तो मैं इसी फसल के लिए किस्म, खाद, सिंचाई, रोग/कीट या कटाई की और ज्यादा विस्तृत जानकारी भी अलग से बता सकता हूँ।")
-    return "\n".join(lines).strip(), [str(GUIDE_PDF)]
+    return "\n".join(lines).strip(), sources
+
+
+def _detect_followup_section(question: str) -> str | None:
+    q = str(question or "").lower()
+    q_norm = _norm(q)
+    q_tokens = re.findall(r"[a-z\u0900-\u097f]+", q)
+    for section, keywords in FOLLOWUP_SECTION_KEYWORDS.items():
+        for keyword in keywords:
+            keyword_text = keyword.lower()
+            keyword_norm = _norm(keyword_text)
+            if keyword_text in q or (keyword_norm and keyword_norm in q_norm):
+                return section
+            keyword_tokens = re.findall(r"[a-z\u0900-\u097f]+", keyword_text)
+            for token in keyword_tokens:
+                if token in q_tokens:
+                    return section
+                if len(token) >= 4 and get_close_matches(token, q_tokens, n=1, cutoff=0.82):
+                    return section
+        if any(keyword.lower() in q for keyword in keywords):
+            return section
+    return None
+
+
+def _section_matches_followup(section: str, entry: dict[str, str]) -> bool:
+    heading_key = _heading_key(entry.get("heading", ""))
+    label = _heading_label_hi(entry.get("heading", ""))
+    point = str(entry.get("point", ""))
+    blob = f"{heading_key} {label} {point}".lower()
+    heading_blob = f"{heading_key} {label}".lower()
+    point_blob = point.lower()
+    if section == "variety":
+        return any(token in heading_blob for token in ["season and variety", "season and varieties", "district/season varieties", "बीज दर", "seed rate", "variety"])
+    if section == "fertilizer":
+        return any(token in heading_blob for token in ["application of fertilizers", "application of micronutrients", "top dressing", "biofertilizer", "compost", "fym", "sulphur", "boric acid"]) or any(token in point_blob for token in ["ऊपरी खाद", "जैव उर्वरक", "गोबर की खाद", "कम्पोस्ट"])
+    if section == "irrigation":
+        return any(token in heading_blob for token in ["सिंचाई", "water management", "irrigation"])
+    if section == "crop_protection":
+        return any(token in heading_blob for token in ["फसल सुरक्षा", "crop protection", "plant protection"]) or any(token in point_blob for token in ["रोग", "कीट", "pest", "disease", "fungus", "fungal", "फफूंद"])
+    if section == "harvest":
+        return any(token in heading_blob for token in ["कटाई", "harvest", "pre-harvest", "maturity"])
+    if section == "field_preparation":
+        return any(token in heading_blob for token in ["खेत की तैयारी", "field preparation", "farm land preparation", "land preparation"]) or any(token in point_blob for token in ["मेड़", "नालियां"])
+    if section == "sowing":
+        return any(token in heading_blob for token in ["बुवाई", "रोपाई", "sowing", "planting", "transplanting", "seed treatment", "spacing", "preparation of setts", "forming ridges", "forming beds"])
+    return False
+
+
+def build_crop_production_followup(question: str, crop_hint: str | None = None) -> tuple[str | None, list[str]]:
+    crop = crop_hint
+    if not crop:
+        try:
+            crop = _resolve_crop_name(question)
+        except ImportError:
+            return None, []
+    if not crop:
+        return None, []
+    section = _detect_followup_section(question)
+    if not section:
+        return None, []
+    phase_points, entries, sources = _build_guide_points_for_crop(crop)
+    if not phase_points:
+        return None, []
+
+    matched_points: list[str] = []
+    for entry in entries:
+        if _section_matches_followup(section, entry):
+            point = _final_phrase_cleanup(str(entry.get("point", "")).strip())
+            if point and point not in matched_points:
+                matched_points.append(point)
+
+    if not matched_points:
+        fallback_phase = {
+            "variety": "",
+            "fertilizer": "mid_growth",
+            "irrigation": "",
+            "crop_protection": "mid_growth",
+            "harvest": "harvest",
+            "field_preparation": "before_sowing",
+            "sowing": "sowing",
+        }.get(section, "")
+        if fallback_phase:
+            matched_points = [p for p in (phase_points.get(fallback_phase) or []) if p]
+
+    if not matched_points:
+        section_hi = {
+            "variety": "किस्म और बीज दर",
+            "fertilizer": "खाद और उर्वरक",
+            "irrigation": "सिंचाई",
+            "crop_protection": "रोग/कीट",
+            "harvest": "कटाई",
+            "field_preparation": "खेत की तैयारी",
+            "sowing": "बुवाई/रोपाई",
+        }.get(section, "विस्तृत जानकारी")
+        crop_label = _crop_display_label(crop)
+        note = {
+            "irrigation": "इस guide के उपलब्ध हिस्से में सिंचाई का अलग और साफ section नहीं मिला।",
+            "variety": "इस guide के उपलब्ध हिस्से में किस्म का अलग section साफ नहीं मिला।",
+            "fertilizer": "इस guide के उपलब्ध हिस्से में खाद/उर्वरक का साफ section नहीं मिला।",
+        }.get(section, "इस guide के उपलब्ध हिस्से में इस विषय की साफ पंक्ति नहीं मिली।")
+        return f"{crop_label} के लिए {section_hi} की जानकारी:\n\n- {note}", sources
+
+    crop_label = _crop_display_label(crop)
+    section_hi = {
+        "variety": "किस्म और बीज दर",
+        "fertilizer": "खाद और उर्वरक",
+        "irrigation": "सिंचाई",
+        "crop_protection": "रोग/कीट",
+        "harvest": "कटाई",
+        "field_preparation": "खेत की तैयारी",
+        "sowing": "बुवाई/रोपाई",
+    }.get(section, "विस्तृत जानकारी")
+
+    lines = [f"{crop_label} के लिए {section_hi} की जानकारी:", ""]
+    for point in matched_points[:5]:
+        lines.append(f"- {point}")
+    if section == "crop_protection":
+        lines.append("")
+        lines.append("अगर आप चाहें, तो exact रोग/कीट या लक्षण लिखें; फिर मैं दवा, dose और PHI और ज्यादा साफ बता दूँगा।")
+    return "\n".join(lines).strip(), sources
