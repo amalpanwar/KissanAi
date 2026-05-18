@@ -1130,6 +1130,30 @@ def _resolve_query_location(query: str) -> tuple[str | None, str | None, str | N
     return place, district, state
 
 
+def _coerce_selectbox_state(
+    key: str,
+    options: list[str],
+    preferred: str | None = None,
+    *,
+    fallback: str | None = None,
+) -> int:
+    if not options:
+        return 0
+    current = st.session_state.get(key)
+    if current not in options:
+        target = None
+        for candidate in (preferred, fallback):
+            cand = str(candidate or "").strip()
+            if cand and cand in options:
+                target = cand
+                break
+        if target is None:
+            target = options[0]
+        st.session_state[key] = target
+        current = target
+    return options.index(current)
+
+
 @st.cache_data(show_spinner=False)
 def load_location_lookup(mtime_ns: int) -> pd.DataFrame:
     _ = mtime_ns
@@ -2339,10 +2363,12 @@ with st.sidebar:
     )
     if not state_options:
         state_options = ["Uttar Pradesh"]
-    if session_state_default in state_options:
-        state_default = state_options.index(session_state_default)
-    else:
-        state_default = state_options.index("Uttar Pradesh") if "Uttar Pradesh" in state_options else 0
+    state_default = _coerce_selectbox_state(
+        "fc_state",
+        state_options,
+        session_state_default,
+        fallback="Uttar Pradesh",
+    )
     selected_state = st.selectbox("State", state_options, index=state_default, key="fc_state")
     state_override = st.text_input("State (type override, optional)", value="", key="fc_state_override")
 
@@ -2358,10 +2384,12 @@ with st.sidebar:
         district_options = []
     if not district_options:
         district_options = ["Meerut"]
-    if session_district_default in district_options:
-        district_default = district_options.index(session_district_default)
-    else:
-        district_default = district_options.index("Meerut") if "Meerut" in district_options else 0
+    district_default = _coerce_selectbox_state(
+        "fc_district",
+        district_options,
+        session_district_default,
+        fallback="Meerut",
+    )
     selected_district = st.selectbox("District", district_options, index=district_default, key="fc_district")
     district_override = st.text_input(
         "District (type override, optional)",
@@ -2382,7 +2410,12 @@ with st.sidebar:
         commodity_options = []
     if not commodity_options:
         commodity_options = [preferred_crop or "Wheat"]
-    commodity_default = commodity_options.index("Wheat") if "Wheat" in commodity_options else 0
+    commodity_default = _coerce_selectbox_state(
+        "fc_commodity_dropdown",
+        commodity_options,
+        preferred_crop or "Wheat",
+        fallback="Wheat",
+    )
     selected_commodity_from_dropdown = st.selectbox(
         "Commodity (from data)",
         commodity_options,
