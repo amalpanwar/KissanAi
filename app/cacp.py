@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 from urllib.request import urlopen
 from urllib.parse import quote
+from app.pdf_extract import read_pdf_pages, read_pdf_text
 
 
 BASE_URL = "https://cacp.da.gov.in/"
@@ -30,15 +31,6 @@ REPORT_CROP_NAMES = {
     "copra": ["Copra"],
 }
 QUESTIONNAIRE_TOKENS = ("viewquestionare", "questionnaire", "questionare", "annexure")
-
-
-def _get_pdf_reader():
-    try:
-        from pypdf import PdfReader
-    except ImportError as exc:
-        raise ImportError("pypdf is required for CACP PDF parsing.") from exc
-    return PdfReader
-
 
 def _current_and_previous_labels(report_kind: str, year: int) -> list[str]:
     if report_kind == "copra":
@@ -161,15 +153,10 @@ def _candidate_report_links(paths: list[str], report_kind: str) -> list[str]:
 
 def _pdf_has_report_signature(pdf_path: Path, report_kind: str, language: str) -> bool:
     try:
-        reader = _get_pdf_reader()(str(pdf_path))
+        pages = read_pdf_pages(pdf_path)
     except Exception:
         return False
-    text = ""
-    for i in range(min(5, len(reader.pages))):
-        try:
-            text += " " + (reader.pages[i].extract_text() or "")
-        except Exception:
-            continue
+    text = " ".join(pages[:5])
     low = text.lower()
     if any(tok in low for tok in QUESTIONNAIRE_TOKENS):
         return False
@@ -189,16 +176,10 @@ def _pdf_has_report_signature(pdf_path: Path, report_kind: str, language: str) -
 
 def _pdf_preview_text(pdf_path: Path, max_pages: int = 8) -> str:
     try:
-        reader = _get_pdf_reader()(str(pdf_path))
+        pages = read_pdf_pages(pdf_path)
     except Exception:
         return ""
-    parts: list[str] = []
-    for i in range(min(max_pages, len(reader.pages))):
-        try:
-            parts.append(reader.pages[i].extract_text() or "")
-        except Exception:
-            continue
-    return "\n".join(parts)
+    return "\n".join(pages[:max_pages])
 
 
 def _download_validated_report(urls: list[str], dest: Path, report_kind: str, language: str) -> tuple[str | None, Path | None]:
@@ -320,16 +301,10 @@ def get_cacp_cost_table(report_kind: str, cache_path: Path | str | None = None) 
         return None
     pdf_path = Path(str(eng_path))
     try:
-        reader = _get_pdf_reader()(str(pdf_path))
+        pages = read_pdf_pages(pdf_path)
     except Exception:
         return None
-    text_parts: list[str] = []
-    for i in range(min(len(reader.pages), 260)):
-        try:
-            text_parts.append(reader.pages[i].extract_text() or "")
-        except Exception:
-            continue
-    text = "\n".join(text_parts)
+    text = "\n".join(pages[:260])
     if not text.strip():
         return None
     lines = _clean_text_lines(text)
@@ -410,16 +385,11 @@ def get_cacp_cost_for_crop(crop_name: str) -> dict | None:
 
 def _extract_frp_from_pdf(pdf_path: Path) -> dict | None:
     try:
-        reader = _get_pdf_reader()(str(pdf_path))
+        pages = read_pdf_pages(pdf_path)
     except Exception:
         return None
     # Scan first 30 pages for FRP sentence
-    text = ""
-    for i in range(min(30, len(reader.pages))):
-        try:
-            text += reader.pages[i].extract_text() or ""
-        except Exception:
-            continue
+    text = "".join(pages[:30])
     if not text:
         return None
     # Example: "FRP ... 2025-26 ... 355 per quintal"
@@ -459,17 +429,11 @@ def get_sugarcane_cost_snapshot(cache_path: Path | str = "data/processed/cacp_su
     if not pdf_path.exists():
         return None
     try:
-        reader = _get_pdf_reader()(str(pdf_path))
+        pages = read_pdf_pages(pdf_path)
     except Exception:
         return None
 
-    text_parts = []
-    for i in range(min(len(reader.pages), 170)):
-        try:
-            text_parts.append(reader.pages[i].extract_text() or "")
-        except Exception:
-            continue
-    text = "\n".join(text_parts)
+    text = "\n".join(pages[:170])
     if not text.strip():
         return None
 

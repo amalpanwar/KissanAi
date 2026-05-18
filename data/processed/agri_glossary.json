@@ -1,0 +1,106 @@
+{
+  "metadata": {
+    "generated_from": "official PDFs and crop production guide",
+    "extraction_strategy": "docling-preferred shared PDF extractor with safe fallback",
+    "term_count": 6
+  },
+  "terms": {
+    "das": {
+      "label": "DAS",
+      "aliases": [
+        "das",
+        "days after sowing"
+      ],
+      "meaning": "Days After Sowing",
+      "answer_hi": "DAS का मतलब Days After Sowing होता है, यानी बुवाई के कितने दिन बाद। उदाहरण: 15-20 DAS का मतलब बुवाई के 15 से 20 दिन बाद।",
+      "snippets": [
+        {
+          "source": "data/raw/Crop Production guide.pdf",
+          "text": "out in 20-25 days after sowing in less fertile nursery soils."
+        }
+      ]
+    },
+    "fym": {
+      "label": "FYM",
+      "aliases": [
+        "fym",
+        "farm yard manure",
+        "farmyard manure"
+      ],
+      "meaning": "Farm Yard Manure",
+      "answer_hi": "FYM का मतलब Farm Yard Manure होता है, यानी गोबर की सड़ी हुई खाद। इसे खेत की उर्वरता और मिट्टी की हालत सुधारने के लिए डाला जाता है।",
+      "snippets": [
+        {
+          "source": "data/raw/Crop Production guide.pdf",
+          "text": "powdered well decomposed farm yard manure."
+        }
+      ]
+    },
+    "npk": {
+      "label": "NPK",
+      "aliases": [
+        "npk",
+        "n:p:k",
+        "nitrogen phosphorus potash"
+      ],
+      "meaning": "Nitrogen, Phosphorus and Potash",
+      "answer_hi": "NPK का मतलब Nitrogen, Phosphorus और Potash होता है। यह मुख्य पोषक तत्वों का अनुपात बताता है, जैसे 80:40:40 NPK।",
+      "snippets": [
+        {
+          "source": "data/raw/Crop Production guide.pdf",
+          "text": "(i) If soil test recommendation is not available, adopt a blanket recommendation of 80:40:40 NPK kg/ha."
+        }
+      ]
+    },
+    "phi": {
+      "label": "PHI",
+      "aliases": [
+        "phi",
+        "pre-harvest interval",
+        "waiting period"
+      ],
+      "meaning": "Pre-Harvest Interval",
+      "answer_hi": "PHI का मतलब Pre-Harvest Interval होता है, यानी दवा के आखिरी छिड़काव और फसल की कटाई के बीच जरूरी इंतजार अवधि।",
+      "snippets": [
+        {
+          "source": "data/raw/all_sources/4._herbicides_mup_as_on_30.09.2025.pdf",
+          "text": "MUP tables में इसे Waiting period/PHI between last application and harvest (days) के रूप में दिया गया है।"
+        }
+      ]
+    },
+    "msp": {
+      "label": "MSP",
+      "aliases": [
+        "msp",
+        "minimum support price"
+      ],
+      "meaning": "Minimum Support Price",
+      "answer_hi": "MSP का मतलब Minimum Support Price होता है, यानी सरकार द्वारा तय न्यूनतम खरीद मूल्य, ताकि किसान को एक आधार भाव मिल सके।",
+      "snippets": [
+        {
+          "source": "data/raw/official_sources/cacp_rabi_latest_en.pdf",
+          "text": "The report contains the recommendations on Minimum Support Prices (MSPs) for the"
+        },
+        {
+          "source": "data/raw/official_sources/cacp_kharif_latest_en.pdf",
+          "text": "The report contains recommendations on Minimum Support Prices (MSP) for the mandated"
+        }
+      ]
+    },
+    "frp": {
+      "label": "FRP",
+      "aliases": [
+        "frp",
+        "fair and remunerative price"
+      ],
+      "meaning": "Fair and Remunerative Price",
+      "answer_hi": "FRP का मतलब Fair and Remunerative Price होता है। यह गन्ने के लिए सरकार द्वारा तय न्यूनतम भुगतान मूल्य होता है।",
+      "snippets": [
+        {
+          "source": "data/raw/official_sources/cacp_sugarcane_latest.pdf",
+          "text": "The report contains recommendation of Fair and Remunerative Price (FRP) of sugarcane and non-"
+        }
+      ]
+    }
+  }
+}

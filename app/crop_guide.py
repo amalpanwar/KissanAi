@@ -6,20 +6,13 @@ from difflib import get_close_matches
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from app.pdf_extract import read_pdf_pages
 
 
 GUIDE_PDF = Path("data/raw/Crop Production guide.pdf")
 ALIAS_JSON = Path("data/raw/commodity_aliases.json")
 GUIDE_REVIEW_QUEUE = Path("data/processed/guide_review_queue.jsonl")
 PDF_OFFSET = 12  # printed page 1 starts at PDF page 13
-
-
-def _get_pdf_reader():
-    try:
-        from pypdf import PdfReader
-    except ImportError as exc:
-        raise ImportError("pypdf is required for crop guide PDF parsing.") from exc
-    return PdfReader
 
 MANUAL_PAGE_MAP = {
     "Rice": 1,
@@ -360,8 +353,7 @@ def _norm(text: str) -> str:
 def _load_pages() -> list[str]:
     if not GUIDE_PDF.exists():
         return []
-    reader = _get_pdf_reader()(str(GUIDE_PDF))
-    return [(p.extract_text() or "") for p in reader.pages]
+    return read_pdf_pages(GUIDE_PDF)
 
 
 @lru_cache(maxsize=1)

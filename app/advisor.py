@@ -21,6 +21,8 @@ from app.crop_guide import build_crop_production_followup, build_crop_production
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
 from app.web_search import is_web_search_configured, web_search
+from app.agri_glossary import match_glossary_entry, format_glossary_answer, glossary_references
+from app.pdf_extract import read_pdf_pages, read_pdf_text
 import pandas as pd
 
 from app.location_lookup import lookup_place, lookup_place_in_text
@@ -410,6 +412,14 @@ class RAGAdvisor:
                 "retrieved": [],
                 "topic": "weather_impact",
             }
+        agri_term_answer, agri_term_refs = self._answer_agri_term_query(farmer_question, normalized_question)
+        if agri_term_answer:
+            return {
+                "answer": agri_term_answer,
+                "references": agri_term_refs,
+                "retrieved": [],
+                "topic": "crop_guide_followup",
+            }
         msp_answer = self._answer_msp_query(farmer_question) or self._answer_msp_query(normalized_question)
         if msp_answer:
             return {
@@ -423,14 +433,6 @@ class RAGAdvisor:
             weather_result = self._answer_weather_request(weather_request, farmer_question, normalized_question)
             weather_result["topic"] = "weather"
             return weather_result
-        agri_term_answer = self._answer_agri_term_query(farmer_question, normalized_question)
-        if agri_term_answer:
-            return {
-                "answer": agri_term_answer,
-                "references": [],
-                "retrieved": [],
-                "topic": "crop_guide_followup",
-            }
         profitability_followup = (
             self._is_profitability_followup_intent(normalized_question)
             or self._is_profitability_followup_intent(farmer_question)
@@ -634,6 +636,9 @@ class RAGAdvisor:
 
     def _answer_msp_query(self, text: str) -> str | None:
         if not self._is_msp_query(text):
+            return None
+        t = (text or "").lower()
+        if any(cue in t for cue in ["kya hota hai", "क्या होता है", "kya hai", "क्या है", "matlab", "मतलब", "full form", "फुल फॉर्म"]):
             return None
         crop = self._extract_crop_from_query(text or "")
         if not crop:
@@ -1952,10 +1957,6 @@ class RAGAdvisor:
         return ordered
 
     def _extract_pesticides_from_pdfs(self, crop: str) -> tuple[list[str], list[str]]:
-        try:
-            from pypdf import PdfReader
-        except Exception:
-            return [], []
         sources = []
         lines_out: list[str] = []
         root = Path("data/raw/all_sources")
@@ -1964,15 +1965,11 @@ class RAGAdvisor:
         crop_key = crop.lower()
         for pdf in root.glob("*.pdf"):
             try:
-                reader = PdfReader(str(pdf))
+                pages = read_pdf_pages(pdf)
             except Exception:
                 continue
             sources.append(str(pdf))
-            for i in range(min(10, len(reader.pages))):
-                try:
-                    page_text = reader.pages[i].extract_text() or ""
-                except Exception:
-                    continue
+            for page_text in pages[:10]:
                 for line in page_text.splitlines():
                     s = line.strip()
                     if not s:
@@ -2245,9 +2242,7 @@ class RAGAdvisor:
         if cached is not None:
             return cached
         try:
-            from pypdf import PdfReader
-            reader = PdfReader(str(pdf_path))
-            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            text = read_pdf_text(pdf_path)
         except Exception:
             text = ""
         self._pdf_text_cache[key] = text
@@ -2465,12 +2460,15 @@ class RAGAdvisor:
             return ["icar.gov.in", "tnau.ac.in", "agricoop.nic.in"]
         return ["icar.gov.in", "agricoop.nic.in", "ppqs.gov.in"]
 
-    def _answer_agri_term_query(self, raw_question: str, normalized_question: str) -> str | None:
+    def _answer_agri_term_query(self, raw_question: str, normalized_question: str) -> tuple[str | None, list[str]]:
         raw = (raw_question or "").strip()
         normalized = (normalized_question or "").strip()
         haystack = f"{raw} {normalized}".lower()
         if not haystack:
-            return None
+            return None, []
+        glossary_entry = match_glossary_entry(haystack)
+        if glossary_entry:
+            return format_glossary_answer(glossary_entry), glossary_references(glossary_entry)
         explanation_cues = [
             "kya hota hai",
             "क्या होता है",
@@ -2496,16 +2494,16 @@ class RAGAdvisor:
                 matched = payload
                 break
         if not matched:
-            return None
+            return None, []
         if not asks_for_meaning and raw.strip().upper() != str(matched.get("label") or "").upper():
-            return None
+            return None, []
         label = str(matched.get("label") or "").strip()
         meaning = str(matched.get("meaning") or "").strip()
         explanation = str(matched.get("explanation") or "").strip()
         lines = [f"{label} का मतलब: {meaning}"]
         if explanation:
             lines.append(explanation)
-        return "\n".join(lines).strip()
+        return "\n".join(lines).strip(), []
 
     def _extract_district_from_context(self, context_part: str) -> str | None:
         return self._extract_district(context_part)
