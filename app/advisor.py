@@ -20,7 +20,7 @@ from app.upag_apy import load_latest_up_yield_qtl_per_acre
 from app.crop_guide import build_crop_production_followup, build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
-from app.web_search import google_search, is_google_search_configured
+from app.web_search import is_web_search_configured, web_search
 import pandas as pd
 
 from app.location_lookup import lookup_place, lookup_place_in_text
@@ -2394,15 +2394,15 @@ class RAGAdvisor:
             + "\n".join(snippets)
         )
 
-    def _web_search_domains_hint(self, question: str) -> str:
+    def _web_search_include_domains(self, question: str) -> list[str]:
         q = (question or "").lower()
         if self._is_msp_query(q) or self._is_price_query(q):
-            return " site:pib.gov.in OR site:agmarknet.gov.in"
+            return ["pib.gov.in", "agmarknet.gov.in"]
         if self._is_crop_protection_followup_intent(q):
-            return " site:ppqs.gov.in OR site:icar.gov.in OR site:agricoop.nic.in"
+            return ["ppqs.gov.in", "icar.gov.in", "agricoop.nic.in"]
         if self._is_crop_guide_intent(q):
-            return " site:icar.gov.in OR site:tnau.ac.in OR site:agricoop.nic.in"
-        return " site:icar.gov.in OR site:agricoop.nic.in OR site:ppqs.gov.in"
+            return ["icar.gov.in", "tnau.ac.in", "agricoop.nic.in"]
+        return ["icar.gov.in", "agricoop.nic.in", "ppqs.gov.in"]
 
     def _build_web_search_queries(self, question: str, context_part: str) -> list[str]:
         q = (question or "").strip()
@@ -2411,17 +2411,16 @@ class RAGAdvisor:
         crop = self._extract_crop_from_query(q) or self._extract_preferred_crop_from_context(context_part) or ""
         district = self._extract_district_from_context(context_part) or ""
         disease_terms = self._extract_disease_terms_from_query(q)
-        hint = self._web_search_domains_hint(q)
         queries: list[str] = []
         if disease_terms and crop:
-            queries.append(f"{crop} {' '.join(disease_terms[:2])} advisory India{hint}")
+            queries.append(f"{crop} {' '.join(disease_terms[:2])} advisory India")
         if crop and self._is_msp_query(q):
-            queries.append(f"{crop} MSP India official{hint}")
+            queries.append(f"{crop} MSP India official")
         if crop and district and self._is_crop_choice_intent(q):
-            queries.append(f"{crop} farming economics {district} Uttar Pradesh India{hint}")
-        queries.append(f"{q}{hint}")
+            queries.append(f"{crop} farming economics {district} Uttar Pradesh India")
+        queries.append(q)
         if crop and crop.lower() not in q.lower():
-            queries.append(f"{crop} {q}{hint}")
+            queries.append(f"{crop} {q}")
         # preserve order but deduplicate
         seen: set[str] = set()
         out: list[str] = []
@@ -2450,13 +2449,14 @@ class RAGAdvisor:
         return [item for _, item in ranked[:top_k]]
 
     def _answer_with_web_search(self, question: str, context_part: str) -> dict | None:
-        if not is_google_search_configured():
+        if not is_web_search_configured():
             return None
         if self._is_weather_intent(question) or self._is_weather_impact_intent(question):
             return None
+        include_domains = self._web_search_include_domains(question)
         search_results: list[dict] = []
         for query in self._build_web_search_queries(question, context_part):
-            hits = google_search(query, num=5)
+            hits = web_search(query, num=5, include_domains=include_domains)
             if not hits:
                 continue
             for hit in hits:
