@@ -80,7 +80,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-18-price-feedback-v1"
+APP_BUILD_VERSION = "2026-05-18-agri-term-v2"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200

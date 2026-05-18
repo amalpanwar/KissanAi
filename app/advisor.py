@@ -124,6 +124,39 @@ DISEASE_HINDI_TERMS = {
     "termite": "दीमक",
 }
 
+AGRI_TERM_EXPLANATIONS = {
+    "das": {
+        "label": "DAS",
+        "meaning": "Days After Sowing",
+        "explanation": "इसका मतलब बुवाई के कितने दिन बाद है। उदाहरण: 15-20 DAS का मतलब बुवाई के 15 से 20 दिन बाद।",
+    },
+    "fym": {
+        "label": "FYM",
+        "meaning": "Farm Yard Manure",
+        "explanation": "इसका मतलब गोबर की सड़ी हुई खाद है, जिसे खेत की उर्वरता बढ़ाने के लिए डाला जाता है।",
+    },
+    "npk": {
+        "label": "NPK",
+        "meaning": "Nitrogen, Phosphorus and Potash",
+        "explanation": "यह मुख्य पोषक तत्वों का अनुपात बताता है। जैसे 80:40:40 NPK का मतलब नाइट्रोजन, फॉस्फोरस और पोटाश की सिफारिशी मात्रा है।",
+    },
+    "phi": {
+        "label": "PHI",
+        "meaning": "Pre-Harvest Interval",
+        "explanation": "इसका मतलब दवा के आखिरी छिड़काव और फसल की कटाई के बीच जरूरी इंतजार अवधि है।",
+    },
+    "msp": {
+        "label": "MSP",
+        "meaning": "Minimum Support Price",
+        "explanation": "यह सरकार द्वारा तय न्यूनतम खरीद मूल्य होता है, ताकि किसान को एक आधार भाव मिल सके।",
+    },
+    "frp": {
+        "label": "FRP",
+        "meaning": "Fair and Remunerative Price",
+        "explanation": "यह गन्ने के लिए केंद्र सरकार द्वारा तय न्यूनतम भुगतान मूल्य होता है।",
+    },
+}
+
 
 def _load_generated_disease_dictionary() -> tuple[dict[str, list[str]], dict[str, str], dict[str, dict[str, object]]]:
     if not DISEASE_DICTIONARY_PATH.exists():
@@ -390,6 +423,14 @@ class RAGAdvisor:
             weather_result = self._answer_weather_request(weather_request, farmer_question, normalized_question)
             weather_result["topic"] = "weather"
             return weather_result
+        agri_term_answer = self._answer_agri_term_query(farmer_question, normalized_question)
+        if agri_term_answer:
+            return {
+                "answer": agri_term_answer,
+                "references": [],
+                "retrieved": [],
+                "topic": "crop_guide_followup",
+            }
         profitability_followup = (
             self._is_profitability_followup_intent(normalized_question)
             or self._is_profitability_followup_intent(farmer_question)
@@ -2423,6 +2464,51 @@ class RAGAdvisor:
         if self._is_crop_guide_intent(q):
             return ["icar.gov.in", "tnau.ac.in", "agricoop.nic.in"]
         return ["icar.gov.in", "agricoop.nic.in", "ppqs.gov.in"]
+
+    def _answer_agri_term_query(self, raw_question: str, normalized_question: str) -> str | None:
+        raw = (raw_question or "").strip()
+        normalized = (normalized_question or "").strip()
+        haystack = f"{raw} {normalized}".lower()
+        if not haystack:
+            return None
+        explanation_cues = [
+            "kya hota hai",
+            "क्या होता है",
+            "kya hai",
+            "क्या है",
+            "matlab",
+            "मतलब",
+            "meaning",
+            "full form",
+            "ka full form",
+            "का फुल फॉर्म",
+        ]
+        asks_for_meaning = any(cue in haystack for cue in explanation_cues)
+        matched: dict[str, str] = {}
+        for key, payload in AGRI_TERM_EXPLANATIONS.items():
+            label = str(payload.get("label") or key)
+            meaning = str(payload.get("meaning") or "")
+            if (
+                re.search(rf"\b{re.escape(key)}\b", haystack)
+                or re.search(rf"\b{re.escape(label.lower())}\b", haystack)
+                or (meaning and meaning.lower() in haystack)
+            ):
+                matched = payload
+                break
+        if not matched:
+            return None
+        if not asks_for_meaning and raw.strip().upper() != str(matched.get("label") or "").upper():
+            return None
+        label = str(matched.get("label") or "").strip()
+        meaning = str(matched.get("meaning") or "").strip()
+        explanation = str(matched.get("explanation") or "").strip()
+        lines = [f"{label} का मतलब: {meaning}"]
+        if explanation:
+            lines.append(explanation)
+        return "\n".join(lines).strip()
+
+    def _extract_district_from_context(self, context_part: str) -> str | None:
+        return self._extract_district(context_part)
 
     def _build_web_search_queries(self, question: str, context_part: str) -> list[str]:
         q = (question or "").strip()
