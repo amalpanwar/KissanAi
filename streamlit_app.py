@@ -1113,10 +1113,10 @@ def _set_session_location_context(place: str | None, district: str | None, state
         "district": clean_district,
         "state": clean_state,
     }
-    if clean_state:
-        st.session_state["fc_state"] = clean_state
-    if clean_district:
-        st.session_state["fc_district"] = clean_district
+    st.session_state["pending_sidebar_location"] = {
+        "state": clean_state,
+        "district": clean_district,
+    }
 
 
 def _resolve_query_location(query: str) -> tuple[str | None, str | None, str | None]:
@@ -2293,6 +2293,15 @@ if isinstance(pending, dict):
         st.session_state["fc_district"] = pending.get("district", "Meerut")
     if "fc_commodity_override" not in st.session_state:
         st.session_state["fc_commodity_override"] = pending.get("commodity", "")
+
+pending_sidebar_location = st.session_state.pop("pending_sidebar_location", None)
+if isinstance(pending_sidebar_location, dict):
+    pending_state = str(pending_sidebar_location.get("state") or "").strip()
+    pending_district = str(pending_sidebar_location.get("district") or "").strip()
+    if pending_state:
+        st.session_state["fc_state"] = pending_state
+    if pending_district:
+        st.session_state["fc_district"] = pending_district
 
 with st.sidebar:
     render_auth_sidebar(cfg.paths["sqlite_db"])
