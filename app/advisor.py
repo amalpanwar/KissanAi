@@ -486,12 +486,32 @@ class RAGAdvisor:
                 "topic": "crop_guide_followup",
             }
         if self._looks_like_location_only(farmer_question):
-            return {
-                "answer": "कृपया बताएं कि आप मौसम पूछ रहे हैं या भाव/कीमत?",
-                "references": [],
-                "retrieved": [],
-                "topic": "clarification",
-            }
+            loc = (
+                lookup_place_in_text(farmer_question)
+                or lookup_place(farmer_question.strip())
+                or lookup_place_in_text(normalized_question)
+                or lookup_place(normalized_question.strip())
+            )
+            if loc:
+                request = WeatherRequest(
+                    place=str(loc.get("place") or farmer_question.strip()),
+                    action="current",
+                    day_offset=None,
+                    label=None,
+                    focus="weather",
+                )
+                result = self._answer_weather_request(
+                    request,
+                    farmer_question,
+                    normalized_question,
+                    place_override=str(loc.get("place") or farmer_question.strip()),
+                )
+                result["topic"] = "weather"
+                result["weather_action"] = "current"
+                return result
+            web_result = self._answer_with_web_search(normalized_question, context_part)
+            if web_result:
+                return web_result
 
         normalized_query = (
             f"{context_part} किसान का प्रश्न: {normalized_question}".strip()
@@ -550,7 +570,7 @@ class RAGAdvisor:
     def _is_price_query(self, text: str) -> bool:
         t = (text or "").lower()
         keys = [
-            "price", "rate", "mandi", "bhav", "daam", "dam", "keemat", "kimat", "qeemat",
+            "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam", "keemat", "kimat", "qeemat",
             "भाव", "कीमत", "दाम", "मंडी",
             "msp", "minimum support price", "support price",
             "न्यूनतम समर्थन मूल्य", "समर्थन मूल्य", "सरकारी भाव", "सरकारी रेट",

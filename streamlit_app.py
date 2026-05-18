@@ -18,6 +18,7 @@ from textwrap import dedent
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
 import json
@@ -79,7 +80,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-17-followup-safe-v5"
+APP_BUILD_VERSION = "2026-05-18-price-feedback-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -769,6 +770,8 @@ def is_price_query(text: str) -> bool:
         "rate",
         "mandi",
         "bhav",
+        "bhaav",
+        "bhao",
         "daam",
         "dam",
         "भाव",
@@ -911,6 +914,25 @@ def extract_place_from_query(query: str) -> str | None:
     if not q:
         return None
 
+    stop = {
+        "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
+        "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
+        "me", "mein", "में", "kesa", "kaisa", "hai", "h",
+        "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam",
+        "भाव", "कीमत", "मंडी", "मौसम", "weather",
+        "btaye", "bataye", "bataiye", "btao", "batao", "boliye", "bolo",
+        "do", "de", "dijiye", "dijie", "batayiye", "btaiye", "liye", "liyee",
+        "बताएं", "बताये", "बताइए", "बताओ", "दीजिए", "दो",
+    }
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
+    commodity_tokens = set()
+    for alias_list in aliases.values():
+        for alias in alias_list:
+            for t in re.findall(r"[a-z0-9]+", alias.lower()):
+                commodity_tokens.add(t)
+
     lookup_path = Path("data/processed/location_lookup.csv")
     lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
     lookup = load_location_lookup(lookup_mtime)
@@ -932,17 +954,22 @@ def extract_place_from_query(query: str) -> str | None:
                 token_hits = 0
                 if len(raw_tokens) == 1:
                     token = raw_tokens[0]
-                    if len(token) >= 3 and token in q_tokens:
+                    if len(token) >= 3 and token in q_tokens and token not in stop and token not in commodity_tokens:
                         matched = True
                         token_hits = 1
                 else:
                     joined = " ".join(raw_tokens)
                     q_joined = " ".join(q_tokens)
                     if joined in q_joined:
-                        matched = True
-                        token_hits = len(raw_tokens)
+                        useful = [t for t in raw_tokens if t not in stop and t not in commodity_tokens]
+                        if useful:
+                            matched = True
+                            token_hits = len(useful)
                     else:
-                        hits = [t for t in raw_tokens if len(t) >= 3 and t in q_tokens]
+                        hits = [
+                            t for t in raw_tokens
+                            if len(t) >= 3 and t in q_tokens and t not in stop and t not in commodity_tokens
+                        ]
                         if hits:
                             matched = True
                             token_hits = len(hits)
@@ -955,23 +982,6 @@ def extract_place_from_query(query: str) -> str | None:
     tokens = [t.strip(" ?!.,") for t in q.split() if t.strip()]
     if not tokens:
         return None
-
-    stop = {
-        "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
-        "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
-        "me", "mein", "में", "kesa", "kaisa", "hai", "h",
-        "price", "rate", "mandi", "bhav", "daam", "dam",
-        "भाव", "कीमत", "मंडी", "मौसम", "weather",
-    }
-
-    alias_path = Path("data/raw/commodity_aliases.json")
-    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
-    aliases = load_commodity_aliases(mtime_ns)
-    commodity_tokens = set()
-    for alias_list in aliases.values():
-        for alias in alias_list:
-            for t in re.findall(r"[a-z0-9]+", alias.lower()):
-                commodity_tokens.add(t)
 
     filtered = []
     for tok in tokens:
@@ -988,7 +998,12 @@ def extract_place_from_query(query: str) -> str | None:
             break
     if not filtered:
         return None
-    return " ".join(filtered)
+    candidate = " ".join(filtered)
+    if not lookup.empty:
+        district_guess, state_guess = _lookup_district_from_location(candidate, lookup)
+        if district_guess or state_guess:
+            return candidate
+    return None
 
 
 def _place_variants(place: str) -> list[str]:
@@ -1124,12 +1139,44 @@ def load_commodity_aliases(mtime_ns: int) -> dict[str, list[str]]:
 
 
 @st.cache_data(show_spinner=False)
-def load_training_feedback_memory(db_path: str, mtime_ns: int) -> list[dict[str, object]]:
-    _ = mtime_ns
+def load_training_feedback_memory(
+    db_path: str,
+    db_mtime_ns: int,
+    feedback_path: str,
+    feedback_mtime_ns: int,
+) -> list[dict[str, object]]:
+    _ = db_mtime_ns
+    _ = feedback_mtime_ns
+    rows: list[dict[str, object]] = []
     try:
-        return get_training_feedback_examples(db_path, limit=200)
+        rows.extend(get_training_feedback_examples(db_path, limit=200))
     except Exception:
-        return []
+        pass
+    fp = Path(feedback_path)
+    if fp.exists():
+        try:
+            for line in fp.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                if isinstance(item, dict):
+                    rows.append(item)
+        except Exception:
+            pass
+    deduped: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        key = (
+            str(row.get("user_query") or "").strip().lower(),
+            str(row.get("correction_text") or "").strip().lower(),
+            str(row.get("topic") or "").strip().lower(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
 
 def _feedback_tokens(text: str) -> set[str]:
@@ -1150,13 +1197,20 @@ def find_feedback_memory_hint(
     topic_hint: str | None,
     crop_hint: str | None,
     db_path: str,
+    advisor: RAGAdvisor | None = None,
 ) -> dict[str, object] | None:
     db_file = Path(db_path)
-    mtime_ns = db_file.stat().st_mtime_ns if db_file.exists() else 0
-    rows = load_training_feedback_memory(db_path, mtime_ns)
+    db_mtime_ns = db_file.stat().st_mtime_ns if db_file.exists() else 0
+    feedback_mtime_ns = TRAINING_FEEDBACK_PATH.stat().st_mtime_ns if TRAINING_FEEDBACK_PATH.exists() else 0
+    rows = load_training_feedback_memory(
+        db_path,
+        db_mtime_ns,
+        str(TRAINING_FEEDBACK_PATH),
+        feedback_mtime_ns,
+    )
     if not rows:
         return None
-    best: tuple[float, dict[str, object]] | None = None
+    scored_rows: list[tuple[float, dict[str, object]]] = []
     crop_hint_l = (crop_hint or "").lower().strip()
     for row in rows:
         score = _feedback_similarity(user_query, str(row.get("user_query") or ""))
@@ -1166,9 +1220,38 @@ def find_feedback_memory_hint(
             score += 0.18
         if crop_hint_l and row_crop and crop_hint_l in row_crop:
             score += 0.18
-        if score >= 0.45 and (best is None or score > best[0]):
-            best = (score, row)
-    return best[1] if best else None
+        if score >= 0.30:
+            scored_rows.append((score, row))
+    if not scored_rows:
+        return None
+    scored_rows.sort(key=lambda x: x[0], reverse=True)
+
+    # Semantic rerank on the best lexical candidates using the same local embedder as the RAG path.
+    if advisor is not None:
+        try:
+            advisor._ensure_rag_components(load_generator=False)
+            if advisor.embedder is not None:
+                top_candidates = scored_rows[:20]
+                candidate_texts = [
+                    f"{str(row.get('user_query') or '').strip()}\n{str(row.get('correction_text') or '').strip()}".strip()
+                    for _, row in top_candidates
+                ]
+                query_vec = np.asarray(advisor.embedder.encode([user_query])[0], dtype=np.float32)
+                candidate_vecs = np.asarray(advisor.embedder.encode(candidate_texts), dtype=np.float32)
+                query_norm = float(np.linalg.norm(query_vec)) or 1.0
+                candidate_norms = np.linalg.norm(candidate_vecs, axis=1)
+                candidate_norms[candidate_norms == 0] = 1.0
+                semantic_scores = (candidate_vecs @ query_vec) / (candidate_norms * query_norm)
+                best_idx = int(np.argmax(semantic_scores))
+                semantic_best = float(semantic_scores[best_idx])
+                lexical_best, best_row = top_candidates[best_idx]
+                if semantic_best >= 0.42 or lexical_best >= 0.55:
+                    return best_row
+        except Exception:
+            pass
+
+    best_lexical, best_row = scored_rows[0]
+    return best_row if best_lexical >= 0.45 else None
 
 
 def _extract_district_from_feedback_text(text: str, districts: list[str]) -> str | None:
@@ -2676,6 +2759,7 @@ if user_query:
             topic_hint="price",
             crop_hint=query_crop_hint,
             db_path=cfg.paths["sqlite_db"],
+            advisor=advisor,
         )
     session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or "").strip()
     session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
