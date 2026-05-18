@@ -56,6 +56,7 @@ export_training_feedback = db_mod.export_training_feedback
 feedback_exists = db_mod.feedback_exists
 get_conn = db_mod.get_conn
 get_feedback_queue = db_mod.get_feedback_queue
+get_training_feedback_examples = db_mod.get_training_feedback_examples
 get_user_by_email = db_mod.get_user_by_email
 get_user_by_id = db_mod.get_user_by_id
 init_db = db_mod.init_db
@@ -1120,6 +1121,76 @@ def load_commodity_aliases(mtime_ns: int) -> dict[str, list[str]]:
         if isinstance(v, list):
             cleaned[str(k).lower()] = [str(x) for x in v]
     return cleaned
+
+
+@st.cache_data(show_spinner=False)
+def load_training_feedback_memory(db_path: str, mtime_ns: int) -> list[dict[str, object]]:
+    _ = mtime_ns
+    try:
+        return get_training_feedback_examples(db_path, limit=200)
+    except Exception:
+        return []
+
+
+def _feedback_tokens(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9\u0900-\u097f]+", (text or "").lower()) if len(t) > 1}
+
+
+def _feedback_similarity(a: str, b: str) -> float:
+    a_tokens = _feedback_tokens(a)
+    b_tokens = _feedback_tokens(b)
+    jaccard = (len(a_tokens & b_tokens) / max(1, len(a_tokens | b_tokens))) if (a_tokens and b_tokens) else 0.0
+    seq = difflib.SequenceMatcher(None, (a or "").lower(), (b or "").lower()).ratio()
+    return max(jaccard, seq)
+
+
+def find_feedback_memory_hint(
+    user_query: str,
+    *,
+    topic_hint: str | None,
+    crop_hint: str | None,
+    db_path: str,
+) -> dict[str, object] | None:
+    db_file = Path(db_path)
+    mtime_ns = db_file.stat().st_mtime_ns if db_file.exists() else 0
+    rows = load_training_feedback_memory(db_path, mtime_ns)
+    if not rows:
+        return None
+    best: tuple[float, dict[str, object]] | None = None
+    crop_hint_l = (crop_hint or "").lower().strip()
+    for row in rows:
+        score = _feedback_similarity(user_query, str(row.get("user_query") or ""))
+        row_topic = str(row.get("topic") or "").strip().lower()
+        row_crop = str(row.get("crop_name") or "").strip().lower()
+        if topic_hint and row_topic == topic_hint.lower():
+            score += 0.18
+        if crop_hint_l and row_crop and crop_hint_l in row_crop:
+            score += 0.18
+        if score >= 0.45 and (best is None or score > best[0]):
+            best = (score, row)
+    return best[1] if best else None
+
+
+def _extract_district_from_feedback_text(text: str, districts: list[str]) -> str | None:
+    q = (text or "").lower()
+    for d in sorted(districts, key=len, reverse=True):
+        dl = d.lower()
+        if dl and dl in q:
+            return d
+    return None
+
+
+def _feedback_prefers_omit_district(text: str) -> bool:
+    t = (text or "").lower()
+    patterns = [
+        "don't mention any district",
+        "do not mention any district",
+        "district mat mention",
+        "jila mat likho",
+        "जिला मत लिखो",
+        "कोई जिला मत लिखो",
+    ]
+    return any(p in t for p in patterns)
 
 
 def commodity_display_name(commodity: str) -> str:
@@ -2595,13 +2666,48 @@ if user_query:
     market_df = load_agmarknet_df()
     intent_msp = is_msp_query(user_query)
     intent_price = is_price_query(user_query) or intent_msp
+    explicit_place = bool(extract_place_from_query(user_query))
+    explicit_district = False
+    query_crop_hint = advisor._extract_crop_from_query(normalized_user_query) or preferred_crop_for_query or ""
+    feedback_hint = None
+    if intent_price:
+        feedback_hint = find_feedback_memory_hint(
+            user_query,
+            topic_hint="price",
+            crop_hint=query_crop_hint,
+            db_path=cfg.paths["sqlite_db"],
+        )
+    session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or "").strip()
+    session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
+    if not market_df.empty and "District" in market_df.columns:
+        known_districts = sorted(market_df["District"].dropna().astype(str).unique().tolist())
+        explicit_district = bool(extract_entities_ner(user_query, known_districts, [])[0])
+    feedback_district_hint = ""
+    feedback_prefers_omit_district = False
+    if feedback_hint:
+        feedback_prefers_omit_district = _feedback_prefers_omit_district(str(feedback_hint.get("correction_text") or ""))
+        if not market_df.empty and "District" in market_df.columns:
+            feedback_district_hint = _extract_district_from_feedback_text(
+                str(feedback_hint.get("correction_text") or ""),
+                sorted(market_df["District"].dropna().astype(str).unique().tolist()),
+            ) or ""
+    fallback_state_for_price = session_state_hint or (active_state if "active_state" in locals() else "Uttar Pradesh")
+    fallback_district_for_price = (
+        session_district_hint
+        or feedback_district_hint
+        or (active_district if "active_district" in locals() else district)
+    )
     selected_state, selected_district, selected_commodity = extract_selection_from_query(
         user_query,
         market_df,
-        fallback_state=last_location_ctx.get("state") or (active_state if "active_state" in locals() else "Uttar Pradesh"),
-        fallback_district=last_location_ctx.get("district") or (active_district if "active_district" in locals() else district),
+        fallback_state=fallback_state_for_price,
+        fallback_district=fallback_district_for_price,
         fallback_commodity=active_commodity if "active_commodity" in locals() else (preferred_crop or "Wheat"),
     )
+    if intent_price and not explicit_place and not explicit_district and fallback_district_for_price:
+        selected_district = fallback_district_for_price
+        if fallback_state_for_price:
+            selected_state = fallback_state_for_price
 
     if intent_price:
         # Ensure commodity is explicitly detected for price queries.
@@ -2728,6 +2834,7 @@ if user_query:
         selected_commodity = comm_from_query or selected_commodity
         commodity_label = commodity_display_name(selected_commodity)
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
+        mention_district_in_price_answer = bool(selected_district and (explicit_place or explicit_district))
         if filtered.empty:
             if selected_commodity.lower() in {"sugarcane", "गन्ना"}:
                 sugarcane_price = get_sugarcane_price_fallback()
@@ -2736,30 +2843,40 @@ if user_query:
                 source_name = sugarcane_price.get("source", "")
                 src = sugarcane_price.get("source_url", "")
                 if price:
-                    final_answer = (
+                    intro = (
                         f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है।\n"
+                        if mention_district_in_price_answer
+                        else ""
+                    )
+                    final_answer = (
+                        f"{intro}"
                         f"गन्ना के लिए {source_name} {season}: ₹{int(float(price))}/क्विंटल."
                     )
                     if src:
                         final_answer += f"\nस्रोत: {src}"
                 else:
-                    final_answer = (
+                    intro = (
                         f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है। "
-                        "CACP से FRP निकालने में समस्या आई।"
+                        if mention_district_in_price_answer
+                        else ""
                     )
+                    final_answer = f"{intro}CACP से FRP निकालने में समस्या आई।"
             else:
                 msp = get_msp_for_crop(selected_commodity)
                 if msp:
-                    final_answer = (
+                    intro = (
                         f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा नहीं मिला।\n"
-                        f"MSP (राष्ट्रीय) {msp['crop']}: ₹{int(msp['msp'])}/क्विंटल.\n"
-                        f"स्रोत: {msp['source_url']}"
+                        if mention_district_in_price_answer
+                        else ""
                     )
+                    final_answer = f"{intro}MSP (राष्ट्रीय) {msp['crop']}: ₹{int(msp['msp'])}/क्विंटल.\nस्रोत: {msp['source_url']}"
                 else:
-                    final_answer = (
+                    intro = (
                         f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है। "
-                        "कृपया दूसरी फसल चुनें या बाद में पुनः प्रयास करें।"
+                        if mention_district_in_price_answer
+                        else ""
                     )
+                    final_answer = f"{intro}कृपया दूसरी फसल चुनें या बाद में पुनः प्रयास करें।"
             query_log_id = log_query_answer(
                 user_query=user_query,
                 composed_query=composed_query,

@@ -836,3 +836,32 @@ def export_training_feedback(db_path: str | Path, output_path: str | Path) -> in
             fh.write(json.dumps(item, ensure_ascii=False) + "\n")
             count += 1
     return count
+
+
+def get_training_feedback_examples(db_path: str | Path, limit: int = 200) -> list[dict[str, Any]]:
+    conn = get_conn(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                f.id,
+                q.user_query,
+                q.topic,
+                q.district,
+                q.crop_name,
+                q.answer_text,
+                f.correction_text,
+                f.validation_status,
+                f.is_training_eligible
+            FROM answer_feedback f
+            JOIN query_logs q ON q.id = f.query_log_id
+            WHERE f.validation_status = 'accepted' OR f.is_training_eligible = 1
+            ORDER BY f.updated_at DESC, f.created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
