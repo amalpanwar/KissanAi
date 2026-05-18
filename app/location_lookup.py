@@ -166,6 +166,22 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
     if not norm_text:
         return None
 
+    weak_location_terms = {
+        "pani",
+        "paani",
+        "water",
+        "irrigation",
+        "sinchai",
+        "sichai",
+        "sinchaai",
+        "lagta",
+        "lagti",
+        "lagte",
+        "lata",
+        "leti",
+        "chahiye",
+    }
+
     # First pass: n-gram token matching for Hinglish queries like "doghat me ..."
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     if tokens:
@@ -173,7 +189,12 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
         for size in range(min(4, len(tokens)), 0, -1):
             for i in range(0, len(tokens) - size + 1):
                 phrase = " ".join(tokens[i : i + size])
-                phrase_norms.add(_normalize_place(phrase))
+                norm_phrase = _normalize_place(phrase)
+                if not norm_phrase:
+                    continue
+                if size == 1 and norm_phrase in weak_location_terms:
+                    continue
+                phrase_norms.add(norm_phrase)
         if "place_norm" in df.columns:
             place_map = {str(v): row for v, row in zip(df["place_norm"], df.to_dict(orient="records")) if v}
             for norm in phrase_norms:
@@ -211,7 +232,7 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
     try:
         if "place_norm" in df.columns:
             norm_text = _normalize_place(text)
-            if len(norm_text) >= 4:
+            if len(norm_text) >= 4 and norm_text not in weak_location_terms:
                 matches = df[df["place_norm"].astype(str).str.startswith(norm_text)]
                 if not matches.empty:
                     # pick the shortest place_norm to avoid overshooting

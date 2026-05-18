@@ -320,7 +320,7 @@ TERM_REPLACEMENTS = {
 FOLLOWUP_SECTION_KEYWORDS = {
     "variety": ["किस्म", "kism", "kisam", "variety", "varieties", "seed rate", "बीज दर"],
     "fertilizer": ["खाद", "khad", "khaad", "उर्वरक", "urvarak", "fertilizer", "fym", "compost", "गोबर", "micronutrient", "जैव उर्वरक", "top dressing"],
-    "irrigation": ["सिंचाई", "sinchai", "sichai", "sinchaai", "पानी", "irrigation", "water management", "water"],
+    "irrigation": ["सिंचाई", "sinchai", "sichai", "sinchaai", "पानी", "pani", "paani", "irrigation", "water management", "water", "water requirement", "water need"],
     "crop_protection": ["रोग", "कीट", "disease", "pest", "fungus", "fungal", "फफूंद", "crop protection", "plant protection", "लक्षण"],
     "harvest": ["कटाई", "katai", "katayi", "katayee", "harvest", "harvesting", "maturity", "pre-harvest"],
     "field_preparation": ["खेत की तैयारी", "जुताई", "field preparation", "land preparation", "मेड़", "नालियां"],

@@ -80,7 +80,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-18-glossary-v3"
+APP_BUILD_VERSION = "2026-05-18-irrigation-routing-v4"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -918,6 +918,8 @@ def extract_place_from_query(query: str) -> str | None:
         "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
         "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
         "me", "mein", "में", "kesa", "kaisa", "hai", "h",
+        "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
+        "lagta", "lagti", "lagte", "lata", "leti", "chahiye",
         "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam",
         "भाव", "कीमत", "मंडी", "मौसम", "weather",
         "btaye", "bataye", "bataiye", "btao", "batao", "boliye", "bolo",
@@ -1055,7 +1057,7 @@ def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[st
         state = str(pick.get("state", "")).strip()
         return (district or None), (state or None)
     # Fallback: contains match for place names like "Doghat Rural"
-    if "place" in lookup.columns:
+    if "place" in lookup.columns and (" " in place.strip() or len(norm) >= 5):
         contains = lookup[lookup["place"].astype(str).map(_normalize_text).str.contains(norm, na=False)]
         if not contains.empty:
             up = contains[contains["state"].str.lower() == "uttar pradesh"] if "state" in contains.columns else contains
