@@ -1104,6 +1104,32 @@ def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[st
     return None, None
 
 
+def _set_session_location_context(place: str | None, district: str | None, state: str | None = None) -> None:
+    clean_place = str(place or "").strip()
+    clean_district = str(district or "").strip()
+    clean_state = str(state or "Uttar Pradesh").strip() or "Uttar Pradesh"
+    st.session_state["last_location_context"] = {
+        "place": clean_place,
+        "district": clean_district,
+        "state": clean_state,
+    }
+    if clean_state:
+        st.session_state["fc_state"] = clean_state
+    if clean_district:
+        st.session_state["fc_district"] = clean_district
+
+
+def _resolve_query_location(query: str) -> tuple[str | None, str | None, str | None]:
+    place = extract_place_from_query(query)
+    if not place:
+        return None, None, None
+    lookup_path = Path("data/processed/location_lookup.csv")
+    lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+    lookup = load_location_lookup(lookup_mtime)
+    district, state = _lookup_district_from_location(place, lookup)
+    return place, district, state
+
+
 @st.cache_data(show_spinner=False)
 def load_location_lookup(mtime_ns: int) -> pd.DataFrame:
     _ = mtime_ns
@@ -2281,6 +2307,9 @@ with st.sidebar:
     env_vals = load_local_env(Path(".env"))
     api_key = get_setting("DATA_GOV_API_KEY", env_vals)
     resource_id = get_setting("DATA_GOV_RESOURCE_ID", env_vals, "35985678-0d79-46b4-9ed6-6f13308a1d24")
+    session_location_defaults = st.session_state.get("last_location_context", {}) or {}
+    session_state_default = str(session_location_defaults.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
+    session_district_default = str(session_location_defaults.get("district") or "Meerut").strip() or "Meerut"
 
     _catalog_df = load_agmarknet_df()
     if not _catalog_df.empty:
@@ -2301,7 +2330,10 @@ with st.sidebar:
     )
     if not state_options:
         state_options = ["Uttar Pradesh"]
-    state_default = state_options.index("Uttar Pradesh") if "Uttar Pradesh" in state_options else 0
+    if session_state_default in state_options:
+        state_default = state_options.index(session_state_default)
+    else:
+        state_default = state_options.index("Uttar Pradesh") if "Uttar Pradesh" in state_options else 0
     selected_state = st.selectbox("State", state_options, index=state_default, key="fc_state")
     state_override = st.text_input("State (type override, optional)", value="", key="fc_state_override")
 
@@ -2317,7 +2349,10 @@ with st.sidebar:
         district_options = []
     if not district_options:
         district_options = ["Meerut"]
-    district_default = district_options.index("Meerut") if "Meerut" in district_options else 0
+    if session_district_default in district_options:
+        district_default = district_options.index(session_district_default)
+    else:
+        district_default = district_options.index("Meerut") if "Meerut" in district_options else 0
     selected_district = st.selectbox("District", district_options, index=district_default, key="fc_district")
     district_override = st.text_input(
         "District (type override, optional)",
@@ -2670,7 +2705,7 @@ if user_query:
             season=season,
             crop_name=preferred_crop or "unknown",
         )
-        st.session_state["last_location_context"] = {"place": place, "district": district or "", "state": "Uttar Pradesh"}
+        _set_session_location_context(place, district or "", "Uttar Pradesh")
         st.session_state.chat_history.append(
             {
                 "role": "assistant",
@@ -2689,6 +2724,18 @@ if user_query:
     last_ctx = st.session_state.get("last_structured_context", {}) or {}
     last_location_ctx = st.session_state.get("last_location_context", {}) or {}
     normalized_user_query = advisor._normalize_hinglish(user_query)
+    session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
+    session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or district or "Meerut").strip() or "Meerut"
+    query_place, query_place_district, query_place_state = _resolve_query_location(user_query)
+    if query_place and (query_place_district or query_place_state):
+        _set_session_location_context(
+            query_place,
+            query_place_district or session_district_hint,
+            query_place_state or session_state_hint,
+        )
+        last_location_ctx = st.session_state.get("last_location_context", {}) or {}
+        session_state_hint = (last_location_ctx.get("state") or session_state_hint).strip() or "Uttar Pradesh"
+        session_district_hint = (last_location_ctx.get("district") or session_district_hint).strip() or "Meerut"
     crop_protect_followup_checker = getattr(advisor, "_is_crop_protection_followup_intent", None)
     crop_guide_followup_checker = getattr(advisor, "_is_crop_guide_followup_intent", None)
     if callable(crop_protect_followup_checker):
@@ -2715,16 +2762,10 @@ if user_query:
     )
 
     # Resolve place->district for crop intent (so profit uses correct district)
-    resolved_district = district
+    resolved_district = session_district_hint
     if is_crop_query(user_query):
-        place = extract_place_from_query(user_query)
-        if place:
-            lookup_path = Path("data/processed/location_lookup.csv")
-            lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
-            lookup = load_location_lookup(lookup_mtime)
-            d_from_place, _ = _lookup_district_from_location(place, lookup)
-            if d_from_place:
-                resolved_district = d_from_place
+        if query_place_district:
+            resolved_district = query_place_district
     elif followup_profit and last_ctx.get("district"):
         resolved_district = last_ctx["district"]
 
@@ -2736,7 +2777,7 @@ if user_query:
     question_for_advisor = user_query.strip()
     if (
         advisor._is_weather_intent(advisor._normalize_hinglish(user_query))
-        and not extract_place_from_query(user_query)
+        and not query_place
         and last_location_ctx.get("place")
     ):
         question_for_advisor = f"{last_location_ctx['place']} में {question_for_advisor}"
@@ -2761,8 +2802,6 @@ if user_query:
             db_path=cfg.paths["sqlite_db"],
             advisor=advisor,
         )
-    session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or "").strip()
-    session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
     if not market_df.empty and "District" in market_df.columns:
         known_districts = sorted(market_df["District"].dropna().astype(str).unique().tolist())
         explicit_district = bool(extract_entities_ner(user_query, known_districts, [])[0])
@@ -2881,7 +2920,11 @@ if user_query:
                 st.write(final_answer)
             st.stop()
         if selected_district:
-            st.session_state["last_location_context"] = {"place": extract_place_from_query(user_query) or last_location_ctx.get("place", ""), "district": selected_district, "state": selected_state}
+            _set_session_location_context(
+                query_place or last_location_ctx.get("place", ""),
+                selected_district,
+                selected_state or session_state_hint,
+            )
         if not selected_district:
             st.session_state.pop("auto_chart", None)
             st.session_state.pop("auto_forecast_table", None)
@@ -3142,17 +3185,13 @@ if user_query:
         elif topic in {"weather", "rag", "clarification"}:
             st.session_state["last_structured_topic"] = topic
             if topic == "weather":
-                place_guess = extract_place_from_query(user_query)
+                place_guess, weather_district, weather_state = _resolve_query_location(user_query)
                 if place_guess:
-                    lookup_path = Path("data/processed/location_lookup.csv")
-                    lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
-                    lookup = load_location_lookup(lookup_mtime)
-                    weather_district, weather_state = _lookup_district_from_location(place_guess, lookup)
-                    st.session_state["last_location_context"] = {
-                        "place": place_guess,
-                        "district": weather_district or last_location_ctx.get("district", ""),
-                        "state": weather_state or last_location_ctx.get("state", "Uttar Pradesh") or "Uttar Pradesh",
-                    }
+                    _set_session_location_context(
+                        place_guess,
+                        weather_district or last_location_ctx.get("district", ""),
+                        weather_state or last_location_ctx.get("state", "Uttar Pradesh") or "Uttar Pradesh",
+                    )
 
     st.session_state.chat_history.append(
         {
