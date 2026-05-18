@@ -10,7 +10,7 @@ BASE_ALIASES = {
     "wheat": ["गेहूं", "गेहूँ", "गेहू", "gehu", "gehun", "gehoo"],
     "rice": ["धान", "चावल", "chawal"],
     "potato": ["आलू", "aloo"],
-    "sugarcane": ["गन्ना", "ganna"],
+    "sugarcane": ["गन्ना", "गन्ने", "ganna", "ganne"],
     "mustard": ["सरसों", "sarso"],
     "maize": ["मक्का", "makka"],
     "onion": ["प्याज", "pyaz"],
