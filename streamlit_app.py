@@ -80,7 +80,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-19-irrigation-routing-v6"
+APP_BUILD_VERSION = "2026-05-19-irrigation-routing-v7"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -349,7 +349,7 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
         </div>
         """
     ).strip()
-    st.markdown(card_html, unsafe_allow_html=True)
+    st.html(card_html)
 
 
 def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | None = None, auto_table: pd.DataFrame | None = None) -> None:
@@ -3213,9 +3213,29 @@ if user_query:
         st.rerun()
         final_answer = market_answer
     else:
-        with st.spinner("Generating recommendation..."):
-            result = advisor.answer(composed_query)
         query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
+        direct_crop_followup = None
+        if (
+            crop_guide_followup_detected
+            and advisor._has_agri_intent(normalized_user_query)
+            and not advisor._is_weather_intent(normalized_user_query)
+        ):
+            guide_answer, guide_sources = build_crop_production_followup(
+                normalized_user_query,
+                crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+            )
+            if guide_answer:
+                direct_crop_followup = {
+                    "answer": guide_answer,
+                    "references": guide_sources,
+                    "retrieved": [],
+                    "topic": "crop_guide_followup",
+                }
+        if direct_crop_followup is not None:
+            result = direct_crop_followup
+        else:
+            with st.spinner("Generating recommendation..."):
+                result = advisor.answer(composed_query)
         if (
             str(result.get("topic") or "").strip().lower() == "weather"
             and crop_guide_followup_detected
