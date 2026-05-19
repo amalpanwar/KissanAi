@@ -1965,7 +1965,7 @@ class RAGAdvisor:
         crop_key = crop.lower()
         for pdf in root.glob("*.pdf"):
             try:
-                pages = read_pdf_pages(pdf)
+                pages = read_pdf_pages(pdf, prefer_docling=False)
             except Exception:
                 continue
             sources.append(str(pdf))
@@ -2242,7 +2242,7 @@ class RAGAdvisor:
         if cached is not None:
             return cached
         try:
-            text = read_pdf_text(pdf_path)
+            text = read_pdf_text(pdf_path, prefer_docling=False)
         except Exception:
             text = ""
         self._pdf_text_cache[key] = text

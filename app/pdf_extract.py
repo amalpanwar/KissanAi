@@ -49,17 +49,20 @@ def _docling_converter():
         return None
 
 
-def _cache_file(pdf_path: Path) -> Path:
+def _cache_file(pdf_path: Path, prefer_docling: bool = True) -> Path:
     stat = pdf_path.stat()
-    docling_state = "docling" if _docling_converter() is not None else "pypdf"
+    if prefer_docling:
+        engine_state = "docling" if _docling_converter() is not None else "pypdf-fallback"
+    else:
+        engine_state = "pypdf-only"
     cache_key = hashlib.sha1(
-        f"{PDF_CACHE_VERSION}|{docling_state}|{pdf_path.resolve()}|{stat.st_mtime_ns}|{stat.st_size}".encode("utf-8")
+        f"{PDF_CACHE_VERSION}|{engine_state}|{pdf_path.resolve()}|{stat.st_mtime_ns}|{stat.st_size}".encode("utf-8")
     ).hexdigest()[:16]
     return CACHE_DIR / f"{pdf_path.stem}_{cache_key}.json"
 
 
-def _load_cache(pdf_path: Path) -> dict[str, Any] | None:
-    cache_path = _cache_file(pdf_path)
+def _load_cache(pdf_path: Path, prefer_docling: bool = True) -> dict[str, Any] | None:
+    cache_path = _cache_file(pdf_path, prefer_docling=prefer_docling)
     if not cache_path.exists():
         return None
     try:
@@ -68,9 +71,9 @@ def _load_cache(pdf_path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _save_cache(pdf_path: Path, payload: dict[str, Any]) -> None:
+def _save_cache(pdf_path: Path, payload: dict[str, Any], prefer_docling: bool = True) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = _cache_file(pdf_path)
+    cache_path = _cache_file(pdf_path, prefer_docling=prefer_docling)
     cache_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
@@ -186,7 +189,7 @@ def _extract_with_pypdf(pdf_path: Path) -> dict[str, Any]:
 
 def extract_pdf(pdf_path: Path | str, prefer_docling: bool = True) -> dict[str, Any]:
     path = Path(pdf_path)
-    cached = _load_cache(path)
+    cached = _load_cache(path, prefer_docling=prefer_docling)
     if cached:
         return cached
 
@@ -200,7 +203,7 @@ def extract_pdf(pdf_path: Path | str, prefer_docling: bool = True) -> dict[str, 
         result["pages"] = pypdf_result.get("pages", [])
         result["engine"] = "docling+pypdf-pages"
 
-    _save_cache(path, result)
+    _save_cache(path, result, prefer_docling=prefer_docling)
     return result
 
 

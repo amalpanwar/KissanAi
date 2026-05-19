@@ -153,7 +153,7 @@ def _candidate_report_links(paths: list[str], report_kind: str) -> list[str]:
 
 def _pdf_has_report_signature(pdf_path: Path, report_kind: str, language: str) -> bool:
     try:
-        pages = read_pdf_pages(pdf_path)
+        pages = read_pdf_pages(pdf_path, prefer_docling=False)
     except Exception:
         return False
     text = " ".join(pages[:5])
@@ -176,7 +176,7 @@ def _pdf_has_report_signature(pdf_path: Path, report_kind: str, language: str) -
 
 def _pdf_preview_text(pdf_path: Path, max_pages: int = 8) -> str:
     try:
-        pages = read_pdf_pages(pdf_path)
+        pages = read_pdf_pages(pdf_path, prefer_docling=False)
     except Exception:
         return ""
     return "\n".join(pages[:max_pages])
@@ -301,7 +301,7 @@ def get_cacp_cost_table(report_kind: str, cache_path: Path | str | None = None) 
         return None
     pdf_path = Path(str(eng_path))
     try:
-        pages = read_pdf_pages(pdf_path)
+        pages = read_pdf_pages(pdf_path, prefer_docling=False)
     except Exception:
         return None
     text = "\n".join(pages[:260])
@@ -385,7 +385,7 @@ def get_cacp_cost_for_crop(crop_name: str) -> dict | None:
 
 def _extract_frp_from_pdf(pdf_path: Path) -> dict | None:
     try:
-        pages = read_pdf_pages(pdf_path)
+        pages = read_pdf_pages(pdf_path, prefer_docling=False)
     except Exception:
         return None
     # Scan first 30 pages for FRP sentence
@@ -429,7 +429,7 @@ def get_sugarcane_cost_snapshot(cache_path: Path | str = "data/processed/cacp_su
     if not pdf_path.exists():
         return None
     try:
-        pages = read_pdf_pages(pdf_path)
+        pages = read_pdf_pages(pdf_path, prefer_docling=False)
     except Exception:
         return None
 

@@ -353,7 +353,9 @@ def _norm(text: str) -> str:
 def _load_pages() -> list[str]:
     if not GUIDE_PDF.exists():
         return []
-    return read_pdf_pages(GUIDE_PDF)
+    # Live app queries should avoid the heavier Docling path to keep Streamlit
+    # responsive. We still use Docling in offline ingestion/build scripts.
+    return read_pdf_pages(GUIDE_PDF, prefer_docling=False)
 
 
 @lru_cache(maxsize=1)
