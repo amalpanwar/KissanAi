@@ -80,7 +80,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-19-irrigation-routing-v7"
+APP_BUILD_VERSION = "2026-05-19-irrigation-routing-v8"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -152,6 +152,29 @@ def _is_night_in_india() -> bool:
     return hour >= 18 or hour < 6
 
 
+def _looks_like_crop_water_followup(query: str, advisor: RAGAdvisor) -> bool:
+    normalized = advisor._normalize_hinglish(query)
+    crop = advisor._extract_crop_from_query(normalized)
+    if not crop:
+        return False
+    water_terms = [
+        "pani",
+        "paani",
+        "पानी",
+        "sinchai",
+        "sichai",
+        "sinchaai",
+        "irrigation",
+        "water",
+        "lagega",
+        "lagta",
+        "kitna",
+        "kitta",
+        "कितना",
+    ]
+    return any(term in normalized for term in water_terms)
+
+
 def render_weather_chat_card(text: str, action: str | None = None) -> None:
     lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
     if not lines:
@@ -163,18 +186,10 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
     night = _is_night_in_india()
     themes = {
         "rain": {
-            "bg": "repeating-linear-gradient(-65deg, rgba(255,255,255,0.0) 0px, rgba(255,255,255,0.0) 12px, rgba(220,241,255,0.16) 12px, rgba(220,241,255,0.16) 14px, rgba(255,255,255,0.0) 14px, rgba(255,255,255,0.0) 24px), linear-gradient(135deg, #0f3554 0%, #1f5c85 55%, #4f8fb7 100%)",
+            "bg": "repeating-linear-gradient(-65deg, rgba(255,255,255,0.0) 0px, rgba(255,255,255,0.0) 12px, rgba(220,241,255,0.14) 12px, rgba(220,241,255,0.14) 14px, rgba(255,255,255,0.0) 14px, rgba(255,255,255,0.0) 24px), linear-gradient(135deg, #0f3554 0%, #1f5c85 55%, #4f8fb7 100%)",
             "bg_size": "160px 160px, auto",
             "border": "#8dc7ec",
             "label": _weather_card_label(action),
-            "overlay": "🌧️",
-            "overlay_color": "rgba(255,255,255,0.95)",
-            "overlay_secondary": "💧",
-            "secondary_color": "rgba(255,255,255,0.78)",
-            "stars": "",
-            "stars_color": "rgba(255,255,255,0.0)",
-            "pattern": "🌧️  💧  ☔  🌧️  💧",
-            "pattern_color": "rgba(220, 241, 255, 0.22)",
             "card_animation": "weatherDayRainBg 5s linear infinite",
         },
         "cloud": {
@@ -182,14 +197,6 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "bg_size": "220px 100px, 260px 120px, 240px 100px, auto",
             "border": "#d7e2ea",
             "label": _weather_card_label(action),
-            "overlay": "☁️",
-            "overlay_color": "rgba(255,255,255,0.95)",
-            "overlay_secondary": "🌥️",
-            "secondary_color": "rgba(255,255,255,0.78)",
-            "stars": "",
-            "stars_color": "rgba(255,255,255,0.0)",
-            "pattern": "☁️  ☁️  🌥️  ☁️  ☁️",
-            "pattern_color": "rgba(255,255,255,0.18)",
             "card_animation": "weatherDayCloudBg 16s ease-in-out infinite",
         },
         "sun": {
@@ -197,14 +204,6 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "bg_size": "auto, auto, auto, auto, auto",
             "border": "#ffe7a8",
             "label": _weather_card_label(action),
-            "overlay": "☀️",
-            "overlay_color": "rgba(255,255,255,0.98)",
-            "overlay_secondary": "🌤️",
-            "secondary_color": "rgba(255,255,255,0.72)",
-            "stars": "",
-            "stars_color": "rgba(255,255,255,0.0)",
-            "pattern": "☀️  ☀️  🌤️  ☀️  ☀️",
-            "pattern_color": "rgba(255,248,215,0.18)",
             "card_animation": "weatherDaySunBg 10s ease-in-out infinite",
         },
         "night_rain": {
@@ -212,14 +211,6 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "bg_size": "160px 160px, auto, auto, auto, auto, auto, auto, auto",
             "border": "#4e6f96",
             "label": _weather_card_label(action),
-            "overlay": "☾",
-            "overlay_color": "rgba(250,252,255,0.96)",
-            "overlay_secondary": "✦ ✦ ✦",
-            "secondary_color": "rgba(255,255,255,0.88)",
-            "stars": "✦   ·   ✦   ·   ✦",
-            "stars_color": "rgba(255,255,255,0.95)",
-            "pattern": "╲ ╲ ╲ ╲ ╲ ╲ ╲",
-            "pattern_color": "rgba(214, 232, 255, 0.28)",
             "card_animation": "weatherNightRainBg 2.2s linear infinite",
         },
         "night_cloud": {
@@ -227,14 +218,6 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "bg_size": "auto, auto, auto, auto, auto, auto, 220px 100px, 260px 120px, 240px 100px, auto",
             "border": "#6d87a8",
             "label": _weather_card_label(action),
-            "overlay": "☾",
-            "overlay_color": "rgba(250,252,255,0.96)",
-            "overlay_secondary": "☁︎   ☁︎",
-            "secondary_color": "rgba(255,255,255,0.42)",
-            "stars": "✦   ✦   ·   ✦",
-            "stars_color": "rgba(255,255,255,0.92)",
-            "pattern": "☁︎   ☁︎   ☁︎   ☁︎",
-            "pattern_color": "rgba(255,255,255,0.16)",
             "card_animation": "weatherNightCloudBg 18s ease-in-out infinite",
         },
         "night_sun": {
@@ -242,61 +225,14 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             "bg_size": "auto, auto, auto, auto, auto, auto, auto, auto, auto",
             "border": "#9cb6df",
             "label": _weather_card_label(action),
-            "overlay": "☾",
-            "overlay_color": "rgba(250,252,255,0.98)",
-            "overlay_secondary": "✦ ✦ ✦ ✦",
-            "secondary_color": "rgba(255,255,255,0.86)",
-            "stars": "✦   ✦   ·   ✦   ·   ✦",
-            "stars_color": "rgba(255,255,255,0.96)",
-            "pattern": "✦   ·   ✦   ·   ✦",
-            "pattern_color": "rgba(255,255,255,0.14)",
             "card_animation": "weatherNightStarBg 10s ease-in-out infinite",
         },
     }
     theme_key = f"night_{theme}" if night and f"night_{theme}" in themes else theme
     cfg_theme = themes.get(theme_key, themes["cloud"])
-    if theme_key.startswith("night_"):
-        overlay_html = ""
-    else:
-        overlay_rows = "<br>".join([html.escape(cfg_theme["pattern"])] * 4)
-        overlay_html = dedent(f"""
-            <div style="position: absolute; inset: -10% -5% auto -5%; opacity: 0.18; font-size: 2.8rem; line-height: 1.8; white-space: nowrap; pointer-events: none; animation: weatherOverlayDrift 18s linear infinite;">{overlay_rows}</div>
-            <div style="position: absolute; right: 14px; top: 10px; opacity: 0.14; font-size: 4.2rem; color: {cfg_theme['overlay_color']}; text-shadow: 0 0 18px rgba(255,255,255,0.18); pointer-events: none; animation: weatherOverlayDrift 18s linear infinite;">{html.escape(cfg_theme["overlay"])}</div>
-            <div style="position: absolute; right: 64px; top: 16px; opacity: 0.18; font-size: 2.1rem; color: {cfg_theme['secondary_color']}; pointer-events: none; animation: weatherOverlayFloat 14s ease-in-out infinite;">{html.escape(cfg_theme["overlay_secondary"])}</div>
-        """).strip()
-    if theme_key.startswith("night_"):
-        pattern_html = ""
-    else:
-        pattern_animation = "weatherPatternRain 8s linear infinite" if "rain" in theme_key else "weatherPatternSlide 16s ease-in-out infinite"
-        pattern_html = dedent(f"""
-            <div style="position: absolute; left: -6px; right: -6px; bottom: 8px; opacity: 0.42; font-size: 1.1rem; letter-spacing: 0.22rem; white-space: nowrap; color: {cfg_theme['pattern_color']}; pointer-events: none; animation: {pattern_animation};">{html.escape(cfg_theme["pattern"])}</div>
-        """).strip()
     card_html = dedent(
         f"""
         <style>
-        @keyframes weatherOverlayDrift {{
-            0% {{ transform: translate3d(0, 0, 0) rotate(-6deg); }}
-            50% {{ transform: translate3d(6px, -8px, 0) rotate(-4deg); }}
-            100% {{ transform: translate3d(0, 0, 0) rotate(-6deg); }}
-        }}
-        @keyframes weatherOverlayFloat {{
-            0% {{ transform: translate3d(0, 0, 0); }}
-            50% {{ transform: translate3d(-4px, 6px, 0); }}
-            100% {{ transform: translate3d(0, 0, 0); }}
-        }}
-        @keyframes weatherPatternSlide {{
-            0% {{ transform: translate3d(-10px, 0, 0); }}
-            50% {{ transform: translate3d(10px, 0, 0); }}
-            100% {{ transform: translate3d(-10px, 0, 0); }}
-        }}
-        @keyframes weatherPatternRain {{
-            0% {{ transform: translate3d(0, -10px, 0); }}
-            100% {{ transform: translate3d(12px, 16px, 0); }}
-        }}
-        @keyframes weatherRainSweep {{
-            0% {{ background-position: 0 -24px; }}
-            100% {{ background-position: 28px 28px; }}
-        }}
         @keyframes weatherNightStarBg {{
             0%, 100% {{ background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }}
             50% {{ background-position: 0 0, 0 0, 2px 1px, -2px 2px, 1px -1px, -1px 1px, 2px 2px, -2px -1px, 0 0; }}
@@ -337,8 +273,6 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
             user-select: text;
             -webkit-user-select: text;
         ">
-            {overlay_html}
-            {pattern_html}
             <div style="position: relative; z-index: 1;">
             <div style="font-size: 0.76rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.88; margin-bottom: 8px;">
                 {cfg_theme['label']}
@@ -3216,7 +3150,10 @@ if user_query:
         query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
         direct_crop_followup = None
         if (
-            crop_guide_followup_detected
+            (
+                crop_guide_followup_detected
+                or _looks_like_crop_water_followup(user_query, advisor)
+            )
             and advisor._has_agri_intent(normalized_user_query)
             and not advisor._is_weather_intent(normalized_user_query)
         ):
@@ -3238,7 +3175,7 @@ if user_query:
                 result = advisor.answer(composed_query)
         if (
             str(result.get("topic") or "").strip().lower() == "weather"
-            and crop_guide_followup_detected
+            and (crop_guide_followup_detected or _looks_like_crop_water_followup(user_query, advisor))
             and advisor._has_agri_intent(normalized_user_query)
         ):
             guide_answer, guide_sources = build_crop_production_followup(
