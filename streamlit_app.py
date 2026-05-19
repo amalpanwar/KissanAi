@@ -80,7 +80,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-18-irrigation-routing-v4"
+APP_BUILD_VERSION = "2026-05-19-irrigation-routing-v5"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -2702,84 +2702,7 @@ if user_query:
             st.write(msg)
         st.stop()
 
-    # If the previous response asked only for a weather location, treat this input as the location.
-    pending_weather_request = st.session_state.pop("pending_weather_location", None)
-    if pending_weather_request:
-        place = user_query.strip()
-        lookup_path = Path("data/processed/location_lookup.csv")
-        lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
-        lookup = load_location_lookup(lookup_mtime)
-        district, _state = _lookup_district_from_location(place, lookup)
-        composed_weather_query = place if not district else f"{place}, {district}, Uttar Pradesh"
-        original_weather_query = (
-            pending_weather_request.get("original_query", "")
-            if isinstance(pending_weather_request, dict)
-            else ""
-        )
-        normalized_weather_query = advisor._normalize_hinglish(original_weather_query or user_query)
-        weather_request = advisor._parse_weather_request(original_weather_query or user_query, normalized_weather_query)
-        if weather_request:
-            weather_result = advisor._answer_weather_request(
-                weather_request,
-                original_weather_query or user_query,
-                normalized_weather_query,
-                place_override=place,
-            )
-            weather = weather_result.get("answer", "")
-            weather_references = weather_result.get("references", ["Open-Meteo API"])
-            weather_action = weather_result.get("weather_action", weather_request.action)
-        else:
-            weather = get_current_weather_hindi(composed_weather_query)
-            if not weather:
-                weather = get_current_weather_hindi(composed_weather_query)
-            weather_references = ["Open-Meteo API"]
-            weather_action = "current"
-        final_answer = (
-            weather
-            if weather
-            else "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
-        )
-        query_log_id = log_query_answer(
-            user_query=user_query,
-            composed_query=composed_weather_query,
-            topic="weather",
-            answer_text=final_answer,
-            references=weather_references,
-            district=district or "",
-            season=season,
-            crop_name=preferred_crop or "unknown",
-        )
-        _set_session_location_context(place, district or "", "Uttar Pradesh")
-        st.session_state.chat_history.append(
-            {
-                "role": "assistant",
-                "text": final_answer,
-                "references": weather_references,
-                "query_log_id": query_log_id,
-                "topic": "weather",
-                "user_query": user_query,
-                "weather_action": weather_action,
-            }
-        )
-        with st.chat_message("assistant"):
-            render_weather_chat_card(final_answer, action=weather_action)
-        st.stop()
-
-    last_ctx = st.session_state.get("last_structured_context", {}) or {}
-    last_location_ctx = st.session_state.get("last_location_context", {}) or {}
     normalized_user_query = advisor._normalize_hinglish(user_query)
-    session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
-    session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or district or "Meerut").strip() or "Meerut"
-    query_place, query_place_district, query_place_state = _resolve_query_location(user_query)
-    if query_place and (query_place_district or query_place_state):
-        _set_session_location_context(
-            query_place,
-            query_place_district or session_district_hint,
-            query_place_state or session_state_hint,
-        )
-        last_location_ctx = st.session_state.get("last_location_context", {}) or {}
-        session_state_hint = (last_location_ctx.get("state") or session_state_hint).strip() or "Uttar Pradesh"
-        session_district_hint = (last_location_ctx.get("district") or session_district_hint).strip() or "Meerut"
     crop_protect_followup_checker = getattr(advisor, "_is_crop_protection_followup_intent", None)
     crop_guide_followup_checker = getattr(advisor, "_is_crop_guide_followup_intent", None)
     if callable(crop_protect_followup_checker):
@@ -2791,6 +2714,101 @@ if user_query:
         crop_guide_followup_detected = bool(crop_guide_followup_checker(normalized_user_query))
     else:
         crop_guide_followup_detected = False
+
+    # If the previous response asked only for a weather location, consume this input
+    # only when it plausibly looks like a location reply. Otherwise continue with
+    # normal routing so agri follow-up questions are not hijacked into weather.
+    pending_weather_request = st.session_state.pop("pending_weather_location", None)
+    if pending_weather_request:
+        place_guess = extract_place_from_query(user_query)
+        looks_like_location_reply = bool(
+            place_guess
+            or advisor._looks_like_location_only(user_query)
+            or (
+                advisor._is_weather_intent(normalized_user_query)
+                and not crop_guide_followup_detected
+                and not crop_protection_followup
+            )
+        )
+        if not looks_like_location_reply and (crop_guide_followup_detected or crop_protection_followup or advisor._has_agri_intent(normalized_user_query)):
+            pending_weather_request = None
+        else:
+            place = place_guess or user_query.strip()
+            lookup_path = Path("data/processed/location_lookup.csv")
+            lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+            lookup = load_location_lookup(lookup_mtime)
+            district, _state = _lookup_district_from_location(place, lookup)
+            composed_weather_query = place if not district else f"{place}, {district}, Uttar Pradesh"
+            original_weather_query = (
+                pending_weather_request.get("original_query", "")
+                if isinstance(pending_weather_request, dict)
+                else ""
+            )
+            normalized_weather_query = advisor._normalize_hinglish(original_weather_query or user_query)
+            weather_request = advisor._parse_weather_request(original_weather_query or user_query, normalized_weather_query)
+            if weather_request:
+                weather_result = advisor._answer_weather_request(
+                    weather_request,
+                    original_weather_query or user_query,
+                    normalized_weather_query,
+                    place_override=place,
+                )
+                weather = weather_result.get("answer", "")
+                weather_references = weather_result.get("references", ["Open-Meteo API"])
+                weather_action = weather_result.get("weather_action", weather_request.action)
+            else:
+                weather = get_current_weather_hindi(composed_weather_query)
+                if not weather:
+                    weather = get_current_weather_hindi(composed_weather_query)
+                weather_references = ["Open-Meteo API"]
+                weather_action = "current"
+            final_answer = (
+                weather
+                if weather
+                else "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+            )
+            query_log_id = log_query_answer(
+                user_query=user_query,
+                composed_query=composed_weather_query,
+                topic="weather",
+                answer_text=final_answer,
+                references=weather_references,
+                district=district or "",
+                season=season,
+                crop_name=preferred_crop or "unknown",
+            )
+            _set_session_location_context(place, district or "", "Uttar Pradesh")
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "text": final_answer,
+                    "references": weather_references,
+                    "query_log_id": query_log_id,
+                    "topic": "weather",
+                    "user_query": user_query,
+                    "weather_action": weather_action,
+                }
+            )
+            with st.chat_message("assistant"):
+                render_weather_chat_card(final_answer, action=weather_action)
+            st.stop()
+
+    last_ctx = st.session_state.get("last_structured_context", {}) or {}
+    last_location_ctx = st.session_state.get("last_location_context", {}) or {}
+    session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
+    session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or district or "Meerut").strip() or "Meerut"
+    query_place = query_place_district = query_place_state = None
+    if not crop_guide_followup_detected and not crop_protection_followup:
+        query_place, query_place_district, query_place_state = _resolve_query_location(user_query)
+    if query_place and (query_place_district or query_place_state):
+        _set_session_location_context(
+            query_place,
+            query_place_district or session_district_hint,
+            query_place_state or session_state_hint,
+        )
+        last_location_ctx = st.session_state.get("last_location_context", {}) or {}
+        session_state_hint = (last_location_ctx.get("state") or session_state_hint).strip() or "Uttar Pradesh"
+        session_district_hint = (last_location_ctx.get("district") or session_district_hint).strip() or "Meerut"
 
     followup_profit = (
         is_profitability_followup_query(user_query)
