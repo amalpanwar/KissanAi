@@ -45,6 +45,7 @@ BASE_ALIASES = {
     "apple": ["सेब", "seb"],
     "grapes": ["अंगूर", "angoor"],
     "pineapple": ["अनानास", "ananas"],
+    "saffron": ["केसर", "kesar"],
     "safflower": ["kusum", "कुसुम"],
     "fish": ["मछली", "machhli", "machli", "machhi"],
     "egg": ["अंडा", "अंडे", "ande", "andey"],

@@ -2453,7 +2453,14 @@ class RAGAdvisor:
     def _web_search_include_domains(self, question: str) -> list[str]:
         q = (question or "").lower()
         if self._is_msp_query(q) or self._is_price_query(q):
-            return ["pib.gov.in", "agmarknet.gov.in"]
+            return [
+                "pib.gov.in",
+                "agmarknet.gov.in",
+                "enam.gov.in",
+                "apeda.gov.in",
+                "agriexchange.apeda.gov.in",
+                "indianspices.com",
+            ]
         if self._is_crop_protection_followup_intent(q):
             return ["ppqs.gov.in", "icar.gov.in", "agricoop.nic.in"]
         if self._is_crop_guide_intent(q):
@@ -2520,6 +2527,13 @@ class RAGAdvisor:
             queries.append(f"{crop} {' '.join(disease_terms[:2])} advisory India")
         if crop and self._is_msp_query(q):
             queries.append(f"{crop} MSP India official")
+        if crop and self._is_price_query(q):
+            if district:
+                queries.append(f"{crop} mandi price {district} India")
+                queries.append(f"{crop} market price {district} India")
+            queries.append(f"{crop} mandi price India")
+            queries.append(f"{crop} market price India")
+            queries.append(f"{crop} current price India")
         if crop and district and self._is_crop_choice_intent(q):
             queries.append(f"{crop} farming economics {district} Uttar Pradesh India")
         queries.append(q)

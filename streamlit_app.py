@@ -80,7 +80,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-19-irrigation-routing-v9"
+APP_BUILD_VERSION = "2026-05-20-price-fallback-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 FETCH_PAGE_LIMIT = 200
@@ -784,6 +784,85 @@ def get_sugarcane_price_fallback() -> dict[str, str | float]:
         "source": "baseline/MSP-SAP estimate",
         "source_url": "",
     }
+
+
+SPECIALTY_CROP_PRICE_NOTES = {
+    "saffron": (
+        "केसर जैसी specialty crop का भाव grade, origin और quality के हिसाब से काफी बदलता है। "
+        "अगर आप specific market या state बताएं, तो targeted price lookup ज्यादा उपयोगी रहेगा।"
+    ),
+}
+
+
+def _format_specialty_crop_price_unavailable(
+    commodity_label: str,
+    commodity_key: str,
+    selected_district: str,
+    mention_district: bool,
+) -> str:
+    intro = (
+        f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है।\n"
+        if mention_district and selected_district
+        else ""
+    )
+    base = f"{commodity_label} के लिए स्थानीय मंडी/MSP डेटा उपलब्ध नहीं मिला। "
+    note = SPECIALTY_CROP_PRICE_NOTES.get(
+        commodity_key,
+        "इस फसल का भाव market, quality और grade के हिसाब से बदल सकता है। "
+        "अगर आप specific market या state बताएं, तो मैं targeted lookup कर सकता हूँ।",
+    )
+    return f"{intro}{base}{note}".strip()
+
+
+def _try_price_web_fallback(
+    advisor: RAGAdvisor | None,
+    *,
+    user_query: str,
+    commodity_label: str,
+    commodity_key: str,
+    selected_state: str,
+    selected_district: str,
+    mention_district: bool,
+) -> tuple[str | None, list[str]]:
+    if advisor is None or not hasattr(advisor, "_answer_with_web_search"):
+        return None, []
+    question_candidates = [
+        (user_query or "").strip(),
+        f"{commodity_key} mandi price India",
+        f"{commodity_key} market price India",
+        f"{commodity_key} current price India",
+    ]
+    if selected_district:
+        question_candidates.insert(1, f"{commodity_key} mandi price {selected_district} India")
+    context_parts = []
+    if selected_district:
+        context_parts.append(f"जिला: {selected_district}")
+    if selected_state:
+        context_parts.append(f"राज्य: {selected_state}")
+    context_part = " | ".join(context_parts)
+    seen: set[str] = set()
+    for question in question_candidates:
+        q = re.sub(r"\s+", " ", question).strip()
+        if not q:
+            continue
+        q_norm = q.lower()
+        if q_norm in seen:
+            continue
+        seen.add(q_norm)
+        try:
+            web_result = advisor._answer_with_web_search(q, context_part)
+        except Exception:
+            web_result = None
+        if not web_result:
+            continue
+        answer = str(web_result.get("answer") or "").strip()
+        refs = [str(r).strip() for r in (web_result.get("references") or []) if str(r).strip()]
+        if not answer:
+            continue
+        if mention_district and selected_district and "चयनित जिले" not in answer:
+            answer = f"चयनित जिले ({selected_district}) में स्थानीय मंडी डेटा उपलब्ध नहीं है।\n{answer}"
+        return answer, refs
+    return None, []
 
 
 def is_profitability_followup_query(text: str) -> bool:
@@ -2958,6 +3037,7 @@ if user_query:
         commodity_label = commodity_display_name(selected_commodity)
         filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
         mention_district_in_price_answer = bool(selected_district and (explicit_place or explicit_district))
+        price_references: list[str] = []
         if filtered.empty:
             if selected_commodity.lower() in {"sugarcane", "गन्ना"}:
                 sugarcane_price = get_sugarcane_price_fallback()
@@ -2994,24 +3074,37 @@ if user_query:
                     )
                     final_answer = f"{intro}MSP (राष्ट्रीय) {msp['crop']}: ₹{int(msp['msp'])}/क्विंटल.\nस्रोत: {msp['source_url']}"
                 else:
-                    intro = (
-                        f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है। "
-                        if mention_district_in_price_answer
-                        else ""
+                    web_answer, price_references = _try_price_web_fallback(
+                        advisor,
+                        user_query=user_query,
+                        commodity_label=commodity_label,
+                        commodity_key=selected_commodity,
+                        selected_state=selected_state,
+                        selected_district=selected_district,
+                        mention_district=mention_district_in_price_answer,
                     )
-                    final_answer = f"{intro}कृपया दूसरी फसल चुनें या बाद में पुनः प्रयास करें।"
+                    if web_answer:
+                        final_answer = web_answer
+                    else:
+                        commodity_key = re.sub(r"[^a-z0-9]+", "", str(selected_commodity).lower())
+                        final_answer = _format_specialty_crop_price_unavailable(
+                            commodity_label,
+                            commodity_key,
+                            selected_district,
+                            mention_district_in_price_answer,
+                        )
             query_log_id = log_query_answer(
                 user_query=user_query,
                 composed_query=composed_query,
                 topic="price",
                 answer_text=final_answer,
-                references=[],
+                references=price_references,
                 district=selected_district,
                 season=season,
                 crop_name=selected_commodity or "unknown",
             )
             st.session_state.chat_history.append(
-                {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+                {"role": "assistant", "text": final_answer, "references": price_references, "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
             )
             with st.chat_message("assistant"):
                 st.write(final_answer)
