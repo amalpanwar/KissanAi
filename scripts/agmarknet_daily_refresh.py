@@ -52,17 +52,19 @@ def main() -> int:
     debug = os.getenv("AGMARKNET_DEBUG", "0")
     limit = os.getenv("AGMARKNET_LIMIT", "250")
     districts_as_list = os.getenv("AGMARKNET_DISTRICTS_AS_LIST", "0") == "1"
+    mode = os.getenv("AGMARKNET_MODE", "report").strip().lower() or "report"
     before_latest = _latest_report_date(OUT_CSV)
 
     def build_cmd(lb_days: int) -> list[str]:
         cmd = [
             python,
             str(script),
+            "--mode",
+            mode,
             "--lookback_days",
             str(lb_days),
             "--state_ids",
             state_ids,
-            "--all_districts",
             "--district_ids",
             district_ids,
             "--group_ids_file",
@@ -83,6 +85,8 @@ def main() -> int:
             "--trim_years",
             keep_years,
         ]
+        if mode == "dashboard":
+            cmd.append("--all_districts")
         if districts_as_list:
             cmd.append("--districts_as_list")
         if debug == "1":

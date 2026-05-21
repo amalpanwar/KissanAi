@@ -17,7 +17,7 @@ DEFAULT_GROUP_MAP = ROOT / "data" / "raw" / "agmarknet_group_commodities.json"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.agmarknet_client import ALL_DISTRICTS, build_snapshot_payload, build_url, extract_rows, fetch_page
+from app.agmarknet_client import ALL_DISTRICTS, build_report_payload, build_snapshot_payload, build_url, extract_rows, fetch_page
 
 
 def parse_ids(val: str) -> list[str]:
@@ -140,6 +140,12 @@ def main() -> None:
     parser.add_argument("--type", default="3")
     parser.add_argument("--msp", default="0")
     parser.add_argument("--options", default="2", help="Comma list of options, e.g. 2 for price, 1 for arrivals")
+    parser.add_argument(
+        "--mode",
+        choices=["report", "dashboard"],
+        default="report",
+        help="Agmarknet source mode. 'report' uses all-type-of-report at district level; 'dashboard' uses the narrower snapshot endpoint.",
+    )
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--max_pages", type=int, default=200)
     parser.add_argument("--sleep_sec", type=float, default=0.3)
@@ -170,77 +176,153 @@ def main() -> None:
 
     state_ids = parse_ids(args.state_ids)
     district_ids = parse_ids(args.district_ids) + load_id_list(args.district_ids_file)
-    # Keep parsing legacy args for CLI compatibility, but the live dashboard
-    # snapshot flow no longer depends on stale local group/commodity/district ids.
-    _ = parse_ids(args.group_ids) + load_id_list(args.group_ids_file)
-    _ = parse_ids(args.commodity_ids) + load_id_list(args.commodity_ids_file)
-    _ = parse_ids(args.options)
-    _ = load_group_map(args.group_commodities_json)
+    group_ids = parse_ids(args.group_ids) + load_id_list(args.group_ids_file)
+    commodity_ids = parse_ids(args.commodity_ids) + load_id_list(args.commodity_ids_file)
+    option_ids = parse_ids(args.options)
+    group_map = load_group_map(args.group_commodities_json)
 
     all_rows: list[dict[str, Any]] = []
     failed_rows: list[dict[str, Any]] = []
     date_values = iter_dates(from_date, to_date)
 
-    use_all_districts = args.all_districts or not district_ids
-    live_district_ids = None if use_all_districts else district_ids
+    if args.mode == "dashboard":
+        use_all_districts = args.all_districts or not district_ids
+        live_district_ids = None if use_all_districts else district_ids
 
-    for state_id in state_ids:
-        for date_str in date_values:
-            page = 1
-            while page <= args.max_pages:
-                params = build_snapshot_payload(
-                    state_id=state_id,
-                    date_str=date_str,
-                    page=page,
-                    limit=args.limit,
-                    district_ids=live_district_ids,
-                )
-                try:
-                    payload = fetch_page(
-                        params,
-                        timeout_sec=args.timeout_sec,
-                        retries=args.retries,
+        for state_id in state_ids:
+            for date_str in date_values:
+                page = 1
+                while page <= args.max_pages:
+                    params = build_snapshot_payload(
+                        state_id=state_id,
+                        date_str=date_str,
+                        page=page,
+                        limit=args.limit,
+                        district_ids=live_district_ids,
                     )
-                except Exception as exc:
-                    if args.debug:
-                        print(f"Fetch failed: {exc} | {build_url(params)}", file=sys.stderr)
-                    failed_rows.append(
-                        {
-                            "state_id": state_id,
-                            "date": date_str,
-                            "page": page,
-                            "error": str(exc),
-                            "url": build_url(params),
-                            "request_json": json.dumps(params, ensure_ascii=False),
-                        }
-                    )
-                    break
-                rows = extract_rows(payload)
-                if not rows:
-                    break
-                price_unit, arrival_unit = extract_units(payload)
-                for r in rows:
-                    r = dict(r)
-                    r["_state_id"] = state_id
-                    r["_requested_date"] = date_str
-                    # Normalize to the legacy column names that the app already expects.
-                    if "reported_date" in r and "rep_date" not in r:
-                        r["rep_date"] = r["reported_date"]
-                    if "as_on" in r and "model_price_wt" not in r:
-                        r["model_price_wt"] = r["as_on"]
-                    if price_unit and (not r.get("unit_name_price") or str(r.get("unit_name_price")).strip().lower() == "nan"):
-                        r["unit_name_price"] = price_unit
-                    if arrival_unit and (not r.get("unit_name_arrival") or str(r.get("unit_name_arrival")).strip().lower() == "nan"):
-                        r["unit_name_arrival"] = arrival_unit
-                    all_rows.append(r)
-                pagination = payload.get("pagination") or {}
-                total_pages = int(pagination.get("total_pages") or 0)
-                if total_pages and page >= total_pages:
-                    break
-                if len(rows) < args.limit:
-                    break
-                page += 1
-                time.sleep(args.sleep_sec)
+                    try:
+                        payload = fetch_page(
+                            params,
+                            timeout_sec=args.timeout_sec,
+                            retries=args.retries,
+                        )
+                    except Exception as exc:
+                        if args.debug:
+                            print(f"Fetch failed: {exc} | {build_url(params)}", file=sys.stderr)
+                        failed_rows.append(
+                            {
+                                "mode": args.mode,
+                                "state_id": state_id,
+                                "date": date_str,
+                                "page": page,
+                                "error": str(exc),
+                                "url": build_url(params),
+                                "request_json": json.dumps(params, ensure_ascii=False),
+                            }
+                        )
+                        break
+                    rows = extract_rows(payload)
+                    if not rows:
+                        break
+                    price_unit, arrival_unit = extract_units(payload)
+                    for r in rows:
+                        r = dict(r)
+                        r["_state_id"] = state_id
+                        r["_requested_date"] = date_str
+                        if "reported_date" in r and "rep_date" not in r:
+                            r["rep_date"] = r["reported_date"]
+                        if "as_on" in r and "model_price_wt" not in r:
+                            r["model_price_wt"] = r["as_on"]
+                        if price_unit and (not r.get("unit_name_price") or str(r.get("unit_name_price")).strip().lower() == "nan"):
+                            r["unit_name_price"] = price_unit
+                        if arrival_unit and (not r.get("unit_name_arrival") or str(r.get("unit_name_arrival")).strip().lower() == "nan"):
+                            r["unit_name_arrival"] = arrival_unit
+                        all_rows.append(r)
+                    pagination = payload.get("pagination") or {}
+                    total_pages = int(pagination.get("total_pages") or 0)
+                    if total_pages and page >= total_pages:
+                        break
+                    if len(rows) < args.limit:
+                        break
+                    page += 1
+                    time.sleep(args.sleep_sec)
+    else:
+        if not group_ids and group_map:
+            group_ids = sorted(group_map.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x))
+        if not group_ids:
+            raise SystemExit("Report mode requires --group_ids/--group_ids_file or a valid group-commodity map.")
+        if not district_ids:
+            district_ids = [""]
+        if not option_ids:
+            option_ids = ["2"]
+
+        for state_id in state_ids:
+            for district_id in district_ids:
+                for group_id in group_ids:
+                    group_commodity_ids = commodity_ids or group_map.get(str(group_id), [])
+                    if not group_commodity_ids:
+                        group_commodity_ids = [""]
+                    for commodity_id in group_commodity_ids:
+                        for option in option_ids:
+                            page = 1
+                            while page <= args.max_pages:
+                                params = build_report_payload(
+                                    state_id=state_id,
+                                    district_id=district_id,
+                                    group_id=group_id,
+                                    commodity_id=commodity_id,
+                                    from_date=from_date,
+                                    to_date=to_date,
+                                    option=option,
+                                    page=page,
+                                    limit=args.limit,
+                                    period=args.period,
+                                    type_value=args.type,
+                                    msp=args.msp,
+                                )
+                                try:
+                                    payload = fetch_page(
+                                        params,
+                                        timeout_sec=args.timeout_sec,
+                                        retries=args.retries,
+                                    )
+                                except Exception as exc:
+                                    if args.debug:
+                                        print(f"Fetch failed: {exc} | {build_url(params)}", file=sys.stderr)
+                                    failed_rows.append(
+                                        {
+                                            "mode": args.mode,
+                                            "state_id": state_id,
+                                            "district_id": district_id,
+                                            "group_id": group_id,
+                                            "commodity_id": commodity_id,
+                                            "option": option,
+                                            "page": page,
+                                            "error": str(exc),
+                                            "url": build_url(params),
+                                            "request_json": json.dumps(params, ensure_ascii=False),
+                                        }
+                                    )
+                                    break
+                                rows = extract_rows(payload)
+                                if not rows:
+                                    break
+                                for r in rows:
+                                    r = dict(r)
+                                    r["_state_id"] = state_id
+                                    r["_district_id"] = district_id
+                                    r["_group_id"] = group_id
+                                    r["_commodity_id"] = commodity_id
+                                    r["_option"] = option
+                                    if "reported_date" in r and "rep_date" not in r:
+                                        r["rep_date"] = r["reported_date"]
+                                    if "as_on" in r and "model_price_wt" not in r:
+                                        r["model_price_wt"] = r["as_on"]
+                                    all_rows.append(r)
+                                if len(rows) < args.limit:
+                                    break
+                                page += 1
+                                time.sleep(args.sleep_sec)
 
     if not all_rows:
         print("No records returned.")
