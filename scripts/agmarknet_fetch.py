@@ -165,6 +165,12 @@ def main() -> None:
     parser.add_argument("--merge_existing", action="store_true", help="Merge with existing CSV at --out")
     parser.add_argument("--trim_years", type=int, default=0, help="After merge, keep last N years only")
     parser.add_argument("--debug", action="store_true", help="Log failed URLs and continue")
+    parser.add_argument("--summary_json", default="", help="Optional JSON file to write run summary/status.")
+    parser.add_argument(
+        "--require_complete",
+        action="store_true",
+        help="Exit non-zero if any request failures occurred, even if rows were saved.",
+    )
     parser.add_argument("--out", default="data/raw/live/agmarknet_report.csv")
     args = parser.parse_args()
 
@@ -189,6 +195,34 @@ def main() -> None:
     all_rows: list[dict[str, Any]] = []
     failed_rows: list[dict[str, Any]] = []
     date_values = iter_dates(from_date, to_date)
+    started_at = datetime.now().isoformat()
+
+    def write_summary(status: str, rows_saved: int = 0, message: str = "") -> None:
+        if not args.summary_json:
+            return
+        summary_path = Path(args.summary_json)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "status": status,
+            "message": message,
+            "mode": args.mode,
+            "from_date": from_date,
+            "to_date": to_date,
+            "started_at": started_at,
+            "completed_at": datetime.now().isoformat(),
+            "rows_saved": int(rows_saved),
+            "raw_rows": int(len(all_rows)),
+            "failure_count": int(len(failed_rows)),
+            "out": str(Path(args.out)),
+            "fail_log": str(Path(args.fail_log)),
+            "state_ids": state_ids,
+            "district_ids": district_ids,
+            "group_ids": group_ids,
+        }
+        try:
+            summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     if args.mode == "dashboard":
         use_all_districts = args.all_districts or not district_ids
@@ -342,7 +376,8 @@ def main() -> None:
             fail_path.parent.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(failed_rows).to_csv(fail_path, index=False)
             print(f"Wrote failures to {fail_path}")
-        return
+        write_summary("failed", rows_saved=0, message="No records returned.")
+        return 4
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,7 +443,19 @@ def main() -> None:
         fail_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(failed_rows).to_csv(fail_path, index=False)
         print(f"Wrote failures to {fail_path}")
+        if args.require_complete:
+            write_summary("partial", rows_saved=len(df), message="Saved rows but some request failures occurred.")
+            return 5
+    else:
+        fail_path = Path(args.fail_log)
+        if fail_path.exists():
+            try:
+                fail_path.unlink()
+            except Exception:
+                pass
+    write_summary("success", rows_saved=len(df), message="Saved rows successfully.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

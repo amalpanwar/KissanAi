@@ -1,0 +1,46 @@
+{
+  "status": "success",
+  "message": "Saved rows successfully.",
+  "mode": "report",
+  "from_date": "2026-04-21",
+  "to_date": "2026-05-21",
+  "started_at": "2026-05-21T22:58:39.834828",
+  "completed_at": "2026-05-21T22:59:29.027052",
+  "rows_saved": 222373,
+  "raw_rows": 119,
+  "failure_count": 0,
+  "out": "data/raw/live/agmarknet_report.csv",
+  "fail_log": "data/raw/live/agmarknet_failures.csv",
+  "state_ids": [
+    "34"
+  ],
+  "district_ids": [
+    "586",
+    "595",
+    "604",
+    "614",
+    "615",
+    "640",
+    "642",
+    "649",
+    "653",
+    "638"
+  ],
+  "group_ids": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15"
+  ]
+}

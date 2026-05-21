@@ -88,6 +88,7 @@ AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
 AGMARKNET_AUTO_REFRESH_LOG = Path("logs/agmarknet_auto_refresh.log")
 AGMARKNET_AUTO_REFRESH_RETRY_MINUTES = 30
+AGMARKNET_REFRESH_STATUS = Path("data/raw/live/agmarknet_refresh_status.json")
 FETCH_PAGE_LIMIT = 200
 FETCH_MAX_RECORDS_COMBO = 50000
 FETCH_MAX_RECORDS_STATE = 50000
@@ -141,6 +142,15 @@ def _load_agmarknet_auto_refresh_meta() -> dict[str, object]:
         return {}
     try:
         return json.loads(AGMARKNET_AUTO_REFRESH_META.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _load_agmarknet_refresh_status() -> dict[str, object]:
+    if not AGMARKNET_REFRESH_STATUS.exists():
+        return {}
+    try:
+        return json.loads(AGMARKNET_REFRESH_STATUS.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
@@ -2472,6 +2482,16 @@ if isinstance(pending_sidebar_location, dict):
 with st.sidebar:
     if st.session_state.get("agmarknet_auto_refresh_notice"):
         st.caption(str(st.session_state.get("agmarknet_auto_refresh_notice")))
+    agmarknet_status = _load_agmarknet_refresh_status()
+    latest_report_date = _latest_agmarknet_report_date(AGMARKNET_CSV)
+    with st.expander("Agmarknet Status", expanded=False):
+        st.caption(f"Latest report date: {latest_report_date.isoformat() if latest_report_date else 'Unavailable'}")
+        if agmarknet_status:
+            st.caption(f"Last refresh status: {agmarknet_status.get('status', 'unknown')}")
+            if agmarknet_status.get("updated_at"):
+                st.caption(f"Last refresh time: {agmarknet_status.get('updated_at')}")
+            if agmarknet_status.get("message"):
+                st.caption(str(agmarknet_status.get("message")))
     render_auth_sidebar(cfg.paths["sqlite_db"])
     render_admin_feedback_queue(cfg.paths["sqlite_db"])
     if not current_user():
