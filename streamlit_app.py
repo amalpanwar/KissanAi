@@ -5,6 +5,7 @@ import re
 import sys
 import sqlite3
 import smtplib
+import subprocess
 import html
 import uuid
 import hmac
@@ -80,9 +81,11 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-20-price-fallback-v1"
+APP_BUILD_VERSION = "2026-05-21-agmarknet-auto-refresh-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
+AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
+AGMARKNET_AUTO_REFRESH_LOG = Path("logs/agmarknet_auto_refresh.log")
 FETCH_PAGE_LIMIT = 200
 FETCH_MAX_RECORDS_COMBO = 50000
 FETCH_MAX_RECORDS_STATE = 50000
@@ -111,6 +114,102 @@ def _safe_float(value: object) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _latest_agmarknet_report_date(path: Path) -> date | None:
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, usecols=["rep_date"])
+    except Exception:
+        return None
+    if "rep_date" not in df.columns or df.empty:
+        return None
+    dt = pd.to_datetime(df["rep_date"], errors="coerce", dayfirst=True)
+    if dt.dropna().empty:
+        return None
+    try:
+        return dt.max().date()
+    except Exception:
+        return None
+
+
+def _load_agmarknet_auto_refresh_meta() -> dict[str, object]:
+    if not AGMARKNET_AUTO_REFRESH_META.exists():
+        return {}
+    try:
+        return json.loads(AGMARKNET_AUTO_REFRESH_META.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_agmarknet_auto_refresh_meta(payload: dict[str, object]) -> None:
+    AGMARKNET_AUTO_REFRESH_META.parent.mkdir(parents=True, exist_ok=True)
+    AGMARKNET_AUTO_REFRESH_META.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _pid_is_running(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except Exception:
+        return False
+    return True
+
+
+def _should_start_agmarknet_auto_refresh() -> tuple[bool, str]:
+    if os.getenv("AGMARKNET_AUTO_REFRESH", "1").strip().lower() in {"0", "false", "no"}:
+        return False, "disabled"
+    meta = _load_agmarknet_auto_refresh_meta()
+    last_started_raw = str(meta.get("last_started_at") or "").strip()
+    last_pid = int(meta.get("pid") or 0) if str(meta.get("pid") or "").strip().isdigit() else 0
+    if last_pid and _pid_is_running(last_pid):
+        return False, "already_running"
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    if last_started_raw:
+        try:
+            last_started = datetime.fromisoformat(last_started_raw)
+            if last_started.astimezone(ZoneInfo("Asia/Kolkata")).date() >= today:
+                return False, "already_started_today"
+        except Exception:
+            pass
+    latest_report_date = _latest_agmarknet_report_date(AGMARKNET_CSV)
+    if latest_report_date is not None and latest_report_date >= today:
+        return False, "already_latest"
+    return True, "stale_or_missing"
+
+
+def _start_agmarknet_auto_refresh() -> tuple[bool, str]:
+    should_start, reason = _should_start_agmarknet_auto_refresh()
+    if not should_start:
+        return False, reason
+    cmd = [
+        sys.executable,
+        str(Path("scripts/agmarknet_daily_refresh.py")),
+    ]
+    env = os.environ.copy()
+    env.setdefault("AGMARKNET_LOOKBACK_DAYS", "14")
+    env.setdefault("AGMARKNET_MODE", "report")
+    AGMARKNET_AUTO_REFRESH_LOG.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = AGMARKNET_AUTO_REFRESH_LOG.open("ab")
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(Path(".")),
+        env=env,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+    )
+    _save_agmarknet_auto_refresh_meta(
+        {
+            "last_started_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
+            "pid": proc.pid,
+            "mode": env.get("AGMARKNET_MODE", "report"),
+            "lookback_days": env.get("AGMARKNET_LOOKBACK_DAYS", "14"),
+            "log_file": str(AGMARKNET_AUTO_REFRESH_LOG),
+        }
+    )
+    return True, "started"
 
 
 def _extract_primary_weather_condition(text: str) -> str:
@@ -2323,6 +2422,12 @@ restore_auth_from_cookie(cfg.paths["sqlite_db"])
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())
 
+agmarknet_auto_started, agmarknet_auto_reason = _start_agmarknet_auto_refresh()
+if agmarknet_auto_started:
+    st.session_state["agmarknet_auto_refresh_notice"] = (
+        "Agmarknet auto-refresh started in background for the last 14 days."
+    )
+
 # Apply pending sidebar selection from last query (if any)
 pending = st.session_state.pop("pending_selection", None)
 if isinstance(pending, dict):
@@ -2343,6 +2448,8 @@ if isinstance(pending_sidebar_location, dict):
         st.session_state["fc_district"] = pending_district
 
 with st.sidebar:
+    if st.session_state.get("agmarknet_auto_refresh_notice"):
+        st.caption(str(st.session_state.get("agmarknet_auto_refresh_notice")))
     render_auth_sidebar(cfg.paths["sqlite_db"])
     render_admin_feedback_queue(cfg.paths["sqlite_db"])
     if not current_user():
