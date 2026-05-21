@@ -76,8 +76,26 @@ def build_report_payload(
     type_value: str = "3",
     msp: str = "0",
 ) -> dict[str, Any]:
-    district_txt = str(district_id).strip() if district_id is not None else ""
-    commodity_txt = str(commodity_id).strip() if commodity_id is not None else ""
+    def _to_int_list(value: str | int | list[int] | list[str] | None) -> list[int]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            out: list[int] = []
+            for item in value:
+                txt = str(item).strip()
+                if txt:
+                    out.append(int(txt))
+            return out
+        txt = str(value).strip()
+        if not txt:
+            return []
+        parts = [p.strip() for p in txt.split(",") if p.strip()]
+        if len(parts) > 1:
+            return [int(p) for p in parts]
+        return [int(txt)]
+
+    district_vals = _to_int_list(district_id)
+    commodity_vals = _to_int_list(commodity_id)
     return {
         "_agmarknet_mode": "report",
         "type": int(type_value),
@@ -86,9 +104,9 @@ def build_report_payload(
         "msp": int(msp),
         "period": str(period),
         "group": [int(group_id)],
-        "commodity": [int(commodity_txt)] if commodity_txt else [],
+        "commodity": commodity_vals,
         "state": [int(state_id)],
-        "district": [int(district_txt)] if district_txt else [],
+        "district": district_vals,
         "market": [],
         "grade": [],
         "page": int(page),

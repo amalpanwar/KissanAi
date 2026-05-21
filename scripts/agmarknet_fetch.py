@@ -85,6 +85,11 @@ def iter_dates(from_date: str, to_date: str) -> list[str]:
 def extract_units(payload: dict[str, Any]) -> tuple[str | None, str | None]:
     data = payload.get("data") or {}
     columns = data.get("columns") if isinstance(data, dict) else None
+    if columns is None and isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and isinstance(item.get("columns"), list):
+                columns = item.get("columns")
+                break
     if not isinstance(columns, list):
         return None, None
 
@@ -251,78 +256,84 @@ def main() -> None:
             group_ids = sorted(group_map.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x))
         if not group_ids:
             raise SystemExit("Report mode requires --group_ids/--group_ids_file or a valid group-commodity map.")
-        if not district_ids:
-            district_ids = [""]
+        district_batch = district_ids or [""]
         if not option_ids:
             option_ids = ["2"]
 
         for state_id in state_ids:
-            for district_id in district_ids:
-                for group_id in group_ids:
-                    group_commodity_ids = commodity_ids or group_map.get(str(group_id), [])
-                    if not group_commodity_ids:
-                        group_commodity_ids = [""]
-                    for commodity_id in group_commodity_ids:
-                        for option in option_ids:
-                            page = 1
-                            while page <= args.max_pages:
-                                params = build_report_payload(
-                                    state_id=state_id,
-                                    district_id=district_id,
-                                    group_id=group_id,
-                                    commodity_id=commodity_id,
-                                    from_date=from_date,
-                                    to_date=to_date,
-                                    option=option,
-                                    page=page,
-                                    limit=args.limit,
-                                    period=args.period,
-                                    type_value=args.type,
-                                    msp=args.msp,
-                                )
-                                try:
-                                    payload = fetch_page(
-                                        params,
-                                        timeout_sec=args.timeout_sec,
-                                        retries=args.retries,
-                                    )
-                                except Exception as exc:
-                                    if args.debug:
-                                        print(f"Fetch failed: {exc} | {build_url(params)}", file=sys.stderr)
-                                    failed_rows.append(
-                                        {
-                                            "mode": args.mode,
-                                            "state_id": state_id,
-                                            "district_id": district_id,
-                                            "group_id": group_id,
-                                            "commodity_id": commodity_id,
-                                            "option": option,
-                                            "page": page,
-                                            "error": str(exc),
-                                            "url": build_url(params),
-                                            "request_json": json.dumps(params, ensure_ascii=False),
-                                        }
-                                    )
-                                    break
-                                rows = extract_rows(payload)
-                                if not rows:
-                                    break
-                                for r in rows:
-                                    r = dict(r)
-                                    r["_state_id"] = state_id
-                                    r["_district_id"] = district_id
-                                    r["_group_id"] = group_id
-                                    r["_commodity_id"] = commodity_id
-                                    r["_option"] = option
-                                    if "reported_date" in r and "rep_date" not in r:
-                                        r["rep_date"] = r["reported_date"]
-                                    if "as_on" in r and "model_price_wt" not in r:
-                                        r["model_price_wt"] = r["as_on"]
-                                    all_rows.append(r)
-                                if len(rows) < args.limit:
-                                    break
-                                page += 1
-                                time.sleep(args.sleep_sec)
+            for group_id in group_ids:
+                group_commodity_ids = commodity_ids or group_map.get(str(group_id), [])
+                commodity_batch = [str(x).strip() for x in group_commodity_ids if str(x).strip()]
+                if not commodity_batch:
+                    commodity_batch = [""]
+                for option in option_ids:
+                    page = 1
+                    while page <= args.max_pages:
+                        params = build_report_payload(
+                            state_id=state_id,
+                            district_id=",".join(district_batch) if district_batch and district_batch != [""] else "",
+                            group_id=group_id,
+                            commodity_id=",".join(commodity_batch) if commodity_batch and commodity_batch != [""] else "",
+                            from_date=from_date,
+                            to_date=to_date,
+                            option=option,
+                            page=page,
+                            limit=args.limit,
+                            period=args.period,
+                            type_value=args.type,
+                            msp=args.msp,
+                        )
+                        if district_batch and district_batch != [""]:
+                            params["district"] = [int(x) for x in district_batch if str(x).strip()]
+                        if commodity_batch and commodity_batch != [""]:
+                            params["commodity"] = [int(x) for x in commodity_batch if str(x).strip()]
+                        try:
+                            payload = fetch_page(
+                                params,
+                                timeout_sec=args.timeout_sec,
+                                retries=args.retries,
+                            )
+                        except Exception as exc:
+                            if args.debug:
+                                print(f"Fetch failed: {exc} | {build_url(params)}", file=sys.stderr)
+                            failed_rows.append(
+                                {
+                                    "mode": args.mode,
+                                    "state_id": state_id,
+                                    "district_ids": ",".join(district_batch),
+                                    "group_id": group_id,
+                                    "commodity_ids": ",".join(commodity_batch),
+                                    "option": option,
+                                    "page": page,
+                                    "error": str(exc),
+                                    "url": build_url(params),
+                                    "request_json": json.dumps(params, ensure_ascii=False),
+                                }
+                            )
+                            break
+                        rows = extract_rows(payload)
+                        if not rows:
+                            break
+                        for r in rows:
+                            r = dict(r)
+                            r["_state_id"] = state_id
+                            r["_district_ids"] = ",".join(district_batch)
+                            r["_group_id"] = group_id
+                            r["_commodity_ids"] = ",".join(commodity_batch)
+                            r["_option"] = option
+                            if "reported_date" in r and "rep_date" not in r:
+                                r["rep_date"] = r["reported_date"]
+                            if "as_on" in r and "model_price_wt" not in r:
+                                r["model_price_wt"] = r["as_on"]
+                            all_rows.append(r)
+                        pagination = payload.get("pagination") or {}
+                        total_pages = int(pagination.get("total_pages") or 0)
+                        if total_pages and page >= total_pages:
+                            break
+                        if len(rows) < args.limit:
+                            break
+                        page += 1
+                        time.sleep(args.sleep_sec)
 
     if not all_rows:
         print("No records returned.")

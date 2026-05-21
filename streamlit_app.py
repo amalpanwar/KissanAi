@@ -87,6 +87,7 @@ LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
 AGMARKNET_AUTO_REFRESH_LOG = Path("logs/agmarknet_auto_refresh.log")
+AGMARKNET_AUTO_REFRESH_RETRY_MINUTES = 30
 FETCH_PAGE_LIMIT = 200
 FETCH_MAX_RECORDS_COMBO = 50000
 FETCH_MAX_RECORDS_STATE = 50000
@@ -168,16 +169,18 @@ def _should_start_agmarknet_auto_refresh() -> tuple[bool, str]:
     if last_pid and _pid_is_running(last_pid):
         return False, "already_running"
     today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
-    if last_started_raw:
-        try:
-            last_started = datetime.fromisoformat(last_started_raw)
-            if last_started.astimezone(ZoneInfo("Asia/Kolkata")).date() >= today:
-                return False, "already_started_today"
-        except Exception:
-            pass
     latest_report_date = _latest_agmarknet_report_date(AGMARKNET_CSV)
     if latest_report_date is not None and latest_report_date >= today:
         return False, "already_latest"
+    if last_started_raw:
+        try:
+            last_started = datetime.fromisoformat(last_started_raw)
+            last_started_ist = last_started.astimezone(ZoneInfo("Asia/Kolkata"))
+            elapsed_min = (datetime.now(ZoneInfo("Asia/Kolkata")) - last_started_ist).total_seconds() / 60.0
+            if elapsed_min < AGMARKNET_AUTO_REFRESH_RETRY_MINUTES:
+                return False, "recent_attempt"
+        except Exception:
+            pass
     return True, "stale_or_missing"
 
 
@@ -187,6 +190,7 @@ def _start_agmarknet_auto_refresh() -> tuple[bool, str]:
         return False, reason
     cmd = [
         sys.executable,
+        "-u",
         str(Path("scripts/agmarknet_daily_refresh.py")),
     ]
     env = os.environ.copy()

@@ -15,6 +15,7 @@ data/processed/*.csv
 data/raw/live/*.csv
 !data/raw/live/agmarknet_report.csv
 !data/raw/live/upag_statewise_apy.csv
+data/raw/live/agmarknet_auto_refresh.json
 Location/
 logs/
 data/processed/*_cache.json
