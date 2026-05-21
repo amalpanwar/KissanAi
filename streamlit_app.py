@@ -15,6 +15,7 @@ from datetime import date, datetime
 from time import time
 from pathlib import Path
 from email.message import EmailMessage
+from functools import lru_cache
 from textwrap import dedent
 from zoneinfo import ZoneInfo
 
@@ -81,7 +82,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-21-agmarknet-auto-refresh-v1"
+APP_BUILD_VERSION = "2026-05-21-cache-fix-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
@@ -464,7 +465,7 @@ def check_ready() -> tuple[bool, str]:
     return True, "System ready"
 
 
-@st.cache_resource(show_spinner=False)
+@lru_cache(maxsize=4)
 def get_advisor(_build_version: str = APP_BUILD_VERSION) -> RAGAdvisor:
     _ = _build_version
     return RAGAdvisor(
@@ -479,13 +480,13 @@ def get_advisor(_build_version: str = APP_BUILD_VERSION) -> RAGAdvisor:
     )
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=32)
 def load_market_df(csv_path: str, mtime_ns: int) -> pd.DataFrame:
     _ = mtime_ns
     return pd.read_csv(csv_path)
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=64)
 def build_forecast(
     csv_path: str,
     mtime_ns: int,
@@ -511,6 +512,23 @@ def build_forecast(
         epochs=40,
     )
     return result.history, result.forecast
+
+
+def clear_local_caches() -> None:
+    for fn in (
+        get_advisor,
+        load_market_df,
+        build_forecast,
+        load_commodity_catalog,
+        load_location_lookup,
+        load_commodity_aliases,
+        load_training_feedback_memory,
+        load_location_corrections,
+    ):
+        try:
+            fn.cache_clear()
+        except Exception:
+            pass
 
 
 def build_forecast_from_df(
@@ -1128,7 +1146,7 @@ def _place_variants(place: str) -> list[str]:
     return variants
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=8)
 def load_commodity_catalog() -> list[str]:
     path = Path("data/raw/agmarknet_commodities.csv")
     if not path.exists():
@@ -1268,7 +1286,7 @@ def _coerce_selectbox_state(
     return options.index(current)
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=8)
 def load_location_lookup(mtime_ns: int) -> pd.DataFrame:
     _ = mtime_ns
     path = Path("data/processed/location_lookup.csv")
@@ -1284,7 +1302,7 @@ def load_location_lookup(mtime_ns: int) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=8)
 def load_commodity_aliases(mtime_ns: int) -> dict[str, list[str]]:
     path = Path("data/raw/commodity_aliases.json")
     if not path.exists():
@@ -1302,7 +1320,7 @@ def load_commodity_aliases(mtime_ns: int) -> dict[str, list[str]]:
     return cleaned
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=8)
 def load_training_feedback_memory(
     db_path: str,
     db_mtime_ns: int,
@@ -1473,7 +1491,7 @@ def commodity_display_name(commodity: str) -> str:
     return crop
 
 
-@st.cache_data(show_spinner=False)
+@lru_cache(maxsize=8)
 def load_location_corrections(mtime_ns: int) -> dict[str, str]:
     path = Path("data/raw/location_corrections.json")
     if not path.exists():
@@ -2589,7 +2607,7 @@ with st.sidebar:
             new_df = pd.DataFrame(recs)
             merged = merge_market_data(LIVE_MARKET_CSV, new_df)
             merged.to_csv(LIVE_MARKET_CSV, index=False)
-            st.cache_data.clear()
+            clear_local_caches()
             return len(new_df), len(merged)
         return 0, 0
 
@@ -2648,7 +2666,7 @@ with st.sidebar:
                     st.success("Agmarknet refresh completed.")
                     if result.stdout.strip():
                         st.code(result.stdout.strip())
-                    st.cache_data.clear()
+                    clear_local_caches()
             except Exception as e:
                 st.error(f"Agmarknet refresh failed: {e}")
 
@@ -3460,7 +3478,7 @@ if user_query:
             if st.button("सुधार सहेजें", use_container_width=True):
                 if corr_place and corr_district:
                     save_location_correction(corr_place, corr_district)
-                    st.cache_data.clear()
+                    clear_local_caches()
                     st.success("सुधार सहेजा गया। अगली बार यही जिला उपयोग होगा।")
 
     if intent_price:
