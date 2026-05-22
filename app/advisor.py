@@ -3502,6 +3502,32 @@ class RAGAdvisor:
         except ValueError:
             return None
 
+    def _extract_area_acres(self, text: str) -> float | None:
+        if not text:
+            return None
+        patterns = [
+            (r"(\d+(?:\.\d+)?)\s*(?:acre|acres|acr|एकड़)\b", 1.0),
+            (r"(\d+(?:\.\d+)?)\s*(?:hectare|hectares|ha|हेक्टेयर)\b", 2.47105),
+            (r"(\d+(?:\.\d+)?)\s*(?:bigha|बीघा)\b", 0.625),
+        ]
+        lower_text = text.lower()
+        for pattern, factor in patterns:
+            m = re.search(pattern, lower_text, flags=re.IGNORECASE)
+            if not m:
+                continue
+            try:
+                return float(m.group(1)) * factor
+            except ValueError:
+                return None
+        return None
+
+    def _format_area_acres(self, area_acres: float | None) -> str:
+        if not area_acres:
+            return "1 acre"
+        if abs(area_acres - round(area_acres)) < 1e-6:
+            return f"{int(round(area_acres))} acre"
+        return f"{area_acres:.1f} acre"
+
     def _is_crop_choice_intent(self, text: str) -> bool:
         t = text.strip().lower()
         keys = [
@@ -3621,6 +3647,8 @@ class RAGAdvisor:
         district = district_override or self._extract_district(context_part) or "Meerut"
         season = self._extract_season(context_part)
         budget = self._extract_budget(question)
+        area_acres = self._extract_area_acres(question)
+        area_scale = area_acres or 1.0
         sources: list[str] = []
         market_prices = self._load_agmarknet_prices(district)
         if market_prices:
@@ -3671,18 +3699,20 @@ class RAGAdvisor:
                 price = float(price_info["price"])
                 price_note = f" (भाव: {price:.0f} Rs./Quintal, {price_info['date']})"
             pest_label = self._estimate_pesticide_pressure(crop)
-            rev = price * float(r["avg_yield_qtl_per_acre"])
+            rev = price * float(r["avg_yield_qtl_per_acre"]) * area_scale
             base_cost_min = float(r["cost_min_inr_per_acre"])
             base_cost_max = float(r["cost_max_inr_per_acre"])
-            pmin = rev - base_cost_max
-            pmax = rev - base_cost_min
-            if budget is not None and float(r["cost_max_inr_per_acre"]) > budget:
+            total_cost_min = base_cost_min * area_scale
+            total_cost_max = base_cost_max * area_scale
+            pmin = rev - total_cost_max
+            pmax = rev - total_cost_min
+            if budget is not None and total_cost_min > budget:
                 continue
             scored.append(
                 {
                     "crop": crop,
-                    "cost_min": base_cost_min,
-                    "cost_max": base_cost_max,
+                    "cost_min": total_cost_min,
+                    "cost_max": total_cost_max,
                     "revenue": rev,
                     "profit_min": pmin,
                     "profit_max": pmax,
@@ -3702,16 +3732,22 @@ class RAGAdvisor:
         lines = []
         lines.append("मानदंड: मंडी MSP/भाव (Agmarknet) + उपलब्ध लागत/उपज डेटा + PPQS/MUP रोग/कीट दबाव संकेत।")
         lines.append("कीमत स्रोत: Agmarknet (district market prices)")
+        scope_label = f"{self._format_area_acres(area_acres)} के लिए" if area_acres else "प्रति एकड़"
         for i, s in enumerate(scored, start=1):
             lines.append(
-                f"{i}) {s['crop']}: लागत ₹{int(s['cost_min'])}-₹{int(s['cost_max'])}/एकड़, "
-                f"अनुमानित आय ₹{int(s['revenue'])}/एकड़, "
-                f"संभावित लाभ ₹{int(s['profit_min'])}-₹{int(s['profit_max'])}/एकड़"
+                f"{i}) {s['crop']}: {scope_label} लागत ₹{int(s['cost_min'])}-₹{int(s['cost_max'])}, "
+                f"अनुमानित आय ₹{int(s['revenue'])}, "
+                f"संभावित लाभ ₹{int(s['profit_min'])}-₹{int(s['profit_max'])}"
                 f"{s['price_note']} | रोग/कीट दबाव संकेत: {s['pressure']}"
             )
 
-        budget_line = f"बजट: ₹{int(budget)} प्रति एकड़" if budget is not None else "बजट: उपलब्ध नहीं"
+        if budget is not None:
+            budget_line = f"कुल बजट: ₹{int(budget)}" if area_acres else f"बजट: ₹{int(budget)} प्रति एकड़"
+        else:
+            budget_line = "बजट: उपलब्ध नहीं"
         header_parts = [f"जिला: {district}"]
+        if area_acres:
+            header_parts.append(f"क्षेत्र: {self._format_area_acres(area_acres)}")
         header_parts.append(budget_line)
         return (
             f"समझा गया सवाल (हिंदी): {question}\n\n"
@@ -3729,6 +3765,8 @@ class RAGAdvisor:
         market_prices: dict[str, dict[str, str | float]],
     ) -> str | None:
         budget = self._extract_budget(question)
+        area_acres = self._extract_area_acres(question)
+        area_scale = area_acres or 1.0
         scored: list[dict] = []
         for crop, base in WESTERN_UP_CROP_BASELINES.items():
             if not self._season_matches(season, str(base["season"])):
@@ -3742,7 +3780,7 @@ class RAGAdvisor:
                 if yield_info and yield_info.get("yield_qtl_per_acre")
                 else float(base["yield_qtl_per_acre"])
             )
-            revenue = price * yield_qtl_per_acre
+            revenue = price * yield_qtl_per_acre * area_scale
             official_cost = self._official_cost_range_for_profitability(crop, yield_qtl_per_acre)
             if official_cost:
                 cost_min = float(official_cost["cost_min"])
@@ -3754,14 +3792,16 @@ class RAGAdvisor:
                 cost_max = float(base["cost_max"])
                 cost_source = "baseline"
                 cost_basis = "indicative range"
-            if budget is not None and cost_min > budget:
+            total_cost_min = cost_min * area_scale
+            total_cost_max = cost_max * area_scale
+            if budget is not None and total_cost_min > budget:
                 continue
             pest_pressure = self._estimate_pesticide_pressure(crop)
             water_penalty = self._water_penalty(base["water_need"])
             pest_penalty = {"कम": 0.98, "मध्यम": 1.0, "उच्च": 1.06, "अज्ञात": 1.03}.get(pest_pressure, 1.03)
-            adjusted_cost_max = cost_max * water_penalty * pest_penalty
+            adjusted_cost_max = total_cost_max * water_penalty * pest_penalty
             profit_min = revenue - adjusted_cost_max
-            profit_max = revenue - cost_min
+            profit_max = revenue - total_cost_min
             scored.append(
                 {
                     "crop": crop,
@@ -3774,7 +3814,7 @@ class RAGAdvisor:
                     "price_source": price_source,
                     "price_date": market.get("date", ""),
                     "revenue": revenue,
-                    "cost_min": cost_min,
+                    "cost_min": total_cost_min,
                     "cost_max": adjusted_cost_max,
                     "cost_source": cost_source,
                     "cost_basis": cost_basis,
@@ -3788,7 +3828,12 @@ class RAGAdvisor:
         if not scored:
             return None
         scored = sorted(scored, key=lambda x: (x["profit_min"], x["profit_max"]), reverse=True)[:5]
-        header = f"जिला: {district}"
+        header_parts = [f"जिला: {district}"]
+        if area_acres:
+            header_parts.append(f"क्षेत्र: {self._format_area_acres(area_acres)}")
+        if budget is not None:
+            header_parts.append(f"कुल बजट: ₹{int(budget)}" if area_acres else f"बजट: ₹{int(budget)} प्रति एकड़")
+        header = " | ".join(header_parts)
         lines = [
             header,
             "लाभ रैंकिंग उपज × भाव − लागत के आधार पर निकाली गई है।",
@@ -3796,6 +3841,7 @@ class RAGAdvisor:
             "",
             "सबसे बेहतर विकल्प:",
         ]
+        scope_label = f"{self._format_area_acres(area_acres)} के लिए" if area_acres else "प्रति एकड़"
         for i, s in enumerate(scored, start=1):
             date_part = f", {s['price_date']}" if s["price_date"] else ""
             crop_label = self._crop_display_label(str(s["crop"]))
@@ -3803,13 +3849,25 @@ class RAGAdvisor:
                 f"{i}) {crop_label}: उपज ~{s['yield']:.1f} qtl/acre"
                 f"{(' (UPAG ' + str(s['yield_year']) + (', 2nd AE' if s.get('yield_note') else '') + ')') if s['yield_source']=='UPAG' and s['yield_year'] else ''}, "
                 f"भाव ₹{s['price']:.0f}/qtl ({s['price_source']}{date_part}), "
-                f"आय ~₹{int(s['revenue'])}/acre, लागत ~₹{int(s['cost_min'])}-₹{int(s['cost_max'])}/acre ({s['cost_source']}, {s['cost_basis']}), "
-                f"लाभ ~₹{int(s['profit_min'])}-₹{int(s['profit_max'])}/acre; पानी: {s['water_need']}, रोग/कीट दबाव: {s['pest_pressure']}"
+                f"{scope_label} आय ~₹{int(s['revenue'])}, लागत ~₹{int(s['cost_min'])}-₹{int(s['cost_max'])} ({s['cost_source']}, {s['cost_basis']}), "
+                f"लाभ ~₹{int(s['profit_min'])}-₹{int(s['profit_max'])}; पानी: {s['water_need']}, रोग/कीट दबाव: {s['pest_pressure']}"
+            )
+        heavy_risk_crops = [
+            self._crop_display_label(str(s["crop"])).split(" (")[0]
+            for s in scored
+            if str(s["water_need"]) == "बहुत अधिक" or str(s["season"]).lower() == "annual"
+        ]
+        if heavy_risk_crops:
+            crop_names = ", ".join(dict.fromkeys(heavy_risk_crops))
+            lines.extend(
+                [
+                    "",
+                    f"ध्यान दें: {crop_names} जैसी लंबी अवधि या ज्यादा पानी वाली फसलों में revenue अच्छा दिख सकता है, लेकिन पानी, मजदूरी और cash-cycle का जोखिम भी ज्यादा रहता है।",
+                ]
             )
         lines.extend(
             [
                 "",
-                "क्यों sugarcane अलग दिखता है: इसका ₹/qtl कम होता है, लेकिन yield/acre बहुत अधिक होती है, इसलिए revenue अच्छा हो सकता है। फिर भी पानी, मजदूरी और 10-12 महीने की cash-cycle का जोखिम ज्यादा है।",
                 "Exotic crops:",
                 *[f"- {note}" for note in EXOTIC_CROP_NOTES],
                 "",
