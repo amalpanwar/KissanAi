@@ -1464,14 +1464,16 @@ class RAGAdvisor:
             "sukh", "सूख", "dry", "drying",
             "murjha", "murja", "wilt", "मुरझा",
             "rang badal", "rang bd", "color change", "colour change",
+            "रंग बदलना",
             "पीला", "पीली", "yellow", "yellowing",
-            "safed parat", "white layer", "white powder", "powdery",
+            "safed parat", "white layer", "white powder", "powdery", "सफेद परत",
             "pattiyo ka rang", "pattion ka rang", "patto ka rang", "पत्तियों का रंग",
+            "पत्ती मुड़ना",
         ]
         pest_symptoms = [
             "keeda dikh", "keede dikh", "kida dikh", "कीड़ा", "कीड़े",
             "छेद", "hole", "boring",
-            "ras choos", "रस चूस",
+            "ras choos", "रस चूस", "रस चूसना",
             "patti kat", "leaf cut", "leaf damage",
             "jad nuksan", "जड़ नुकसान",
             "मुड़", "curl", "पत्ती मुड़",
@@ -1502,9 +1504,11 @@ class RAGAdvisor:
             "sukh", "सूख", "dry", "drying",
             "murjha", "murja", "wilt", "मुरझा",
             "rang badal", "rang bd", "color change", "colour change",
+            "रंग बदलना",
             "पीला", "पीली", "yellow", "yellowing",
-            "safed parat", "white layer", "white powder", "powdery",
+            "safed parat", "white layer", "white powder", "powdery", "सफेद परत",
             "pattiyo ka rang", "pattion ka rang", "patto ka rang", "पत्तियों का रंग",
+            "पत्ती मुड़ना",
         ]
         if any(term in t for term in pest_symptoms):
             return "pest"
@@ -2962,6 +2966,19 @@ class RAGAdvisor:
         return f"{greeting}। मैं किसान एआई हूँ, मैं आपकी कैसे सहायता करूँ?"
 
     def _normalize_hinglish(self, text: str) -> str:
+        phrase_mapping = [
+            (r"\bpatt?iyo?n?\s+ka\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
+            (r"\bpattion?\s+ka\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
+            (r"\bsafed\s+parat(?:\s+aa\s+r[hae]+\s*hai)?\b", "सफेद परत"),
+            (r"\bwhite\s+(?:layer|powder)(?:\s+aa\s+r[hae]+\s*hai)?\b", "सफेद परत"),
+            (r"\bpatti\s+mu[dn](?:\s*r[hae]+\s*hai)?\b", "पत्ती मुड़ना"),
+            (r"\bpatti\s+mur(?:\s*r[hae]+\s*hai)?\b", "पत्ती मुड़ना"),
+            (r"\bras\s+choos(?:\s+r[hae]+\s*hai)?\b", "रस चूसना"),
+            (r"\bkeeda\s+dikh(?:\s+r[hae]+\s*hai)?\b", "कीड़ा दिखना"),
+            (r"\bkeede\s+dikh(?:\s+r[hae]+\s*hai)?\b", "कीड़े दिखना"),
+            (r"\bkida\s+dikh(?:\s+r[hae]+\s*hai)?\b", "कीड़ा दिखना"),
+            (r"\bdhab+e?\s+aa\s+r[hae]+\s*(?:hain|hai)?\b", "धब्बे"),
+        ]
         mapping = {
             r"\bwhaet\b": "wheat",
             r"\bburnt\b": "bunt",
@@ -3020,8 +3037,46 @@ class RAGAdvisor:
             r"\bbimari\b": "बीमारी",
             r"\blakshan\b": "लक्षण",
             r"\bsymptom\b": "लक्षण",
+            r"\bpatt?iyo?n?\b": "पत्तियों",
+            r"\bpatto?n?\b": "पत्तों",
+            r"\bpatti\b": "पत्ती",
+            r"\brang badal(?:\s*r[hae]+\s*hai)?\b": "रंग बदलना",
+            r"\bcolor change\b": "रंग बदलना",
+            r"\bcolour change\b": "रंग बदलना",
+            r"\bdhab+e?\b": "धब्बे",
+            r"\bdaag\b": "धब्बे",
+            r"\bsafed parat\b": "सफेद परत",
+            r"\bwhite layer\b": "सफेद परत",
+            r"\bwhite powder\b": "सफेद परत",
+            r"\bsadan\b": "सड़न",
+            r"\bsadn\b": "सड़न",
+            r"\bjhulsa\b": "झुलसा",
+            r"\bsukhna\b": "सूखना",
+            r"\bsukh r[hae]+\b": "सूखना",
+            r"\bsookh\b": "सूखना",
+            r"\bmurjha(?:na)?\b": "मुरझाना",
+            r"\bmurja(?:na)?\b": "मुरझाना",
+            r"\bpeela\b": "पीला",
+            r"\bpeeli\b": "पीली",
+            r"\byellowing\b": "पीला पड़ना",
+            r"\bras choos(?:na)?\b": "रस चूसना",
+            r"\bpat+t[iy]?\s*mu[d]?na\b": "पत्ती मुड़ना",
+            r"\bcurl(?:ing)?\b": "पत्ती मुड़ना",
+            r"\bkeeda dikh r[hae]+\b": "कीड़ा दिखना",
+            r"\bkeede dikh r[hae]+\b": "कीड़े दिखना",
+            r"\bkida dikh r[hae]+\b": "कीड़ा दिखना",
+            r"\bछेद\b": "छेद",
+            r"\bhole(s)?\b": "छेद",
+            r"\bjad nuksan\b": "जड़ नुकसान",
+            r"\bleaf blight\b": "पत्ती झुलसा",
+            r"\bloose smut\b": "ढीला कंडुआ",
+            r"\bdowny mildew\b": "डाउनी मिल्ड्यू",
+            r"\bpowdery mildew\b": "चूर्णी फफूंदी",
+            r"\bwhite rust\b": "सफेद रतुआ",
         }
         out = text
+        for pattern, replacement in phrase_mapping:
+            out = re.sub(pattern, replacement, out, flags=re.IGNORECASE)
         for pattern, replacement in mapping.items():
             out = re.sub(pattern, replacement, out, flags=re.IGNORECASE)
         return out
