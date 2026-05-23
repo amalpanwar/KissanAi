@@ -1300,6 +1300,48 @@ class RAGAdvisor:
                 lines.extend(self._format_numbered_blocks(db_lines[:3]))
                 lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
                 return {"answer": "\n".join(lines), "references": db_sources, "retrieved": []}
+        if crop and self._is_symptom_followup_query(question):
+            likely_terms: list[str] = []
+            for term in disease_terms:
+                term_l = str(term).strip().lower()
+                if term_l and term_l not in likely_terms:
+                    likely_terms.append(term_l)
+            if not likely_terms:
+                for issue in self._extract_common_crop_issues(crop, limit=3, issue_mode=issue_mode):
+                    for term in self._extract_disease_terms_from_query(issue):
+                        term_l = str(term).strip().lower()
+                        if term_l and term_l not in likely_terms:
+                            likely_terms.append(term_l)
+            symptom_db_lines: list[str] = []
+            symptom_sources: list[str] = []
+            seen_lines: set[str] = set()
+            for term in likely_terms[:4]:
+                lines_for_term, refs_for_term = self._extract_pesticides_from_db(crop, disease_terms=[term], limit=3)
+                if not lines_for_term:
+                    lines_for_term, refs_for_term = self._extract_pesticides_for_issue(crop, term, limit=2)
+                for line in lines_for_term:
+                    key = re.sub(r"\s+", " ", str(line).strip().lower())
+                    if not key or key in seen_lines:
+                        continue
+                    seen_lines.add(key)
+                    symptom_db_lines.append(line)
+                for ref in refs_for_term:
+                    if ref and ref not in symptom_sources:
+                        symptom_sources.append(ref)
+                if len(symptom_db_lines) >= 3:
+                    break
+            if symptom_db_lines:
+                disease_label = symptom_label or "दिए गए लक्षण"
+                lines = [
+                    "संरचित कीटनाशक सलाह:",
+                    f"- फसल: {self._crop_name_hi(crop)}",
+                    f"- लक्षण मिलान: {disease_label}",
+                    "- संभावित दवा विकल्प:",
+                ]
+                lines.extend(self._format_numbered_blocks(symptom_db_lines[:3]))
+                lines.append("- अगर लक्षण और साफ लिखें, तो मैं सबसे सटीक विकल्प चुनकर dose और PHI और बेहतर कर दूँगा।")
+                lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
+                return {"answer": "\n".join(lines), "references": symptom_sources, "retrieved": []}
         if crop and generic_issue:
             common_issues = self._extract_common_crop_issues(crop, limit=3, issue_mode=issue_mode)
             sample_sources: list[str] = []
@@ -3241,8 +3283,8 @@ class RAGAdvisor:
 
     def _normalize_hinglish(self, text: str) -> str:
         phrase_mapping = [
-            (r"\bpatt?iyo?n?\s+ka\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
-            (r"\bpattion?\s+ka\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
+            (r"\bpatt?iyo?n?\s+(?:ka|k)\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
+            (r"\bpattion?\s+(?:ka|k)\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
             (r"\bpatt?iyo?n?\s+pe\s+peelapan(?:\s+aa\s+r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
             (r"\bsafed\s+parat(?:\s+aa\s+r[hae]+\s*hai)?\b", "सफेद परत"),
             (r"\bsafed\s+powder(?:\s+aa\s+r[hae]+\s*hai)?\b", "सफेद परत"),
