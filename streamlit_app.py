@@ -82,7 +82,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-23-profit-season-v1"
+APP_BUILD_VERSION = "2026-05-23-query-season-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
@@ -117,6 +117,24 @@ def _safe_float(value: object) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _extract_season_from_query_text(text: str, advisor: RAGAdvisor | None = None) -> str | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    normalized = advisor._normalize_hinglish(raw) if advisor is not None else raw.lower()
+    t = f"{raw.lower()} | {str(normalized).lower()}"
+    season_patterns = [
+        ("Rabi", [r"\brabi\b", r"रबी"]),
+        ("Kharif", [r"\bkharif\b", r"खरीफ"]),
+        ("Zaid", [r"\bzaid\b", r"जायद"]),
+        ("Annual", [r"\bannual\b", r"सालाना", r"वार्षिक"]),
+    ]
+    for label, patterns in season_patterns:
+        if any(re.search(pattern, t, flags=re.IGNORECASE) for pattern in patterns):
+            return label
+    return None
 
 
 def _latest_agmarknet_report_date(path: Path) -> date | None:
@@ -3035,6 +3053,7 @@ if user_query:
             or remembered_crop_context
         )
     )
+    explicit_query_season = _extract_season_from_query_text(user_query, advisor)
 
     # Resolve place->district for crop intent (so profit uses correct district)
     resolved_district = session_district_hint
@@ -3044,7 +3063,10 @@ if user_query:
     elif followup_profit and last_ctx.get("district"):
         resolved_district = last_ctx["district"]
 
-    season_for_query = last_ctx.get("season", season) if (followup_profit or followup_crop_care or followup_crop_guide) else season
+    season_for_query = (
+        explicit_query_season
+        or (last_ctx.get("season", season) if (followup_profit or followup_crop_care or followup_crop_guide) else season)
+    )
     preferred_crop_for_query = (
         last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else preferred_crop
     )
