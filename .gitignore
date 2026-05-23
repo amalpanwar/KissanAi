@@ -21,6 +21,7 @@ logs/
 data/processed/*_cache.json
 data/raw/ppqs_pesticides/
 data/processed/accepted_feedback.jsonl
+data/processed/symptom_alias_candidates.json
 data/processed/guide_review_queue.jsonl
 data/processed/pdf_tables/
 data/processed/*.xlsx

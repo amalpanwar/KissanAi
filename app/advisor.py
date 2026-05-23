@@ -23,6 +23,15 @@ from app.msp import get_msp_for_crop
 from app.web_search import is_web_search_configured, web_search
 from app.agri_glossary import match_glossary_entry, format_glossary_answer, glossary_references
 from app.pdf_extract import read_pdf_pages, read_pdf_text
+from app.symptom_matcher import (
+    SYMPTOM_CANDIDATE_PATH,
+    SYMPTOM_DICTIONARY_PATH,
+    TRAINING_FEEDBACK_PATH,
+    load_feedback_rows as load_symptom_feedback_rows,
+    load_symptom_dictionary,
+    normalize_symptom_text,
+    save_symptom_alias_candidates,
+)
 import pandas as pd
 
 from app.location_lookup import lookup_place, lookup_place_in_text
@@ -363,6 +372,7 @@ class PesticideRequest:
     disease_terms: list[str] = field(default_factory=list)
     issue_mode: str = "general"
     generic_issue: bool = False
+    symptom_label: str | None = None
 
 
 class RAGAdvisor:
@@ -374,6 +384,10 @@ class RAGAdvisor:
         self.top_k = cfg.top_k
         self._pdf_text_cache: dict[str, str] = {}
         self._pdf_verification_cache: dict[str, bool] = {}
+        self._symptom_index_signature: tuple[int, int] | None = None
+        self._symptom_phrase_rows: list[dict[str, str]] = []
+        self._symptom_phrase_embeddings: np.ndarray | None = None
+        self._feedback_symptom_candidate_signature: tuple[int, int] | None = None
 
     def answer(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)
@@ -1229,8 +1243,14 @@ class RAGAdvisor:
         pesticide_name = request.pesticide_name if request else self._extract_pesticide_name_from_query(question)
         if not pesticide_name:
             pesticide_name = self._infer_pesticide_name_from_query_tokens(question, crop=crop)
+        symptom_entry = self._match_symptom_entry(question, use_semantic=True)
         disease_terms = list(request.disease_terms) if request else self._extract_disease_terms_from_query(question)
+        if not disease_terms and symptom_entry is not None:
+            disease_terms = [str(t).strip().lower() for t in (symptom_entry.get("disease_candidates") or []) if str(t).strip()]
         issue_mode = request.issue_mode if request else self._generic_issue_mode(question)
+        symptom_label = request.symptom_label if request else None
+        if not symptom_label and symptom_entry is not None:
+            symptom_label = str(symptom_entry.get("label_hi") or symptom_entry.get("label_en") or "").strip() or None
         generic_issue = request.generic_issue if request else bool(crop and not pesticide_name and self._is_generic_issue_query(question, issue_mode=issue_mode))
         if pesticide_name:
             chem_lines, chem_sources = self._extract_rows_for_pesticide_name(
@@ -1267,6 +1287,19 @@ class RAGAdvisor:
                     "references": [],
                     "retrieved": [],
                 }
+        if crop and symptom_entry is not None and disease_terms:
+            db_lines, db_sources = self._extract_pesticides_from_db(crop, disease_terms=disease_terms, limit=8)
+            if db_lines:
+                disease_label = symptom_label or ", ".join(disease_terms[:3]) or "दिए गए लक्षण"
+                lines = [
+                    "संरचित कीटनाशक सलाह:",
+                    f"- फसल: {self._crop_name_hi(crop)}",
+                    f"- लक्षण मिलान: {disease_label}",
+                    "- दवा विकल्प:",
+                ]
+                lines.extend(self._format_numbered_blocks(db_lines[:3]))
+                lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
+                return {"answer": "\n".join(lines), "references": db_sources, "retrieved": []}
         if crop and generic_issue:
             common_issues = self._extract_common_crop_issues(crop, limit=3, issue_mode=issue_mode)
             sample_sources: list[str] = []
@@ -1286,7 +1319,9 @@ class RAGAdvisor:
                     "general": "- अगर exact नाम नहीं पता, तो लक्षण लिखें: धब्बे/सड़न/छेद/कीड़ा दिखना/पत्ती मुड़ना।",
                 }.get(issue_mode, "- अगर exact नाम नहीं पता, तो मुख्य लक्षण लिखें।")
                 issue_intro = (
-                    f"- दिए गए लक्षण के आधार पर इस फसल में ये {mode_label} संभावित लगते हैं:"
+                    f"- दिए गए लक्षण ({symptom_label}) के आधार पर इस फसल में ये {mode_label} संभावित लगते हैं:"
+                    if symptom_based and symptom_label
+                    else f"- दिए गए लक्षण के आधार पर इस फसल में ये {mode_label} संभावित लगते हैं:"
                     if symptom_based
                     else f"- इस फसल में आम तौर पर ये 2-3 {mode_label} ज़्यादा देखे जाते हैं:"
                 )
@@ -1452,10 +1487,227 @@ class RAGAdvisor:
             return True
         return any(k in t for k in ["rog", "bimari", "disease", "रोग", "बीमारी"])
 
+    def _load_symptom_entries(self) -> dict[str, dict[str, object]]:
+        dict_mtime_ns = SYMPTOM_DICTIONARY_PATH.stat().st_mtime_ns if SYMPTOM_DICTIONARY_PATH.exists() else 0
+        candidate_mtime_ns = SYMPTOM_CANDIDATE_PATH.stat().st_mtime_ns if SYMPTOM_CANDIDATE_PATH.exists() else 0
+        return load_symptom_dictionary(dict_mtime_ns, candidate_mtime_ns)
+
+    def _symptom_aliases_for_entry(self, entry: dict[str, object]) -> list[str]:
+        aliases = [str(v).strip() for v in (entry.get("aliases") or []) if str(v).strip()]
+        for extra in (entry.get("label_hi"), entry.get("label_en"), entry.get("canonical")):
+            if str(extra or "").strip():
+                aliases.append(str(extra).strip())
+        out: list[str] = []
+        seen: set[str] = set()
+        for alias in aliases:
+            normalized = normalize_symptom_text(alias)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            out.append(alias)
+        return out
+
+    def _lexical_symptom_match(
+        self,
+        text: str,
+        entries: dict[str, dict[str, object]] | None = None,
+    ) -> dict[str, object] | None:
+        normalized = normalize_symptom_text(text)
+        if not normalized:
+            return None
+        entries = entries or self._load_symptom_entries()
+        best_entry: dict[str, object] | None = None
+        best_score = 0
+        for entry in entries.values():
+            for alias in self._symptom_aliases_for_entry(entry):
+                alias_norm = normalize_symptom_text(alias)
+                if not alias_norm:
+                    continue
+                if alias_norm in normalized or normalized in alias_norm:
+                    score = len(alias_norm)
+                    if score > best_score:
+                        best_score = score
+                        best_entry = entry
+        return best_entry
+
+    def _is_candidate_symptom_phrase(self, text: str) -> bool:
+        t = normalize_symptom_text(text)
+        if not t or len(t) < 6:
+            return False
+        blockers = [
+            "मौसम", "weather", "price", "rate", "भाव", "कीमत", "मंडी", "msp", "frp",
+            "किस्म", "variety", "खाद", "fertilizer", "सिंचाई", "irrigation",
+        ]
+        if any(token in t for token in blockers):
+            return False
+        cues = [
+            "लक्षण", "symptom", "धब्ब", "spot", "सड़न", "rot", "झुलसा", "blight",
+            "सूख", "dry", "मुरझ", "wilt", "रंग", "yellow", "पीला", "पीली",
+            "सफेद", "powder", "परत", "मुड़", "curl", "रस", "चूस", "कीड़ा", "कीड़े",
+            "keeda", "kide", "kida", "छेद", "hole", "borer", "जड़",
+        ]
+        return any(token in t for token in cues)
+
+    def _maybe_refresh_feedback_symptom_candidates(self) -> None:
+        db_mtime_ns = 0
+        if self.cfg.db_path and Path(self.cfg.db_path).exists():
+            db_mtime_ns = Path(self.cfg.db_path).stat().st_mtime_ns
+        feedback_mtime_ns = TRAINING_FEEDBACK_PATH.stat().st_mtime_ns if TRAINING_FEEDBACK_PATH.exists() else 0
+        signature = (db_mtime_ns, feedback_mtime_ns)
+        if self._feedback_symptom_candidate_signature == signature:
+            return
+        self._feedback_symptom_candidate_signature = signature
+        if not self.cfg.db_path or (db_mtime_ns == 0 and feedback_mtime_ns == 0):
+            return
+        rows = load_symptom_feedback_rows(
+            self.cfg.db_path,
+            db_mtime_ns,
+            str(TRAINING_FEEDBACK_PATH),
+            feedback_mtime_ns,
+        )
+        if not rows:
+            return
+        self._ensure_rag_components(load_generator=False)
+        if self.embedder is None:
+            return
+        base_entries = load_symptom_dictionary(
+            SYMPTOM_DICTIONARY_PATH.stat().st_mtime_ns if SYMPTOM_DICTIONARY_PATH.exists() else 0,
+            0,
+        )
+        if not base_entries:
+            return
+        phrase_rows: list[dict[str, str]] = []
+        phrase_texts: list[str] = []
+        for canonical, entry in base_entries.items():
+            mode = str(entry.get("mode") or "general").strip().lower()
+            for alias in self._symptom_aliases_for_entry(entry):
+                alias_norm = normalize_symptom_text(alias)
+                if not alias_norm:
+                    continue
+                phrase_rows.append({"canonical": canonical, "alias": alias_norm, "mode": mode})
+                phrase_texts.append(alias_norm)
+        if not phrase_texts:
+            return
+        phrase_vecs = np.asarray(self.embedder.encode(phrase_texts), dtype=np.float32)
+        query_cache: dict[str, np.ndarray] = {}
+        learned: dict[str, list[str]] = {}
+        for row in rows:
+            topic = str(row.get("topic") or "").strip().lower()
+            if topic and topic not in {"pesticide", "crop_guide_followup", "crop_guide"}:
+                continue
+            raw_query = str(row.get("user_query") or "").strip()
+            if not raw_query:
+                continue
+            normalized_query = normalize_symptom_text(self._normalize_hinglish(raw_query))
+            if not self._is_candidate_symptom_phrase(normalized_query):
+                continue
+            if self._lexical_symptom_match(normalized_query, base_entries):
+                continue
+            if normalized_query not in query_cache:
+                query_cache[normalized_query] = np.asarray(self.embedder.encode([normalized_query])[0], dtype=np.float32)
+            query_vec = query_cache[normalized_query]
+            scores = phrase_vecs @ query_vec
+            best_idx = int(np.argmax(scores))
+            best_score = float(scores[best_idx])
+            if best_score < 0.66:
+                continue
+            best = phrase_rows[best_idx]
+            learned.setdefault(best["canonical"], []).append(normalized_query)
+        aliases_payload: dict[str, list[str]] = {}
+        for canonical, aliases in learned.items():
+            cleaned = []
+            seen: set[str] = set()
+            for alias in aliases:
+                alias_norm = normalize_symptom_text(alias)
+                if not alias_norm or alias_norm in seen:
+                    continue
+                seen.add(alias_norm)
+                cleaned.append(alias_norm)
+            if cleaned:
+                aliases_payload[canonical] = cleaned[:20]
+        existing_payload: dict[str, object] = {}
+        if SYMPTOM_CANDIDATE_PATH.exists():
+            try:
+                existing_payload = json.loads(SYMPTOM_CANDIDATE_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                existing_payload = {}
+        if aliases_payload != (existing_payload.get("aliases") or {}):
+            save_symptom_alias_candidates(
+                {
+                    "generated_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
+                    "source": "accepted_feedback",
+                    "aliases": aliases_payload,
+                }
+            )
+            self._symptom_index_signature = None
+            self._symptom_phrase_rows = []
+            self._symptom_phrase_embeddings = None
+
+    def _ensure_symptom_semantic_index(self) -> None:
+        self._maybe_refresh_feedback_symptom_candidates()
+        dict_mtime_ns = SYMPTOM_DICTIONARY_PATH.stat().st_mtime_ns if SYMPTOM_DICTIONARY_PATH.exists() else 0
+        candidate_mtime_ns = SYMPTOM_CANDIDATE_PATH.stat().st_mtime_ns if SYMPTOM_CANDIDATE_PATH.exists() else 0
+        signature = (dict_mtime_ns, candidate_mtime_ns)
+        if self._symptom_index_signature == signature and self._symptom_phrase_embeddings is not None:
+            return
+        self._ensure_rag_components(load_generator=False)
+        if self.embedder is None:
+            self._symptom_index_signature = signature
+            self._symptom_phrase_rows = []
+            self._symptom_phrase_embeddings = None
+            return
+        entries = self._load_symptom_entries()
+        phrase_rows: list[dict[str, str]] = []
+        phrase_texts: list[str] = []
+        for canonical, entry in entries.items():
+            mode = str(entry.get("mode") or "general").strip().lower()
+            for alias in self._symptom_aliases_for_entry(entry):
+                alias_norm = normalize_symptom_text(alias)
+                if not alias_norm:
+                    continue
+                phrase_rows.append({"canonical": canonical, "alias": alias_norm, "mode": mode})
+                phrase_texts.append(alias_norm)
+        self._symptom_index_signature = signature
+        self._symptom_phrase_rows = phrase_rows
+        self._symptom_phrase_embeddings = (
+            np.asarray(self.embedder.encode(phrase_texts), dtype=np.float32) if phrase_texts else None
+        )
+
+    def _match_symptom_entry(
+        self,
+        text: str,
+        normalized_text: str | None = None,
+        *,
+        use_semantic: bool = True,
+    ) -> dict[str, object] | None:
+        normalized = normalize_symptom_text(normalized_text or text)
+        if not normalized:
+            return None
+        lexical = self._lexical_symptom_match(normalized)
+        if lexical is not None:
+            return lexical
+        if not use_semantic:
+            return None
+        if not self._is_candidate_symptom_phrase(normalized):
+            return None
+        self._ensure_symptom_semantic_index()
+        if self.embedder is None or self._symptom_phrase_embeddings is None or not self._symptom_phrase_rows:
+            return None
+        query_vec = np.asarray(self.embedder.encode([normalized])[0], dtype=np.float32)
+        scores = self._symptom_phrase_embeddings @ query_vec
+        best_idx = int(np.argmax(scores))
+        best_score = float(scores[best_idx])
+        if best_score < 0.52:
+            return None
+        best = self._symptom_phrase_rows[best_idx]
+        return self._load_symptom_entries().get(best["canonical"])
+
     def _is_symptom_followup_query(self, text: str) -> bool:
         t = (text or "").strip().lower()
         if not t:
             return False
+        if self._match_symptom_entry(text, use_semantic=True) is not None:
+            return True
         disease_symptoms = [
             "lakshan", "symptom", "लक्षण",
             "dhab", "धब्ब", "spot",
@@ -1481,6 +1733,11 @@ class RAGAdvisor:
         return any(term in t for term in disease_symptoms + pest_symptoms)
 
     def _generic_issue_mode(self, text: str) -> str:
+        symptom_entry = self._match_symptom_entry(text, use_semantic=True)
+        if symptom_entry is not None:
+            mode = str(symptom_entry.get("mode") or "").strip().lower()
+            if mode in {"fungal", "pest", "disease"}:
+                return mode
         if self._is_fungal_query(text):
             return "fungal"
         if self._is_pest_only_query(text):
@@ -1985,6 +2242,13 @@ class RAGAdvisor:
         ]
         if not terms and any(re.search(pat, t) for pat in generic_insect_patterns):
             terms.append("insect pest")
+        if not terms:
+            symptom_entry = self._match_symptom_entry(text, use_semantic=True)
+            if symptom_entry is not None:
+                for candidate in (symptom_entry.get("disease_candidates") or []):
+                    cand = str(candidate).strip().lower()
+                    if cand:
+                        terms.append(cand)
         terms = self._dedupe_disease_terms(terms)
         return terms
 
@@ -2847,8 +3111,13 @@ class RAGAdvisor:
         pesticide_name = self._extract_pesticide_name_from_query(raw) or self._extract_pesticide_name_from_query(normalized)
         if not pesticide_name:
             pesticide_name = self._infer_pesticide_name_from_query_tokens(raw, crop=crop) or self._infer_pesticide_name_from_query_tokens(normalized, crop=crop)
+        symptom_entry = self._match_symptom_entry(raw, normalized, use_semantic=True)
         disease_terms = self._extract_disease_terms_from_query(normalized) or self._extract_disease_terms_from_query(raw)
-        issue_mode = self._generic_issue_mode(normalized or raw)
+        if not disease_terms and symptom_entry is not None:
+            disease_terms = [str(t).strip().lower() for t in (symptom_entry.get("disease_candidates") or []) if str(t).strip()]
+        issue_mode = str(symptom_entry.get("mode") or "").strip().lower() if symptom_entry is not None else self._generic_issue_mode(normalized or raw)
+        if issue_mode not in {"fungal", "pest", "disease", "general"}:
+            issue_mode = self._generic_issue_mode(normalized or raw)
         generic_issue = bool(crop and not pesticide_name and self._is_generic_issue_query(normalized or raw, issue_mode=issue_mode))
         return PesticideRequest(
             crop=crop,
@@ -2857,6 +3126,11 @@ class RAGAdvisor:
             disease_terms=disease_terms,
             issue_mode=issue_mode,
             generic_issue=generic_issue,
+            symptom_label=(
+                str(symptom_entry.get("label_hi") or symptom_entry.get("label_en") or "").strip()
+                if symptom_entry is not None
+                else None
+            ) or None,
         )
 
     def _is_greeting(self, text: str) -> bool:
@@ -2969,10 +3243,13 @@ class RAGAdvisor:
         phrase_mapping = [
             (r"\bpatt?iyo?n?\s+ka\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
             (r"\bpattion?\s+ka\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
+            (r"\bpatt?iyo?n?\s+pe\s+peelapan(?:\s+aa\s+r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
             (r"\bsafed\s+parat(?:\s+aa\s+r[hae]+\s*hai)?\b", "सफेद परत"),
+            (r"\bsafed\s+powder(?:\s+aa\s+r[hae]+\s*hai)?\b", "सफेद परत"),
             (r"\bwhite\s+(?:layer|powder)(?:\s+aa\s+r[hae]+\s*hai)?\b", "सफेद परत"),
             (r"\bpatti\s+mu[dn](?:\s*r[hae]+\s*hai)?\b", "पत्ती मुड़ना"),
             (r"\bpatti\s+mur(?:\s*r[hae]+\s*hai)?\b", "पत्ती मुड़ना"),
+            (r"\bpatte\s+mur\s+r[hae]+\s*(?:hain|hai)?\b", "पत्ती मुड़ना"),
             (r"\bras\s+choos(?:\s+r[hae]+\s*hai)?\b", "रस चूसना"),
             (r"\bkeeda\s+dikh(?:\s+r[hae]+\s*hai)?\b", "कीड़ा दिखना"),
             (r"\bkeede\s+dikh(?:\s+r[hae]+\s*hai)?\b", "कीड़े दिखना"),
@@ -3043,9 +3320,11 @@ class RAGAdvisor:
             r"\brang badal(?:\s*r[hae]+\s*hai)?\b": "रंग बदलना",
             r"\bcolor change\b": "रंग बदलना",
             r"\bcolour change\b": "रंग बदलना",
+            r"\bpeelapan\b": "पीला पड़ना",
             r"\bdhab+e?\b": "धब्बे",
             r"\bdaag\b": "धब्बे",
             r"\bsafed parat\b": "सफेद परत",
+            r"\bsafed powder\b": "सफेद परत",
             r"\bwhite layer\b": "सफेद परत",
             r"\bwhite powder\b": "सफेद परत",
             r"\bsadan\b": "सड़न",
@@ -3061,6 +3340,7 @@ class RAGAdvisor:
             r"\byellowing\b": "पीला पड़ना",
             r"\bras choos(?:na)?\b": "रस चूसना",
             r"\bpat+t[iy]?\s*mu[d]?na\b": "पत्ती मुड़ना",
+            r"\bpatte\b": "पत्ते",
             r"\bcurl(?:ing)?\b": "पत्ती मुड़ना",
             r"\bkeeda dikh r[hae]+\b": "कीड़ा दिखना",
             r"\bkeede dikh r[hae]+\b": "कीड़े दिखना",

@@ -1,0 +1,191 @@
+{
+  "symptoms": {
+    "leaf_color_change": {
+      "label_hi": "पत्तियों का रंग बदलना",
+      "label_en": "leaf color change",
+      "mode": "disease",
+      "aliases": [
+        "पत्तियों का रंग बदलना",
+        "पत्तियों का रंग बदल रहा है",
+        "रंग बदलना",
+        "पीली पत्तियां",
+        "पीला पड़ना",
+        "पीलापन",
+        "पत्तियों पर पीलापन",
+        "yellow leaves",
+        "yellowing leaves",
+        "leaf yellowing",
+        "leaf discoloration"
+      ],
+      "disease_candidates": [
+        "rust",
+        "leaf blight"
+      ]
+    },
+    "leaf_spots": {
+      "label_hi": "धब्बे",
+      "label_en": "leaf spots",
+      "mode": "disease",
+      "aliases": [
+        "धब्बे",
+        "पत्तियों पर धब्बे",
+        "दाग धब्बे",
+        "leaf spots",
+        "spots on leaf",
+        "daag dhabbe"
+      ],
+      "disease_candidates": [
+        "leaf blight",
+        "alternaria blight",
+        "rust"
+      ]
+    },
+    "white_layer": {
+      "label_hi": "सफेद परत",
+      "label_en": "white powder layer",
+      "mode": "disease",
+      "aliases": [
+        "सफेद परत",
+        "सफेद पाउडर",
+        "safed powder",
+        "white powder",
+        "white layer",
+        "white dust",
+        "dust layer",
+        "powder on leaf",
+        "powdery layer"
+      ],
+      "disease_candidates": [
+        "powdery mildew",
+        "downy mildew",
+        "white rust"
+      ]
+    },
+    "rot": {
+      "label_hi": "सड़न",
+      "label_en": "rot",
+      "mode": "disease",
+      "aliases": [
+        "सड़न",
+        "गलना",
+        "rot",
+        "rotting",
+        "soft rot"
+      ],
+      "disease_candidates": [
+        "red rot"
+      ]
+    },
+    "drying": {
+      "label_hi": "सूखना",
+      "label_en": "drying",
+      "mode": "disease",
+      "aliases": [
+        "सूखना",
+        "सूख रहा है",
+        "drying",
+        "dry leaves",
+        "sookh raha hai"
+      ],
+      "disease_candidates": [
+        "leaf blight",
+        "rust"
+      ]
+    },
+    "wilting": {
+      "label_hi": "मुरझाना",
+      "label_en": "wilting",
+      "mode": "disease",
+      "aliases": [
+        "मुरझाना",
+        "मुरझा रहा है",
+        "wilting",
+        "wilted leaves",
+        "murjhana"
+      ],
+      "disease_candidates": [
+        "leaf blight",
+        "red rot"
+      ]
+    },
+    "leaf_curl": {
+      "label_hi": "पत्ती मुड़ना",
+      "label_en": "leaf curling",
+      "mode": "pest",
+      "aliases": [
+        "पत्ती मुड़ना",
+        "पत्तियां मुड़ रही हैं",
+        "patte mur rahe hain",
+        "leaf curl",
+        "leaf curling",
+        "curled leaves"
+      ],
+      "disease_candidates": [
+        "insect pest"
+      ]
+    },
+    "sap_sucking": {
+      "label_hi": "रस चूसना",
+      "label_en": "sap sucking",
+      "mode": "pest",
+      "aliases": [
+        "रस चूसना",
+        "रस चूस रहा है",
+        "sap sucking",
+        "sap sucking pest",
+        "sucking pest"
+      ],
+      "disease_candidates": [
+        "insect pest"
+      ]
+    },
+    "insect_visible": {
+      "label_hi": "कीड़ा दिखना",
+      "label_en": "insect visible",
+      "mode": "pest",
+      "aliases": [
+        "कीड़ा दिखना",
+        "कीड़े दिखना",
+        "कीड़ा लगा है",
+        "visible insect",
+        "insect seen"
+      ],
+      "disease_candidates": [
+        "insect pest"
+      ]
+    },
+    "holes": {
+      "label_hi": "छेद",
+      "label_en": "holes in plant",
+      "mode": "pest",
+      "aliases": [
+        "छेद",
+        "पत्तियों में छेद",
+        "पत्तों में छेद",
+        "chhed jaisa nuksan",
+        "hole in leaf",
+        "holes in leaf",
+        "boring damage"
+      ],
+      "disease_candidates": [
+        "stem borer",
+        "insect pest"
+      ]
+    },
+    "root_damage": {
+      "label_hi": "जड़ नुकसान",
+      "label_en": "root damage",
+      "mode": "pest",
+      "aliases": [
+        "जड़ नुकसान",
+        "जड़ खराब",
+        "root damage",
+        "root eating",
+        "root pest"
+      ],
+      "disease_candidates": [
+        "insect pest"
+      ]
+    }
+  }
+}
