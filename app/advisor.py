@@ -1150,6 +1150,7 @@ class RAGAdvisor:
             or self._is_disease_only_query(t)
             or self._is_fungal_query(t)
             or self._is_pest_only_query(t)
+            or self._is_symptom_followup_query(t)
         )
 
     def _is_crop_guide_followup_intent(self, text: str) -> bool:
@@ -1197,6 +1198,8 @@ class RAGAdvisor:
         mode = issue_mode or self._generic_issue_mode(t)
         if self._has_specific_issue_term(t):
             return False
+        if self._is_symptom_followup_query(t):
+            return True
         if mode == "fungal":
             return self._is_fungal_query(t)
         if mode == "pest":
@@ -1269,6 +1272,7 @@ class RAGAdvisor:
             sample_sources: list[str] = []
             if common_issues:
                 issue_lines = self._format_numbered_text_blocks(common_issues[:3])
+                symptom_based = self._is_symptom_followup_query(question)
                 mode_label = {
                     "fungal": "फफूंद/फंगल रोग",
                     "pest": "कीट",
@@ -1281,14 +1285,24 @@ class RAGAdvisor:
                     "disease": "- अगर exact नाम नहीं पता, तो लक्षण लिखें: धब्बे, सड़न, झुलसा, सूखना, या पत्तियों का रंग बदलना।",
                     "general": "- अगर exact नाम नहीं पता, तो लक्षण लिखें: धब्बे/सड़न/छेद/कीड़ा दिखना/पत्ती मुड़ना।",
                 }.get(issue_mode, "- अगर exact नाम नहीं पता, तो मुख्य लक्षण लिखें।")
+                issue_intro = (
+                    f"- दिए गए लक्षण के आधार पर इस फसल में ये {mode_label} संभावित लगते हैं:"
+                    if symptom_based
+                    else f"- इस फसल में आम तौर पर ये 2-3 {mode_label} ज़्यादा देखे जाते हैं:"
+                )
+                closing_prompt = (
+                    "- अगर इनमें से कोई लक्षण सबसे ज्यादा मिल रहा हो, तो वही लिखें; फिर मैं उसी के हिसाब से सही दवा, dose और PHI बता दूँगा।"
+                    if symptom_based
+                    else "- आप इनमें से किसी एक का नाम या लक्षण लिखें, फिर मैं उसी के हिसाब से सही दवा, dose और PHI बता दूँगा।"
+                )
                 return {
                     "answer": (
                         "संरचित कीटनाशक सलाह:\n"
                         f"- फसल: {self._crop_name_hi(crop)}\n"
-                        f"- इस फसल में आम तौर पर ये 2-3 {mode_label} ज़्यादा देखे जाते हैं:\n"
+                        f"{issue_intro}\n"
                         f"{issue_lines}\n"
                         f"{symptom_prompt}\n"
-                        "- आप इनमें से किसी एक का नाम या लक्षण लिखें, फिर मैं उसी के हिसाब से सही दवा, dose और PHI बता दूँगा।"
+                        f"{closing_prompt}"
                     ),
                     "references": sample_sources,
                     "retrieved": [],
@@ -1438,12 +1452,63 @@ class RAGAdvisor:
             return True
         return any(k in t for k in ["rog", "bimari", "disease", "रोग", "बीमारी"])
 
+    def _is_symptom_followup_query(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        disease_symptoms = [
+            "lakshan", "symptom", "लक्षण",
+            "dhab", "धब्ब", "spot",
+            "sadan", "sadn", "rot", "सड़न",
+            "jhulsa", "झुलसा", "blight",
+            "sukh", "सूख", "dry", "drying",
+            "murjha", "murja", "wilt", "मुरझा",
+            "rang badal", "rang bd", "color change", "colour change",
+            "पीला", "पीली", "yellow", "yellowing",
+            "safed parat", "white layer", "white powder", "powdery",
+            "pattiyo ka rang", "pattion ka rang", "patto ka rang", "पत्तियों का रंग",
+        ]
+        pest_symptoms = [
+            "keeda dikh", "keede dikh", "kida dikh", "कीड़ा", "कीड़े",
+            "छेद", "hole", "boring",
+            "ras choos", "रस चूस",
+            "patti kat", "leaf cut", "leaf damage",
+            "jad nuksan", "जड़ नुकसान",
+            "मुड़", "curl", "पत्ती मुड़",
+        ]
+        return any(term in t for term in disease_symptoms + pest_symptoms)
+
     def _generic_issue_mode(self, text: str) -> str:
         if self._is_fungal_query(text):
             return "fungal"
         if self._is_pest_only_query(text):
             return "pest"
         if self._is_disease_only_query(text):
+            return "disease"
+        t = (text or "").strip().lower()
+        pest_symptoms = [
+            "keeda dikh", "keede dikh", "kida dikh", "कीड़ा", "कीड़े",
+            "छेद", "hole", "boring",
+            "ras choos", "रस चूस",
+            "patti kat", "leaf cut", "leaf damage",
+            "jad nuksan", "जड़ नुकसान",
+            "मुड़", "curl", "पत्ती मुड़",
+        ]
+        disease_symptoms = [
+            "lakshan", "symptom", "लक्षण",
+            "dhab", "धब्ब", "spot",
+            "sadan", "sadn", "rot", "सड़न",
+            "jhulsa", "झुलसा", "blight",
+            "sukh", "सूख", "dry", "drying",
+            "murjha", "murja", "wilt", "मुरझा",
+            "rang badal", "rang bd", "color change", "colour change",
+            "पीला", "पीली", "yellow", "yellowing",
+            "safed parat", "white layer", "white powder", "powdery",
+            "pattiyo ka rang", "pattion ka rang", "patto ka rang", "पत्तियों का रंग",
+        ]
+        if any(term in t for term in pest_symptoms):
+            return "pest"
+        if any(term in t for term in disease_symptoms):
             return "disease"
         return "general"
 

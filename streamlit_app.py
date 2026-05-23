@@ -3449,6 +3449,7 @@ if user_query:
     else:
         query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
         direct_crop_followup = None
+        direct_crop_protection_followup = None
         if (
             (
                 crop_guide_followup_detected
@@ -3468,8 +3469,27 @@ if user_query:
                     "retrieved": [],
                     "topic": "crop_guide_followup",
                 }
+        if (
+            direct_crop_followup is None
+            and crop_protection_followup
+            and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+            and not advisor._is_weather_intent(normalized_user_query)
+        ):
+            pesticide_result = advisor._structured_pesticide_advice(
+                normalized_user_query,
+                crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+            )
+            if pesticide_result and pesticide_result.get("answer"):
+                direct_crop_protection_followup = {
+                    "answer": pesticide_result["answer"],
+                    "references": pesticide_result.get("references", []),
+                    "retrieved": pesticide_result.get("retrieved", []),
+                    "topic": "pesticide",
+                }
         if direct_crop_followup is not None:
             result = direct_crop_followup
+        elif direct_crop_protection_followup is not None:
+            result = direct_crop_protection_followup
         else:
             with st.spinner("Generating recommendation..."):
                 result = advisor.answer(composed_query)
@@ -3488,6 +3508,23 @@ if user_query:
                     "references": guide_sources,
                     "retrieved": [],
                     "topic": "crop_guide_followup",
+                }
+        if (
+            str(result.get("topic") or "").strip().lower() == "weather"
+            and crop_protection_followup
+            and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+            and not advisor._is_weather_intent(normalized_user_query)
+        ):
+            pesticide_result = advisor._structured_pesticide_advice(
+                normalized_user_query,
+                crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+            )
+            if pesticide_result and pesticide_result.get("answer"):
+                result = {
+                    "answer": pesticide_result["answer"],
+                    "references": pesticide_result.get("references", []),
+                    "retrieved": pesticide_result.get("retrieved", []),
+                    "topic": "pesticide",
                 }
         final_answer = result["answer"]
         topic = result.get("topic") or "rag"
