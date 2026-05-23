@@ -27,6 +27,48 @@ class ForecastResult:
     forecast: pd.DataFrame
 
 
+def quick_forecast(
+    series_df: pd.DataFrame,
+    horizon_days: int = 15,
+    seasonal_period: int = 7,
+    trend_window: int = 14,
+    max_daily_change_pct: float = 0.05,
+) -> ForecastResult:
+    data = series_df.sort_values("date").reset_index(drop=True).copy()
+    values = data["value"].values.astype(np.float32)
+    if len(values) < max(7, seasonal_period + 1):
+        raise ValueError("Not enough history for quick forecast.")
+
+    recent = values[-max(seasonal_period * 4, trend_window + 1) :]
+    last_val = float(values[-1])
+
+    if len(recent) >= 2:
+        diffs = np.diff(recent[-min(trend_window, len(recent) - 1) :])
+        trend = float(np.mean(diffs)) if len(diffs) else 0.0
+    else:
+        trend = 0.0
+
+    weekly_pattern = recent[-seasonal_period:]
+    preds: list[float] = []
+    prev = last_val
+    max_pct = max(0.0, float(max_daily_change_pct))
+
+    for step in range(horizon_days):
+        seasonal_guess = float(weekly_pattern[step % len(weekly_pattern)])
+        trend_guess = last_val + trend * float(step + 1)
+        pred = 0.65 * seasonal_guess + 0.35 * trend_guess
+        low = prev * (1.0 - max_pct)
+        high = prev * (1.0 + max_pct)
+        clipped = min(max(float(pred), low), high)
+        preds.append(clipped)
+        prev = clipped
+
+    start = data["date"].max() + pd.Timedelta(days=1)
+    f_dates = pd.date_range(start=start, periods=horizon_days, freq="D")
+    forecast_df = pd.DataFrame({"date": f_dates, "predicted_value": np.asarray(preds, dtype=np.float32)})
+    return ForecastResult(history=data, forecast=forecast_df)
+
+
 def _auto_sarima_forecast(values: np.ndarray, horizon_days: int) -> np.ndarray:
     # Simple auto-SARIMA via small AIC grid search.
     best_aic = None

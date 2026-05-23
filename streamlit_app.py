@@ -33,7 +33,7 @@ from app.crop_guide import build_crop_production_followup
 import app.db as db_mod
 from app.datagov_client import DataGovClient
 from app.feedback import compact_evidence_text, validate_feedback_with_local_sources
-from app.lstm_forecast import prepare_daily_series, train_and_forecast
+from app.lstm_forecast import prepare_daily_series, quick_forecast, train_and_forecast
 from app.weather import get_current_weather_hindi
 from app.cacp import get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
@@ -569,6 +569,28 @@ def build_forecast_from_df(
     return result.history, result.forecast
 
 
+def build_quick_forecast_from_df(
+    df: pd.DataFrame,
+    commodity: str,
+    state: str,
+    district: str,
+    horizon: int = 7,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    series = prepare_daily_series(
+        df=df,
+        date_col="Arrival_Date",
+        value_col="Modal_Price",
+        commodity=commodity,
+        state=state,
+        district=district,
+    )
+    result = quick_forecast(
+        series_df=series,
+        horizon_days=horizon,
+    )
+    return result.history, result.forecast
+
+
 def load_local_env(env_path: Path) -> dict[str, str]:
     vals: dict[str, str] = {}
     if not env_path.exists():
@@ -861,6 +883,27 @@ def is_price_query(text: str) -> bool:
         "सरकारी रेट",
     ]
     return any(k in t for k in keywords)
+
+
+def wants_detailed_price_forecast(text: str) -> bool:
+    t = (text or "").lower()
+    keys = [
+        "forecast",
+        "trend",
+        "prediction",
+        "predict",
+        "अगले",
+        "आने वाले",
+        "भविष्य",
+        "अनुमान",
+        "7 दिन",
+        "15 दिन",
+        "next week",
+        "tomorrow",
+        "kal",
+        "agle",
+    ]
+    return any(k in t for k in keys)
 
 
 def is_msp_query(text: str) -> bool:
@@ -3291,29 +3334,40 @@ if user_query:
         else:
             latest_line, _latest = summarize_latest_market(filtered)
         auto_caption = f"{selected_state} / {selected_district} / {commodity_label}"
+        detailed_forecast_requested = wants_detailed_price_forecast(user_query)
         auto_chart = None
         auto_table = None
         try:
-            hist, fc = build_forecast_from_df(
-                df=forecast_df,
-                commodity=selected_commodity,
-                state=selected_state,
-                district=selected_district,
-                horizon=15,
-            )
-            history_tail = hist.tail(90).copy()
-            history_tail = history_tail.rename(columns={"value": "History"})
-            fc2 = fc.rename(columns={"predicted_value": "Forecast"})
+            if detailed_forecast_requested:
+                hist, fc = build_forecast_from_df(
+                    df=forecast_df,
+                    commodity=selected_commodity,
+                    state=selected_state,
+                    district=selected_district,
+                    horizon=15,
+                )
+                history_tail = hist.tail(90).copy()
+                history_tail = history_tail.rename(columns={"value": "History"})
+                fc2 = fc.rename(columns={"predicted_value": "Forecast"})
 
-            chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
-            chart_df["History"] = history_tail["History"].values
-            chart_df = chart_df.set_index("date")
+                chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
+                chart_df["History"] = history_tail["History"].values
+                chart_df = chart_df.set_index("date")
 
-            fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
-            fc_chart["Forecast"] = fc2["Forecast"].values
-            fc_chart = fc_chart.set_index("date")
-            auto_chart = chart_df.join(fc_chart, how="outer")
-            auto_table = fc2
+                fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
+                fc_chart["Forecast"] = fc2["Forecast"].values
+                fc_chart = fc_chart.set_index("date")
+                auto_chart = chart_df.join(fc_chart, how="outer")
+                auto_table = fc2
+            else:
+                _hist, fc = build_quick_forecast_from_df(
+                    df=forecast_df,
+                    commodity=selected_commodity,
+                    state=selected_state,
+                    district=selected_district,
+                    horizon=7,
+                )
+                auto_table = fc.rename(columns={"predicted_value": "Forecast"})
         except Exception:
             auto_chart = None
             auto_table = None
@@ -3340,7 +3394,7 @@ if user_query:
                 f"- निकटतम मंडी (लगभग): {nearest_market[1]} ({nearest_market[0]:.1f} km)\n"
             )
 
-        if auto_chart is not None and auto_table is not None:
+        if auto_table is not None:
             query_log_id = log_query_answer(
                 user_query=user_query,
                 composed_query=composed_query,
@@ -3367,18 +3421,22 @@ if user_query:
                 "district": selected_district,
                 "commodity": selected_commodity,
             }
-            st.session_state["pending_chat_items"] = [
+            pending_chat_items = [
                 {"role": "assistant", "text": market_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query},
-                {
-                    "role": "assistant",
-                    "type": "market_panel",
-                    "text": "",
-                    "references": [],
-                    "market_meta": market_meta,
-                    "market_chart": auto_chart,
-                    "market_table": auto_table,
-                },
             ]
+            if detailed_forecast_requested and auto_chart is not None:
+                pending_chat_items.append(
+                    {
+                        "role": "assistant",
+                        "type": "market_panel",
+                        "text": "",
+                        "references": [],
+                        "market_meta": market_meta,
+                        "market_chart": auto_chart,
+                        "market_table": auto_table,
+                    }
+                )
+            st.session_state["pending_chat_items"] = pending_chat_items
         else:
             st.session_state.pop("auto_chart", None)
             st.session_state.pop("auto_forecast_table", None)
