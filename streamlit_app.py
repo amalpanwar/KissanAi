@@ -82,7 +82,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-22-profitability-refresh-v1"
+APP_BUILD_VERSION = "2026-05-23-symptom-followup-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
@@ -3027,6 +3027,14 @@ if user_query:
         crop_guide_followup_detected
         and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
     )
+    remembered_crop_context = bool((last_ctx.get("preferred_crop") or "").strip())
+    can_use_pesticide_followup_context = (
+        crop_protection_followup
+        and (
+            st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+            or remembered_crop_context
+        )
+    )
 
     # Resolve place->district for crop intent (so profit uses correct district)
     resolved_district = session_district_hint
@@ -3471,8 +3479,7 @@ if user_query:
                 }
         if (
             direct_crop_followup is None
-            and crop_protection_followup
-            and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+            and can_use_pesticide_followup_context
             and not advisor._is_weather_intent(normalized_user_query)
         ):
             pesticide_result = advisor._structured_pesticide_advice(
@@ -3511,8 +3518,7 @@ if user_query:
                 }
         if (
             str(result.get("topic") or "").strip().lower() == "weather"
-            and crop_protection_followup
-            and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+            and can_use_pesticide_followup_context
             and not advisor._is_weather_intent(normalized_user_query)
         ):
             pesticide_result = advisor._structured_pesticide_advice(
