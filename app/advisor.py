@@ -4323,12 +4323,12 @@ class RAGAdvisor:
         c = crop_season.lower()
         if not s or s in {"all", "any"}:
             return True
-        if "annual" in c:
-            return True
+        if s == "annual":
+            return "annual" in c
         if s in c:
             return True
-        # If the app defaults to Rabi and user asked generic profitability,
-        # still include annual sugarcane and common Western UP choices.
+        if s in {"rabi", "kharif", "zaid"}:
+            return False
         return False
 
     def _market_price_for_crop(
