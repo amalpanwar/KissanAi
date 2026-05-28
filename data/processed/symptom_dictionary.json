@@ -30,14 +30,15 @@
         "धब्बे",
         "पत्तियों पर धब्बे",
         "दाग धब्बे",
+        "पत्तियों में धब्बे",
+        "पत्तियों पे धब्बे",
         "leaf spots",
         "spots on leaf",
         "daag dhabbe"
       ],
       "disease_candidates": [
         "leaf blight",
-        "alternaria blight",
-        "rust"
+        "alternaria blight"
       ]
     },
     "white_layer": {
@@ -83,13 +84,20 @@
       "aliases": [
         "सूखना",
         "सूख रहा है",
+        "सूख रही है",
+        "पत्तियां सूख रही हैं",
+        "पत्तिया सूख रही है",
+        "पत्ती सूख रही है",
+        "patte sookh rahe hain",
+        "pattiya sukh rahi hai",
+        "pattiya sookh rahi hai",
         "drying",
         "dry leaves",
         "sookh raha hai"
       ],
       "disease_candidates": [
         "leaf blight",
-        "rust"
+        "alternaria blight"
       ]
     },
     "wilting": {

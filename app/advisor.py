@@ -98,6 +98,10 @@ DISEASE_ALIASES = {
     "leaf blight": ["leaf blight", "blight", "झुलसा"],
     "alternaria blight": ["alternaria blight", "alternaria", "अल्टरनेरिया झुलसा"],
     "stem borer": ["stem borer", "तना छेदक"],
+    "shoot borer": ["shoot borer", "shootborer", "early shoot borer", "earlyshootborer", "शूट बोरर"],
+    "top borer": ["top borer", "topborer", "टॉप बोरर"],
+    "root borer": ["root borer", "rootborer", "जड़ छेदक"],
+    "white grub": ["white grub", "whitegrub", "सफेद सूंडी"],
     "insect pest": [
         "borer",
         "stem borer",
@@ -130,9 +134,20 @@ DISEASE_HINDI_TERMS = {
     "powdery mildew": "चूर्णी फफूंदी",
     "downy mildew": "डाउनी मिल्ड्यू",
     "stem borer": "तना छेदक",
+    "shoot borer": "शूट बोरर",
+    "top borer": "टॉप बोरर",
+    "root borer": "जड़ छेदक",
+    "white grub": "सफेद सूंडी",
     "insect pest": "कीट",
     "aphid": "माहू",
     "termite": "दीमक",
+}
+
+STRICT_DISEASE_QUERY_ALIASES = {
+    "leaf blight": ["leaf blight", "पत्ती झुलसा"],
+    "alternaria blight": ["alternaria blight", "अल्टरनेरिया झुलसा"],
+    "powdery mildew": ["powdery mildew", "चूर्णी फफूंदी"],
+    "downy mildew": ["downy mildew", "डाउनी मिल्ड्यू"],
 }
 
 AGRI_TERM_EXPLANATIONS = {
@@ -1243,11 +1258,14 @@ class RAGAdvisor:
         pesticide_name = request.pesticide_name if request else self._extract_pesticide_name_from_query(question)
         if not pesticide_name:
             pesticide_name = self._infer_pesticide_name_from_query_tokens(question, crop=crop)
-        symptom_entry = self._match_symptom_entry(question, use_semantic=True)
-        disease_terms = list(request.disease_terms) if request else self._extract_disease_terms_from_query(question)
+        explicit_terms = self._extract_disease_terms_from_query(question, allow_symptom_fallback=False)
+        symptom_entry = None if explicit_terms else self._match_symptom_entry(question, use_semantic=True)
+        disease_terms = list(request.disease_terms) if request and request.disease_terms else explicit_terms
         if not disease_terms and symptom_entry is not None:
             disease_terms = [str(t).strip().lower() for t in (symptom_entry.get("disease_candidates") or []) if str(t).strip()]
-        issue_mode = request.issue_mode if request else self._generic_issue_mode(question)
+        issue_mode = request.issue_mode if request else (
+            self._issue_mode_from_disease_terms(disease_terms) if disease_terms else self._generic_issue_mode(question)
+        )
         symptom_label = request.symptom_label if request else None
         if not symptom_label and symptom_entry is not None:
             symptom_label = str(symptom_entry.get("label_hi") or symptom_entry.get("label_en") or "").strip() or None
@@ -1288,7 +1306,14 @@ class RAGAdvisor:
                     "retrieved": [],
                 }
         if crop and symptom_entry is not None and disease_terms:
-            db_lines, db_sources = self._extract_pesticides_from_db(crop, disease_terms=disease_terms, limit=8)
+            db_lines, db_sources = self._extract_pesticides_from_db(
+                crop,
+                disease_terms=disease_terms,
+                limit=8,
+                symptom_text=question,
+                symptom_entry=symptom_entry,
+                strict_match=True,
+            )
             if db_lines:
                 disease_label = symptom_label or ", ".join(disease_terms[:3]) or "दिए गए लक्षण"
                 lines = [
@@ -1300,7 +1325,7 @@ class RAGAdvisor:
                 lines.extend(self._format_numbered_blocks(db_lines[:3]))
                 lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
                 return {"answer": "\n".join(lines), "references": db_sources, "retrieved": []}
-        if crop and self._is_symptom_followup_query(question):
+        if crop and not explicit_terms and self._is_symptom_followup_query(question):
             likely_terms: list[str] = []
             for term in disease_terms:
                 term_l = str(term).strip().lower()
@@ -1316,7 +1341,14 @@ class RAGAdvisor:
             symptom_sources: list[str] = []
             seen_lines: set[str] = set()
             for term in likely_terms[:4]:
-                lines_for_term, refs_for_term = self._extract_pesticides_from_db(crop, disease_terms=[term], limit=3)
+                lines_for_term, refs_for_term = self._extract_pesticides_from_db(
+                    crop,
+                    disease_terms=[term],
+                    limit=3,
+                    symptom_text=question,
+                    symptom_entry=symptom_entry,
+                    strict_match=True,
+                )
                 if not lines_for_term:
                     lines_for_term, refs_for_term = self._extract_pesticides_for_issue(crop, term, limit=2)
                 for line in lines_for_term:
@@ -1922,6 +1954,7 @@ class RAGAdvisor:
         issue_norm = issue.lower().strip()
         if not issue_norm:
             return [], []
+        expanded_terms = self._expanded_disease_query_terms([issue_norm])
         try:
             conn = sqlite3.connect(self.cfg.db_path)
             conn.row_factory = sqlite3.Row
@@ -1947,9 +1980,20 @@ class RAGAdvisor:
             return [], []
         if not rows:
             return [], []
+        if expanded_terms:
+            filtered_rows: list[sqlite3.Row] = []
+            for row in rows:
+                issue_text = f"{row['disease_name_en'] or ''} {row['disease_name_hi'] or ''}".lower()
+                if any(term in issue_text for term in expanded_terms):
+                    filtered_rows.append(row)
+            if filtered_rows:
+                rows = filtered_rows
+        rows = self._filter_rows_for_symptom_context(rows, symptom_text=issue)
         lines = []
         sources = []
         for r in rows[:limit]:
+            if not self._verify_pesticide_row_against_pdf(r):
+                continue
             disease = r["disease_name_hi"] or self._translate_disease_name(r["disease_name_en"] or "")
             dose_parts = []
             if r["ai_g"]:
@@ -1967,9 +2011,10 @@ class RAGAdvisor:
                 line += f" | {'; '.join(dose_parts)}"
             line += waiting_part
             lines.append(line.strip())
-            if r["source_file"]:
-                sources.append(r["source_file"])
-        return lines, list(set(sources))
+            source_ref = self._display_pesticide_source_reference(r["source_file"])
+            if source_ref:
+                sources.append(source_ref)
+        return lines, sorted(set(sources))
 
     def _is_issue_label_useful(self, label: str) -> bool:
         text = label.lower()
@@ -2267,7 +2312,7 @@ class RAGAdvisor:
                 return crop_name
         return None
 
-    def _extract_disease_terms_from_query(self, text: str) -> list[str]:
+    def _extract_disease_terms_from_query(self, text: str, allow_symptom_fallback: bool = True) -> list[str]:
         t = text.lower()
         terms: list[str] = []
         for canonical, aliases in DISEASE_ALIASES.items():
@@ -2284,7 +2329,7 @@ class RAGAdvisor:
         ]
         if not terms and any(re.search(pat, t) for pat in generic_insect_patterns):
             terms.append("insect pest")
-        if not terms:
+        if not terms and allow_symptom_fallback:
             symptom_entry = self._match_symptom_entry(text, use_semantic=True)
             if symptom_entry is not None:
                 for candidate in (symptom_entry.get("disease_candidates") or []):
@@ -2310,6 +2355,8 @@ class RAGAdvisor:
             "pod borer",
             "stem borer",
             "shoot borer",
+            "top borer",
+            "root borer",
             "shoot fly",
             "leaf folder",
             "diamondback moth",
@@ -2326,10 +2373,47 @@ class RAGAdvisor:
             "mealybug",
             "scale insect",
             "bollworm",
+            "white grub",
         }
         if "insect pest" in ordered and any(term in ordered for term in specific_insect_terms):
             ordered.remove("insect pest")
         return ordered
+
+    def _issue_mode_from_disease_terms(self, disease_terms: list[str]) -> str:
+        pest_terms = {
+            "fruit borer",
+            "pod borer",
+            "stem borer",
+            "shoot borer",
+            "top borer",
+            "root borer",
+            "shoot fly",
+            "leaf folder",
+            "diamondback moth",
+            "aphid",
+            "whitefly",
+            "thrips",
+            "jassid",
+            "mite",
+            "red spider mite",
+            "yellow mite",
+            "termite",
+            "hopper",
+            "caterpillar",
+            "mealybug",
+            "scale insect",
+            "bollworm",
+            "white grub",
+            "insect pest",
+        }
+        if any(term in pest_terms for term in disease_terms):
+            return "pest"
+        if any(
+            any(token in term for token in ("mildew", "rust", "blight", "smut", "bunt", "rot", "wilt", "spot", "blast"))
+            for term in disease_terms
+        ):
+            return "disease"
+        return "general"
 
     def _extract_pesticides_from_pdfs(self, crop: str) -> tuple[list[str], list[str]]:
         sources = []
@@ -2340,7 +2424,7 @@ class RAGAdvisor:
         crop_key = crop.lower()
         for pdf in root.glob("*.pdf"):
             try:
-                pages = read_pdf_pages(pdf, prefer_docling=False)
+                pages = read_pdf_pages(pdf, prefer_docling=True)
             except Exception:
                 continue
             sources.append(str(pdf))
@@ -2364,6 +2448,9 @@ class RAGAdvisor:
         crop: str,
         disease_terms: list[str] | None = None,
         limit: int = 5,
+        symptom_text: str | None = None,
+        symptom_entry: dict[str, object] | None = None,
+        strict_match: bool = False,
     ) -> tuple[list[str], list[str]]:
         if not self.cfg.db_path:
             return [], []
@@ -2389,16 +2476,22 @@ class RAGAdvisor:
         if not rows:
             return [], []
         disease_terms = disease_terms or []
-        expanded_terms = []
-        for term in disease_terms:
-            expanded_terms.extend(DISEASE_ALIASES.get(term, [term]))
-        expanded_terms = [t.lower() for t in expanded_terms if t]
+        expanded_terms = self._expanded_disease_query_terms(disease_terms, strict_match=strict_match)
 
         def score_row(r: sqlite3.Row) -> int:
+            label_text = str(r["disease_name_en"] or r["disease_name_hi"] or "")
             text = f"{r['disease_name_en'] or ''} {r['disease_name_hi'] or ''}".lower()
             score = 0
             if expanded_terms:
                 score += sum(10 for term in expanded_terms if term in text)
+                compact_parts = [self._compact_norm(part) for part in self._split_issue_label(label_text)]
+                compact_parts = [part for part in compact_parts if part]
+                for term in expanded_terms:
+                    compact_term = self._compact_norm(term)
+                    if compact_term and compact_term in compact_parts:
+                        score += 8
+                if len(compact_parts) > 1:
+                    score -= min(6, (len(compact_parts) - 1) * 2)
             if r["quality_status"] == "valid":
                 score += 2
             if r["pesticide_name"]:
@@ -2409,7 +2502,8 @@ class RAGAdvisor:
 
         if expanded_terms:
             rows = [r for r in rows if score_row(r) >= 10]
-        rows = sorted(rows, key=score_row, reverse=True)[:limit]
+        rows = sorted(rows, key=score_row, reverse=True)
+        rows = self._filter_rows_for_symptom_context(rows, symptom_text=symptom_text, symptom_entry=symptom_entry)[:limit]
         if not rows:
             return [], []
         lines = []
@@ -2418,9 +2512,20 @@ class RAGAdvisor:
             if not self._verify_pesticide_row_against_pdf(r):
                 continue
             lines.append(self._format_pesticide_record(r, include_crop=False))
-            if r["source_file"]:
-                sources.append(r["source_file"])
-        return lines, list(set(sources))
+            source_ref = self._display_pesticide_source_reference(r["source_file"])
+            if source_ref:
+                sources.append(source_ref)
+        return lines, sorted(set(sources))
+
+    def _expanded_disease_query_terms(self, disease_terms: list[str], strict_match: bool = False) -> list[str]:
+        expanded_terms: list[str] = []
+        for term in disease_terms:
+            term_l = str(term).strip().lower()
+            aliases = STRICT_DISEASE_QUERY_ALIASES.get(term_l) if strict_match else None
+            if not aliases:
+                aliases = DISEASE_ALIASES.get(term_l, [term_l])
+            expanded_terms.extend(aliases)
+        return [str(term).strip().lower() for term in expanded_terms if str(term).strip()]
 
     def _extract_rows_for_pesticide_name(
         self,
@@ -2478,8 +2583,9 @@ class RAGAdvisor:
                 continue
             seen.add(key)
             lines.append(self._format_pesticide_record(r, include_crop=True, crop_override=crop))
-            if r["source_file"]:
-                sources.append(r["source_file"])
+            source_ref = self._display_pesticide_source_reference(r["source_file"])
+            if source_ref:
+                sources.append(source_ref)
             if len(lines) >= limit:
                 break
         return lines, sorted(set(sources))
@@ -2562,8 +2668,9 @@ class RAGAdvisor:
                 continue
             seen.add(key)
             lines.append(self._format_pesticide_record(r, include_crop=True, crop_override=crop))
-            if r["source_file"]:
-                sources.append(r["source_file"])
+            source_ref = self._display_pesticide_source_reference(r["source_file"])
+            if source_ref:
+                sources.append(source_ref)
             if len(lines) >= limit:
                 break
         return lines, sorted(set(sources))
@@ -2592,6 +2699,79 @@ class RAGAdvisor:
                 parts.append(f"डोज़/अतिरिक्त निर्देश: {dose_text}")
         return parts
 
+    def _pesticide_row_text(self, row: sqlite3.Row) -> str:
+        fields = [
+            "crop_name",
+            "disease_name_en",
+            "disease_name_hi",
+            "pesticide_name",
+            "ai_g",
+            "ai_unit",
+            "formulation",
+            "formulation_unit",
+            "dilution",
+            "dilution_unit",
+            "dose_text",
+        ]
+        return " ".join(str(row[field] or "") for field in fields).lower()
+
+    def _is_seed_treatment_row(self, row: sqlite3.Row) -> bool:
+        text = self._pesticide_row_text(row)
+        seed_markers = [
+            "seed treatment",
+            "seedtreatment",
+            "seed dresser",
+            "kg seed",
+            "/kg seed",
+            "of seed",
+            "seeds are treated",
+            "shade dry and sow",
+            "seed borne",
+            "slurry",
+            "at the time of sowing",
+        ]
+        return any(marker in text for marker in seed_markers)
+
+    def _is_leaf_symptom_context(self, symptom_text: str, symptom_entry: dict[str, object] | None = None) -> bool:
+        normalized = normalize_symptom_text(symptom_text)
+        if symptom_entry is not None:
+            canonical = str(symptom_entry.get("canonical") or "").strip().lower()
+            if canonical in {"leaf_spots", "leaf_color_change", "white_layer", "drying", "wilting", "leaf_curl", "holes"}:
+                return True
+            if canonical in {"root_damage", "sap_sucking", "insect_visible"}:
+                return False
+        leaf_markers = [
+            "पत्ती",
+            "पत्त",
+            "leaf",
+            "dhab",
+            "धब्ब",
+            "spot",
+            "rang",
+            "yellow",
+            "सफेद",
+            "powder",
+            "सूख",
+            "dry",
+            "झुलसा",
+            "मुड़",
+        ]
+        return any(marker in normalized for marker in leaf_markers)
+
+    def _filter_rows_for_symptom_context(
+        self,
+        rows: list[sqlite3.Row],
+        symptom_text: str | None = None,
+        symptom_entry: dict[str, object] | None = None,
+    ) -> list[sqlite3.Row]:
+        if not rows or not symptom_text:
+            return rows
+        if self._is_leaf_symptom_context(symptom_text, symptom_entry=symptom_entry):
+            filtered = [row for row in rows if not self._is_seed_treatment_row(row)]
+            if filtered:
+                return filtered
+        return rows
+
     def _source_pdf_path(self, source_file: object) -> Path | None:
         source = str(source_file or "").strip()
         if not source:
@@ -2617,11 +2797,22 @@ class RAGAdvisor:
         if cached is not None:
             return cached
         try:
-            text = read_pdf_text(pdf_path, prefer_docling=False)
+            text = read_pdf_text(pdf_path, prefer_docling=True)
         except Exception:
             text = ""
         self._pdf_text_cache[key] = text
         return text
+
+    def _display_pesticide_source_reference(self, source_file: object) -> str | None:
+        pdf_path = self._source_pdf_path(source_file)
+        if pdf_path:
+            return str(pdf_path)
+        source = str(source_file or "").strip()
+        if not source:
+            return None
+        if source.lower().endswith(".xlsx"):
+            return None
+        return source
 
     def _compact_norm(self, text: object) -> str:
         return re.sub(r"[^a-z0-9\u0900-\u097F]+", "", str(text or "").lower())
@@ -2751,12 +2942,13 @@ class RAGAdvisor:
             clean_en = str(raw_entry.get("clean_english") or "").strip()
             clean_hi = str(raw_entry.get("clean_hindi") or "").strip()
             if clean_hi and clean_en:
-                return f"{clean_hi} ({clean_en})"
+                return f"{clean_hi} ({self._clean_pest_label(clean_en)})"
             if clean_hi:
                 return clean_hi
             if clean_en:
-                return clean_en
+                return self._clean_pest_label(clean_en)
         lower = text.lower().replace("downey", "downy")
+        compact_lower = self._compact_norm(lower)
         skip_keys: set[str] = set()
         if "white rust" in lower:
             skip_keys.add("rust")
@@ -2768,7 +2960,8 @@ class RAGAdvisor:
         for key, hi in DISEASE_HINDI_TERMS.items():
             if key in skip_keys:
                 continue
-            if key in lower and hi not in hits:
+            compact_key = self._compact_norm(key)
+            if (key in lower or (compact_key and compact_key in compact_lower)) and hi not in hits:
                 hits.append(hi)
         if hits:
             return f"{' / '.join(hits)} ({self._clean_pest_label(text)})"
@@ -3153,13 +3346,20 @@ class RAGAdvisor:
         pesticide_name = self._extract_pesticide_name_from_query(raw) or self._extract_pesticide_name_from_query(normalized)
         if not pesticide_name:
             pesticide_name = self._infer_pesticide_name_from_query_tokens(raw, crop=crop) or self._infer_pesticide_name_from_query_tokens(normalized, crop=crop)
-        symptom_entry = self._match_symptom_entry(raw, normalized, use_semantic=True)
-        disease_terms = self._extract_disease_terms_from_query(normalized) or self._extract_disease_terms_from_query(raw)
+        disease_terms = (
+            self._extract_disease_terms_from_query(normalized, allow_symptom_fallback=False)
+            or self._extract_disease_terms_from_query(raw, allow_symptom_fallback=False)
+        )
+        symptom_entry = None if disease_terms else self._match_symptom_entry(raw, normalized, use_semantic=True)
         if not disease_terms and symptom_entry is not None:
             disease_terms = [str(t).strip().lower() for t in (symptom_entry.get("disease_candidates") or []) if str(t).strip()]
-        issue_mode = str(symptom_entry.get("mode") or "").strip().lower() if symptom_entry is not None else self._generic_issue_mode(normalized or raw)
+        issue_mode = (
+            str(symptom_entry.get("mode") or "").strip().lower()
+            if symptom_entry is not None
+            else self._issue_mode_from_disease_terms(disease_terms) if disease_terms else self._generic_issue_mode(normalized or raw)
+        )
         if issue_mode not in {"fungal", "pest", "disease", "general"}:
-            issue_mode = self._generic_issue_mode(normalized or raw)
+            issue_mode = self._issue_mode_from_disease_terms(disease_terms) if disease_terms else self._generic_issue_mode(normalized or raw)
         generic_issue = bool(crop and not pesticide_name and self._is_generic_issue_query(normalized or raw, issue_mode=issue_mode))
         return PesticideRequest(
             crop=crop,
