@@ -82,7 +82,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-05-28-pesticide-cleaning-v1"
+APP_BUILD_VERSION = "2026-06-13-query-agent-model-split-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
@@ -96,6 +96,8 @@ FETCH_COOLDOWN_SEC = 600
 FAST_FETCH_LIMIT = 200
 TRAINING_FEEDBACK_PATH = Path("data/processed/accepted_feedback.jsonl")
 AUTH_COOKIE_NAME = "krishiai_auth"
+MEDIUM_GENERATOR_MODEL = os.getenv("KISAANAI_MEDIUM_GENERATOR_MODEL") or cfg.generator_model
+COMPLEX_GENERATOR_MODEL = os.getenv("KISAANAI_COMPLEX_GENERATOR_MODEL") or None
 
 
 def _safe_text(value: object, fallback: str = "") -> str:
@@ -503,11 +505,14 @@ def get_advisor(_build_version: str = APP_BUILD_VERSION) -> RAGAdvisor:
     return RAGAdvisor(
         AdvisorConfig(
             embedding_model=cfg.embedding_model,
-            generator_model=cfg.generator_model,
+            generator_model=MEDIUM_GENERATOR_MODEL,
             index_path=cfg.paths["vector_store"],
             metadata_path=cfg.paths["metadata_store"],
             top_k=cfg.top_k,
             db_path=cfg.paths["sqlite_db"],
+            complex_generator_model=COMPLEX_GENERATOR_MODEL,
+            response_cache_path=os.getenv("KISAANAI_RESPONSE_CACHE_PATH", "data/processed/query_response_cache.json"),
+            query_cache_ttl_sec=int(os.getenv("KISAANAI_QUERY_CACHE_TTL_SEC", str(6 * 60 * 60))),
         )
     )
 

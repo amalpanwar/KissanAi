@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -19,14 +20,18 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config()
+    medium_generator_model = os.getenv("KISAANAI_MEDIUM_GENERATOR_MODEL") or cfg.generator_model
     advisor = RAGAdvisor(
         AdvisorConfig(
             embedding_model=cfg.embedding_model,
-            generator_model=cfg.generator_model,
+            generator_model=medium_generator_model,
             index_path=cfg.paths["vector_store"],
             metadata_path=cfg.paths["metadata_store"],
             top_k=cfg.top_k,
             db_path=cfg.paths["sqlite_db"],
+            complex_generator_model=os.getenv("KISAANAI_COMPLEX_GENERATOR_MODEL") or None,
+            response_cache_path=os.getenv("KISAANAI_RESPONSE_CACHE_PATH", "data/processed/query_response_cache.json"),
+            query_cache_ttl_sec=int(os.getenv("KISAANAI_QUERY_CACHE_TTL_SEC", str(6 * 60 * 60))),
         )
     )
     out = advisor.answer(args.q)

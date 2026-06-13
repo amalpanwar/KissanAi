@@ -23,6 +23,8 @@ from app.msp import get_msp_for_crop
 from app.web_search import is_web_search_configured, web_search
 from app.agri_glossary import match_glossary_entry, format_glossary_answer, glossary_references
 from app.pdf_extract import read_pdf_pages, read_pdf_text
+from app.query_agent import QueryAgent, QueryPlan
+from app.query_cache import QueryResponseCache
 from app.symptom_matcher import (
     SYMPTOM_CANDIDATE_PATH,
     SYMPTOM_DICTIONARY_PATH,
@@ -366,6 +368,10 @@ class AdvisorConfig:
     metadata_path: str
     top_k: int
     db_path: str | None = None
+    complex_generator_model: str | None = None
+    response_cache_path: str = "data/processed/query_response_cache.json"
+    query_cache_ttl_sec: int = 6 * 60 * 60
+    response_cache_max_entries: int = 256
 
 
 @dataclass
@@ -396,6 +402,7 @@ class RAGAdvisor:
         self.embedder: Embedder | None = None
         self.retriever: Retriever | None = None
         self.generator: LocalGenerator | None = None
+        self.complex_generator: LocalGenerator | None = None
         self.top_k = cfg.top_k
         self._pdf_text_cache: dict[str, str] = {}
         self._pdf_verification_cache: dict[str, bool] = {}
@@ -403,6 +410,16 @@ class RAGAdvisor:
         self._symptom_phrase_rows: list[dict[str, str]] = []
         self._symptom_phrase_embeddings: np.ndarray | None = None
         self._feedback_symptom_candidate_signature: tuple[int, int] | None = None
+        self.query_agent = QueryAgent(
+            cfg.generator_model,
+            complex_generator_model=cfg.complex_generator_model,
+            default_top_k=cfg.top_k,
+        )
+        self.response_cache = QueryResponseCache(
+            cfg.response_cache_path,
+            version=f"advisor-rag-v1::{cfg.embedding_model}::{cfg.generator_model}::{cfg.complex_generator_model or ''}",
+            max_entries=cfg.response_cache_max_entries,
+        )
 
     def answer(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)
@@ -590,50 +607,111 @@ class RAGAdvisor:
             if context_part
             else normalized_question
         )
+        return self._answer_rag_with_agent(
+            normalized_question=normalized_question,
+            normalized_query=normalized_query,
+            context_part=context_part,
+        )
+
+    def _get_generator_for_model(self, model_name: str | None) -> LocalGenerator | None:
+        target_model = (model_name or self.cfg.generator_model).strip()
+        if not target_model:
+            return None
+        if target_model == self.cfg.generator_model:
+            self._ensure_rag_components(load_generator=True)
+            return self.generator
+        if self.complex_generator is None:
+            try:
+                self.complex_generator = LocalGenerator(target_model)
+            except Exception:
+                return None
+        return self.complex_generator
+
+    def _answer_rag_with_agent(
+        self,
+        *,
+        normalized_question: str,
+        normalized_query: str,
+        context_part: str,
+    ) -> dict:
+        plan = self.query_agent.decide(normalized_question, context_part)
+        cached = self.response_cache.get(
+            question=normalized_question,
+            context_part=context_part,
+            route=plan.route,
+            model_name=plan.model_name or "",
+        )
+        if cached:
+            cached.setdefault("topic", "rag")
+            cached["query_plan"] = plan.to_dict()
+            return cached
 
         try:
             self._ensure_rag_components(load_generator=False)
         except Exception:
-            web_result = self._answer_with_web_search(normalized_question, context_part)
+            web_result = self._answer_with_web_search(normalized_question, context_part) if plan.allow_web_fallback else None
             if web_result:
+                web_result["query_plan"] = plan.to_dict()
                 return web_result
             return {
                 "answer": "अभी यह सवाल local source से नहीं निकल पाया और RAG model उपलब्ध नहीं है। कृपया सवाल में फसल/जिला साफ लिखें या थोड़ी देर बाद फिर प्रयास करें।",
                 "references": [],
                 "retrieved": [],
                 "topic": "rag",
+                "query_plan": plan.to_dict(),
+                "cache_hit": False,
             }
-        if self.embedder is None or self.retriever is None or self.generator is None:
-            web_result = self._answer_with_web_search(normalized_question, context_part)
+
+        if self.embedder is None or self.retriever is None:
+            web_result = self._answer_with_web_search(normalized_question, context_part) if plan.allow_web_fallback else None
             if web_result:
+                web_result["query_plan"] = plan.to_dict()
                 return web_result
             return {
                 "answer": "मॉडल अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।",
                 "references": [],
                 "retrieved": [],
                 "topic": "rag",
+                "query_plan": plan.to_dict(),
+                "cache_hit": False,
             }
 
-        retrieved = self._retrieve_with_hyde_and_rerank(normalized_question, context_part)
-        prompt = build_prompt(normalized_query, retrieved)
-        try:
-            response = self.generator.generate(prompt)
-            if self._is_low_quality_response(response):
+        retrieved = self._retrieve_with_hyde_and_rerank(normalized_question, context_part, top_k=plan.top_k)
+        response = ""
+        generator = None
+        if plan.route != "retrieval_only":
+            generator = self._get_generator_for_model(plan.model_name)
+        if generator is not None:
+            prompt = build_prompt(normalized_query, retrieved)
+            try:
+                response = generator.generate(prompt)
+            except Exception:
+                response = ""
+        if not response or self._is_low_quality_response(response):
+            if plan.allow_web_fallback:
                 web_result = self._answer_with_web_search(normalized_question, context_part)
                 if web_result:
+                    web_result["query_plan"] = plan.to_dict()
                     return web_result
-                response = self._fallback_answer(retrieved, normalized_question)
-        except Exception:
-            web_result = self._answer_with_web_search(normalized_question, context_part)
-            if web_result:
-                return web_result
             response = self._fallback_answer(retrieved, normalized_question)
-        return {
+
+        result = {
             "answer": response,
             "references": [r.get("source_file") for r in retrieved],
             "retrieved": retrieved,
             "topic": "rag",
+            "query_plan": plan.to_dict(),
+            "cache_hit": False,
         }
+        self.response_cache.put(
+            question=normalized_question,
+            context_part=context_part,
+            route=plan.route,
+            model_name=plan.model_name or "",
+            result=result,
+            ttl_sec=min(plan.cache_ttl_sec, self.cfg.query_cache_ttl_sec),
+        )
+        return result
 
     def _query_tokens(self, text: str) -> set[str]:
         tokens = re.findall(r"[a-z0-9\u0900-\u097F]+", (text or "").lower())
@@ -726,7 +804,14 @@ class RAGAdvisor:
             "written in simple Hindi for field use."
         )
 
-    def _rerank_retrieved(self, question: str, candidates: list[dict], top_k: int) -> list[dict]:
+    def _rerank_retrieved(
+        self,
+        question: str,
+        candidates: list[dict],
+        top_k: int,
+        *,
+        keep_internal: bool = False,
+    ) -> list[dict]:
         q_tokens = self._query_tokens(question)
         crop = self._extract_crop_from_query(question)
         disease_terms = [d.lower() for d in self._extract_disease_terms_from_query(question)]
@@ -754,13 +839,24 @@ class RAGAdvisor:
         ranked.sort(key=lambda x: x[0], reverse=True)
         trimmed = []
         for _score, item in ranked[:top_k]:
-            trimmed.append({k: v for k, v in item.items() if not str(k).startswith("_") or k == "_score"})
+            if keep_internal:
+                trimmed.append(item)
+            else:
+                trimmed.append({k: v for k, v in item.items() if not str(k).startswith("_") or k == "_score"})
         return trimmed
 
-    def _retrieve_with_hyde_and_rerank(self, question: str, context_part: str) -> list[dict]:
+    def _retrieve_with_hyde_and_rerank(
+        self,
+        question: str,
+        context_part: str,
+        top_k: int | None = None,
+        *,
+        keep_internal: bool = False,
+    ) -> list[dict]:
         if self.embedder is None or self.retriever is None:
             return []
-        fetch_k = max(self.top_k * 3, 8)
+        target_top_k = max(1, int(top_k or self.top_k))
+        fetch_k = max(target_top_k * 3, 8)
         qvec = self.embedder.encode([question])[0]
         base = self.retriever.retrieve_with_scores(qvec, k=fetch_k)
         merged: dict[int, dict] = {}
@@ -781,7 +877,18 @@ class RAGAdvisor:
                     merged[doc_id] = item
                 elif prev is not None:
                     prev["_from_hyde"] = prev.get("_from_hyde") or True
-        return self._rerank_retrieved(question, list(merged.values()), self.top_k)
+        return self._rerank_retrieved(question, list(merged.values()), target_top_k, keep_internal=keep_internal)
+
+    def retrieve_debug(self, question: str, context_part: str = "", top_k: int = 5) -> list[dict]:
+        self._ensure_rag_components(load_generator=False)
+        if self.embedder is None or self.retriever is None:
+            return []
+        return self._retrieve_with_hyde_and_rerank(
+            question,
+            context_part,
+            top_k=top_k,
+            keep_internal=True,
+        )
 
     def _is_cost_of_production_query(self, text: str) -> bool:
         t = text.strip().lower()

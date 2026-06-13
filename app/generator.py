@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import os
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
 class LocalGenerator:
     def __init__(self, model_name: str) -> None:
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        online = os.getenv("KISAANAI_HF_ONLINE", "").strip().lower() in {"1", "true", "yes"}
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=not online)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             low_cpu_mem_usage=True,
+            local_files_only=not online,
         )
         device = 0 if torch.cuda.is_available() else -1
         self.pipe = pipeline(
