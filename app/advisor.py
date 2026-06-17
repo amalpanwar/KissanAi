@@ -532,6 +532,18 @@ class RAGAdvisor:
                     "retrieved": [],
                     "topic": "crop_guide",
                 }
+        if self._is_season_crop_list_intent(normalized_question):
+            season_crop_answer, season_crop_sources = self._answer_season_crop_list_query(
+                context_part,
+                normalized_question,
+            )
+            if season_crop_answer:
+                return {
+                    "answer": season_crop_answer,
+                    "references": season_crop_sources,
+                    "retrieved": [],
+                    "topic": "crop_season_list",
+                }
         if self._is_crop_choice_intent(normalized_question):
             place = self._extract_location_from_question(farmer_question)
             loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
@@ -4316,6 +4328,29 @@ class RAGAdvisor:
         ]
         return any(k in t for k in keys)
 
+    def _is_season_crop_list_intent(self, text: str) -> bool:
+        t = text.strip().lower()
+        season_markers = ["rabi", "kharif", "zaid", "annual", "रबी", "खरीफ", "जायद", "वार्षिक", "सालाना"]
+        crop_list_markers = [
+            "fasal",
+            "फसल",
+            "crop",
+            "ugaye",
+            "उगाएं",
+            "बताये",
+            "बताएं",
+            "btaye",
+            "batao",
+            "list",
+            "kaun si",
+            "कौन सी",
+        ]
+        if not any(marker in t for marker in season_markers):
+            return False
+        if any(marker in t for marker in ["profit", "profitable", "laabh", "लाभ", "budget", "cost", "comparison", "compare", "बेहतर"]):
+            return False
+        return any(marker in t for marker in crop_list_markers)
+
     def _is_crop_guide_intent(self, text: str) -> bool:
         t = text.strip().lower()
         keys = [
@@ -4629,6 +4664,74 @@ class RAGAdvisor:
             ]
         )
         return f"समझा गया सवाल (हिंदी): {question}\n\n" + "\n".join(lines)
+
+    def _answer_season_crop_list_query(
+        self,
+        context_part: str,
+        question: str,
+    ) -> tuple[str | None, list[str]]:
+        season = self._extract_season(context_part)
+        if not season:
+            q = (question or "").lower()
+            if "kharif" in q or "खरीफ" in q:
+                season = "Kharif"
+            elif "rabi" in q or "रबी" in q:
+                season = "Rabi"
+            elif "zaid" in q or "जायद" in q:
+                season = "Zaid"
+            elif "annual" in q or "वार्षिक" in q or "सालाना" in q:
+                season = "Annual"
+        if not season:
+            return None, []
+
+        district = self._extract_district(context_part) or "Meerut"
+        items: list[str] = []
+        sources = ["UPAG yield data", f"CACP {season.title()} cost report" if season.lower() != "annual" else "CACP Sugarcane / baseline crop data"]
+
+        for crop, base in WESTERN_UP_CROP_BASELINES.items():
+            if not self._season_matches(season, str(base["season"])):
+                continue
+            yield_info = load_latest_up_yield_qtl_per_acre(crop, season=season)
+            yield_qtl = (
+                float(yield_info["yield_qtl_per_acre"])
+                if yield_info and yield_info.get("yield_qtl_per_acre")
+                else float(base["yield_qtl_per_acre"])
+            )
+            cost_info = self._official_cost_range_for_profitability(crop, yield_qtl)
+            crop_label = self._crop_display_label(crop)
+            if cost_info:
+                item = (
+                    f"{crop_label}: उपज ~{yield_qtl:.1f} qtl/acre "
+                    f"(UPAG {yield_info.get('crop_year', '')}, 2nd AE), "
+                    f"लागत ~₹{int(float(cost_info['cost_min']))}-₹{int(float(cost_info['cost_max']))}/acre "
+                    f"({cost_info['source']}), पानी: {base['water_need']}"
+                )
+            else:
+                item = (
+                    f"{crop_label}: उपज ~{yield_qtl:.1f} qtl/acre, "
+                    f"indicative लागत ~₹{int(float(base['cost_min']))}-₹{int(float(base['cost_max']))}/acre, "
+                    f"पानी: {base['water_need']}"
+                )
+            items.append(item)
+
+        if not items:
+            return None, sources
+
+        header = [
+            f"जिला: {district}",
+            f"मौसम: {season}",
+            f"{season} मौसम की सामान्य फसलें:",
+        ]
+        answer = (
+            f"समझा गया सवाल (हिंदी): {question}\n\n"
+            + " | ".join(header[:2])
+            + "\n"
+            + header[2]
+            + "\n"
+            + self._format_numbered_text_blocks(items)
+            + "\n\nअगर आप चाहें, तो मैं इन्हीं फसलों में से कौन सी ज्यादा लाभदायक, कम लागत वाली, या कम पानी वाली है यह भी compare कर सकता हूँ।"
+        )
+        return answer, sources
 
     def _season_matches(self, selected: str, crop_season: str) -> bool:
         s = (selected or "").lower()
