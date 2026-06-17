@@ -417,7 +417,7 @@ class RAGAdvisor:
         )
         self.response_cache = QueryResponseCache(
             cfg.response_cache_path,
-            version=f"advisor-rag-v1::{cfg.embedding_model}::{cfg.generator_model}::{cfg.complex_generator_model or ''}",
+            version=f"advisor-rag-v2::{cfg.embedding_model}::{cfg.generator_model}::{cfg.complex_generator_model or ''}",
             max_entries=cfg.response_cache_max_entries,
         )
 
@@ -682,7 +682,12 @@ class RAGAdvisor:
         if plan.route != "retrieval_only":
             generator = self._get_generator_for_model(plan.model_name)
         if generator is not None:
-            prompt = build_prompt(normalized_query, retrieved)
+            prompt = build_prompt(
+                normalized_query,
+                retrieved,
+                query_family=plan.query_family,
+                max_chunks=plan.prompt_context_k,
+            )
             try:
                 response = generator.generate(prompt)
             except Exception:
