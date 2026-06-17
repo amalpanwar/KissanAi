@@ -4347,7 +4347,28 @@ class RAGAdvisor:
         ]
         if not any(marker in t for marker in season_markers):
             return False
-        if any(marker in t for marker in ["profit", "profitable", "laabh", "लाभ", "budget", "cost", "comparison", "compare", "बेहतर"]):
+        # Let comparative or profit-oriented season queries flow into the crop-choice
+        # ranking path instead of the plain season crop list.
+        if self._is_crop_choice_intent(t):
+            return False
+        if any(
+            marker in t
+            for marker in [
+                "profit",
+                "profitable",
+                "laabh",
+                "labh",
+                "laabhdayak",
+                "labhdayak",
+                "लाभ",
+                "फायदे",
+                "budget",
+                "cost",
+                "comparison",
+                "compare",
+                "बेहतर",
+            ]
+        ):
             return False
         return any(marker in t for marker in crop_list_markers)
 
