@@ -279,10 +279,15 @@ def main() -> None:
                         all_rows.append(r)
                     pagination = payload.get("pagination") or {}
                     total_pages = int(pagination.get("total_pages") or 0)
-                    if total_pages and page >= total_pages:
+                    current_page = int(pagination.get("current_page") or page)
+                    next_page = pagination.get("next_page")
+                    items_per_page = int(pagination.get("items_per_page") or 0)
+                    if total_pages and current_page >= total_pages:
                         break
-                    if len(rows) < args.limit:
-                        break
+                    if not total_pages and not next_page:
+                        effective_page_size = items_per_page or args.limit
+                        if len(rows) < effective_page_size:
+                            break
                     page += 1
                     time.sleep(args.sleep_sec)
     else:
@@ -362,10 +367,15 @@ def main() -> None:
                             all_rows.append(r)
                         pagination = payload.get("pagination") or {}
                         total_pages = int(pagination.get("total_pages") or 0)
-                        if total_pages and page >= total_pages:
+                        current_page = int(pagination.get("current_page") or page)
+                        next_page = pagination.get("next_page")
+                        items_per_page = int(pagination.get("items_per_page") or 0)
+                        if total_pages and current_page >= total_pages:
                             break
-                        if len(rows) < args.limit:
-                            break
+                        if not total_pages and not next_page:
+                            effective_page_size = items_per_page or args.limit
+                            if len(rows) < effective_page_size:
+                                break
                         page += 1
                         time.sleep(args.sleep_sec)
 

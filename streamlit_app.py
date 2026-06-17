@@ -908,6 +908,27 @@ def is_price_query(text: str) -> bool:
     return any(k in t for k in keywords)
 
 
+def is_latest_commodity_price_query(text: str) -> bool:
+    t = (text or "").lower()
+    latest_markers = [
+        "latest available",
+        "latest price available",
+        "date k hisab",
+        "date ke hisab",
+        "kis date ka latest",
+        "konsi fasal ka price latest",
+        "kaunsi fasal ka price latest",
+        "which commodity has latest price",
+        "which crop has latest price",
+        "सबसे latest",
+        "सबसे लेटेस्ट",
+        "लेटेस्ट उपलब्ध",
+        "ताज़ा उपलब्ध",
+    ]
+    commodity_markers = ["commodity", "crop", "fasal", "फसल", "price", "bhav", "भाव", "rate", "कीमत", "मंडी"]
+    return any(marker in t for marker in latest_markers) and any(marker in t for marker in commodity_markers)
+
+
 def wants_detailed_price_forecast(text: str) -> bool:
     t = (text or "").lower()
     keys = [
@@ -1790,6 +1811,51 @@ def summarize_latest_market(df: pd.DataFrame) -> tuple[str, dict[str, str] | Non
     if not pd.isna(qty) and str(qty).strip() and str(qty).strip().lower() != "nan":
         line += f", आवक: {qty} {arrival_unit}"
     return line, latest
+
+
+def summarize_latest_available_commodity(df: pd.DataFrame, state: str, district: str) -> tuple[str, list[str]]:
+    if df.empty:
+        return "अभी बाजार डेटा उपलब्ध नहीं है।", []
+    out = df.copy()
+    out.columns = [c.strip() for c in out.columns]
+    out = out[out["State"].astype(str).str.lower() == str(state).lower()]
+    out = out[out["District"].astype(str).str.lower() == str(district).lower()]
+    out["Arrival_Date_dt"] = pd.to_datetime(out["Arrival_Date"], errors="coerce", dayfirst=True)
+    out = out.dropna(subset=["Arrival_Date_dt", "Modal_Price", "Commodity"])
+    if out.empty:
+        return f"{district} में किसी commodity के लिए वैध ताज़ा डेटा नहीं मिला।", []
+
+    latest_by_commodity = (
+        out.sort_values("Arrival_Date_dt", ascending=False)
+        .groupby("Commodity", as_index=False)
+        .head(1)
+        .sort_values(["Arrival_Date_dt", "Modal_Price"], ascending=[False, False])
+    )
+    top = latest_by_commodity.iloc[0].to_dict()
+    top_date = top.get("Arrival_Date_dt")
+    top_commodity = commodity_display_name(str(top.get("Commodity") or ""))
+    top_price = top.get("Modal_Price")
+    top_qty = top.get("Arrival_Qty")
+    top_market = str(top.get("Market") or "").strip()
+    lines = [
+        f"{district} में तारीख के हिसाब से सबसे ताज़ा उपलब्ध commodity: {top_commodity}",
+        f"- ताज़ा तारीख: {top_date.date()}",
+        f"- भाव: {top_price} {top.get('Price_Unit') or 'Rs./Quintal'}",
+    ]
+    if top_market:
+        lines.append(f"- मंडी: {top_market}")
+    if pd.notna(top_qty):
+        lines.append(f"- आवक: {top_qty} {top.get('Arrival_Unit') or 'Metric Tonnes'}")
+
+    sample_lines: list[str] = []
+    for _, row in latest_by_commodity.head(5).iterrows():
+        sample_lines.append(
+            f"- {commodity_display_name(str(row.get('Commodity') or ''))}: {row['Arrival_Date_dt'].date()} | {row.get('Modal_Price')} {row.get('Price_Unit') or 'Rs./Quintal'}"
+        )
+    if sample_lines:
+        lines.append("अन्य हाल की उपलब्ध commodities (नमूना):")
+        lines.extend(sample_lines)
+    return "\n".join(lines), ["agmarknet_report.csv"]
 
 
 def summarize_latest_market_for_market(df: pd.DataFrame, market: str) -> tuple[str, dict[str, str] | None]:
@@ -3139,6 +3205,28 @@ if user_query:
         comm_from_query = resolve_commodity_from_query(
             user_query, load_commodity_catalog()
         )
+        if not comm_from_query and is_latest_commodity_price_query(user_query):
+            final_answer, price_references = summarize_latest_available_commodity(
+                market_df,
+                selected_state,
+                selected_district,
+            )
+            query_log_id = log_query_answer(
+                user_query=user_query,
+                composed_query=composed_query,
+                topic="price",
+                answer_text=final_answer,
+                references=price_references,
+                district=selected_district,
+                season=season,
+                crop_name="latest_available_commodity",
+            )
+            st.session_state.chat_history.append(
+                {"role": "assistant", "text": final_answer, "references": price_references, "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+            )
+            with st.chat_message("assistant"):
+                st.write(final_answer)
+            st.stop()
         if not comm_from_query:
             final_answer = (
                 "कृपया फसल/कमोडिटी का नाम बताएं (जैसे: गेहूं, गन्ना, धान)।"
