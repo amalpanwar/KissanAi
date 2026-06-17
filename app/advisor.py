@@ -17,7 +17,7 @@ from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
 from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_rain_day_forecast_hindi, get_tomorrow_rain_forecast_hindi, get_weekly_weather_forecast_hindi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
-from app.crop_guide import build_crop_production_followup, build_crop_production_guide
+from app.crop_guide import CROP_ALIASES, build_crop_production_followup, build_crop_production_guide
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
 from app.web_search import is_web_search_configured, web_search
@@ -4405,32 +4405,13 @@ class RAGAdvisor:
             "कैसे उगाएं",
             "कैसे उगाये",
         ]
-        crop_markers = [
-            "rice",
-            "wheat",
-            "sugarcane",
-            "maize",
-            "groundnut",
-            "sesame",
-            "cotton",
-            "धान",
-            "गेहूं",
-            "gehu",
-            "gehun",
-            "गन्ना",
-            "गन्ने",
-            "ganne",
-            "ganna",
-            "मक्का",
-            "मूंगफली",
-            "तिल",
-            "कपास",
-            "सूरजमुखी",
-            "surajmukhi",
-            "surujmukhi",
-            "soorajmukhi",
-            "suryamukhi",
-        ]
+        crop_markers: list[str] = []
+        for crop_name, aliases in CROP_ALIASES.items():
+            crop_markers.append(str(crop_name).lower())
+            for alias in aliases:
+                marker = str(alias).strip().lower()
+                if marker and marker not in crop_markers:
+                    crop_markers.append(marker)
         guide_context_words = [
             "खेती",
             "kheti",
