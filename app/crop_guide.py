@@ -259,6 +259,7 @@ HEADING_LABELS_HI = {
     "FORMING BEDS AND CHANNEL": "क्यारियां और नालियां",
     "FORMING RIDGES AND FURROWS": "मेड़ और नालियां",
     "APPLICATION OF FERTILIZERS": "उर्वरक प्रबंधन",
+    "FERTILIZER APPLICATION": "उर्वरक प्रबंधन",
     "APPLICATION OF MICRONUTRIENTS": "सूक्ष्म पोषक तत्व",
     "FOLIAR SPRAY OF NAPHTHALENE ACETIC ACID": "पत्तियों पर स्प्रे (NAA)",
     "SULPHUR FERTILIZATION": "गंधक प्रबंधन",
@@ -833,6 +834,11 @@ def _safe_render_block(crop: str, heading: str, body: str, phase: str) -> str:
     label = _heading_label_hi(heading)
     text = _cleanup_bullet_text(_translate_terms(_compress_sentences(body, limit=3)))
 
+    if any(token in heading_key for token in ["TIME OF SOWING", "SOWING OF SEEDS", "FERTILIZER APPLICATION"]):
+        candidate = _summarize_block(crop, heading, body)
+        if candidate:
+            return candidate
+
     if "CLIMATE REQUIREMENT" in heading_key:
         lower = body.lower()
         parts = []
@@ -997,6 +1003,23 @@ def _validate_and_repair_guide(crop: str, entries: list[dict[str, str]]) -> tupl
     return phase_points, issues
 
 
+def _prune_generic_phase_points(phase_points: dict[str, list[str]]) -> dict[str, list[str]]:
+    cleaned: dict[str, list[str]] = {}
+    for phase, pts in phase_points.items():
+        items = list(pts or [])
+        has_specific_seed_rate = any(
+            p.startswith("बीज दर:") and "किस्म और सिंचाई की स्थिति के अनुसार" not in p for p in items
+        )
+        if has_specific_seed_rate:
+            items = [
+                p
+                for p in items
+                if not (p.startswith("बीज दर:") and "किस्म और सिंचाई की स्थिति के अनुसार" in p)
+            ]
+        cleaned[phase] = items
+    return cleaned
+
+
 def _build_guide_points_for_crop(crop: str) -> tuple[dict[str, list[str]] | None, list[dict[str, str]], list[str]]:
     section_text = _extract_section_text(crop)
     if not section_text:
@@ -1025,6 +1048,7 @@ def _build_guide_points_for_crop(crop: str) -> tuple[dict[str, list[str]] | None
             )
     phase_points, issues = _validate_and_repair_guide(crop, entries)
     _append_review_queue(crop, issues)
+    phase_points = _prune_generic_phase_points(phase_points)
     if not any(phase_points.values()):
         return None, [], []
     return phase_points, entries, [str(GUIDE_PDF)]
@@ -1168,6 +1192,19 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         setts = _extract_first(r"([0-9,]+\s*two-budded setts/ha)", text)
         if setts:
             return f"{label}: लगभग {_translate_terms(setts)} रखें।"
+        if "quantity of seed required" in text.lower():
+            pure_crop = _extract_first(r"(?:Pure|Sole)\s*crop\s*([0-9.]+)", text)
+            mixed_crop = _extract_first(r"Mixed\s*crop\s*([0-9.]+)", text)
+            rice_fallow = _extract_first(r"Rice\s*fallows?.*?([0-9.]+)\s*[-–]?\s*$", text)
+            parts = []
+            if pure_crop:
+                parts.append(f"शुद्ध फसल में लगभग {pure_crop.strip()} किग्रा/हेक्टेयर बीज रखें।")
+            if mixed_crop:
+                parts.append(f"मिश्रित फसल में लगभग {mixed_crop.strip()} किग्रा/हेक्टेयर बीज रखें।")
+            if rice_fallow:
+                parts.append(f"rice fallow स्थिति में लगभग {rice_fallow.strip()} किग्रा/हेक्टेयर बीज रखें।")
+            if parts:
+                return f"{label}: {' '.join(parts)}"
         rows = _extract_all(r"(Varieties|Hybrids)\s*([0-9.]+\s*kg/ha)\s*([0-9.]+\s*kg/ha)", text)
         if rows:
             parts = []
@@ -1193,11 +1230,30 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         parts.append("खेत की ढाल के अनुसार सिंचाई की नालियां रखें।")
         return f"{label}: {' '.join(parts)}"
 
-    if "APPLICATION OF FERTILIZERS" in heading_key:
+    if "FERTILIZER APPLICATION" in heading_key or "APPLICATION OF FERTILIZERS" in heading_key:
         if crop.lower() == "sugarcane":
             npk = _extract_first(r"NPK\s*@\s*([0-9:]+)\s*kg/ha", text)
             if npk:
                 return f"{label}: यदि मिट्टी जांच उपलब्ध न हो तो लगभग {npk} NPK किग्रा/हेक्टेयर दें। Super phosphate furrow में डालकर मिट्टी से मिला दें।"
+        rainfed = _extract_first(
+            r"Rainfed\s*:\s*([0-9.]+\s*kg\s*N\s*\+\s*[0-9.]+\s*kg\s*P\s*2O5\s*\+\s*[0-9.]+\s*kg\s*K\s*2O\s*\+\s*[0-9.]+\s*kg\s*S\*?/ha)",
+            text,
+        )
+        irrigated = _extract_first(
+            r"Irrigated\s*:\s*([0-9.]+\s*kg\s*N\s*\+\s*[0-9.]+\s*kg\s*P\s*2O5\s*\+\s*[0-9.]+\s*kg\s*K\s*2O\s*\+\s*[0-9.]+\s*kg\s*S\*?/ha)",
+            text,
+        )
+        if rainfed or irrigated:
+            parts = ["यदि मिट्टी जांच उपलब्ध न हो, तो उर्वरक बुवाई से पहले बेसल रूप में दें।"]
+            if rainfed:
+                rainfed_txt = re.sub(r"\s+", " ", rainfed).replace("P 2O5", "P2O5").replace("K 2O", "K2O").replace("S*", "S")
+                parts.append(f"वर्षा आधारित फसल में लगभग {rainfed_txt} दें।")
+            if irrigated:
+                irrigated_txt = re.sub(r"\s+", " ", irrigated).replace("P 2O5", "P2O5").replace("K 2O", "K2O").replace("S*", "S")
+                parts.append(f"सिंचित फसल में लगभग {irrigated_txt} दें।")
+            if "gypsum" in text.lower() and "single super phospate" in text.lower():
+                parts.append("अगर फॉस्फोरस के लिए SSP न दें, तो गंधक gypsum के रूप में दें।")
+            return f"{label}: {' '.join(parts)}"
         npk = _extract_first(r"recommendation of\s*([0-9: ]+NPK\s*kg/ha|[0-9: ]+\s*NPK\s*kg/ha|[0-9: ]+)", text)
         zns = _extract_first(r"Apply\s*([0-9.]+\s*kg\s*ZnSO\s*4.*?)\.", text)
         parts = []
@@ -1225,6 +1281,22 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
             return f"{label}: ray floret opening stage पर 0.2% boric acid (लगभग 2 g/लीटर पानी) का spray करें, ताकि seed set और seed filling बेहतर हो।"
         text2 = _cleanup_bullet_text(_compress_sentences(text, limit=3))
         return f"{label}: {text2}"
+
+    if "TIME OF SOWING" in heading_key:
+        if "third week of january" in text.lower() and "second week of february" in text.lower():
+            return f"{label}: सामान्यतः जनवरी के तीसरे सप्ताह से फरवरी के दूसरे सप्ताह तक बुवाई करें।"
+        return f"{label}: {_cleanup_bullet_text(_translate_terms(_compress_sentences(text, limit=2)))}"
+
+    if "SOWING OF SEEDS" in heading_key:
+        lower = text.lower()
+        if "relay cropping" in lower and "harvest of the paddy crop" in lower:
+            parts = [
+                "रिले फसल पद्धति में धान की कटाई से लगभग 5-10 दिन पहले खड़े खेत में उचित नमी पर बीज समान रूप से बिखेरें।",
+            ]
+            if "combined harvesting areas" in lower:
+                parts.append("जहाँ मशीन से कटाई होती है, वहाँ धान की कटाई से पहले ही बीज का छिटकाव करें।")
+            return f"{label}: {' '.join(parts)}"
+        return f"{label}: {_cleanup_bullet_text(_translate_terms(_compress_sentences(text, limit=2)))}"
 
     if heading_key == "SOWING":
         spacing_line = _extract_first(r"Spacing\s*:\s*(.*?)(?:i\)|$)", text)
@@ -1327,14 +1399,7 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
     if "CROP PROTECTION" in heading_key:
         if crop.lower() == "sugarcane":
             return "फसल सुरक्षा: गन्ने में shoot borer, termites और grassy shoot disease जैसे प्रमुख कीट/रोग पर नजर रखें। समय पर sett treatment, trash mulching, intercropping और सिफारिश अनुसार insecticide/biocontrol अपनाएँ।"
-        dose = _extract_first(r"@?\s*([0-9.]+\s*g/kg of seed)", text)
-        chems = _extract_first(r"fungicides\s*(.*?)(?:@|$)", text)
-        parts = []
-        if chems:
-            parts.append(f"बीज उपचार के लिए {chems.strip()} का उपयोग किया जा सकता है।")
-        if dose:
-            parts.append(f"खुराक: {_translate_terms(dose.strip())}।")
-        return f"{label}: {' '.join(parts) or _translate_terms(_compress_sentences(text))}"
+        return f"{label}: प्रमुख रोग/कीट पर नियमित निगरानी रखें और जरूरत होने पर सिफारिश अनुसार दवा/बीज उपचार अपनाएं।"
 
     text = _cleanup_bullet_text(_compress_sentences(text, limit=3))
     if not text:
