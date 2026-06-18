@@ -1264,6 +1264,11 @@ class RAGAdvisor:
             "dosage",
             "borer",
             "stem borer",
+            "shoot borer",
+            "top borer",
+            "root borer",
+            "white grub",
+            "grub",
             "smut",
             "bunt",
             "burnt",
@@ -1341,8 +1346,9 @@ class RAGAdvisor:
             "smut", "bunt", "blight", "mildew", "wilt", "spot", "blast",
             "stem borer", "borer", "leaf folder", "leaffolder", "hopper",
             "planthopper", "aphid", "termite", "mite", "caterpillar",
+            "white grub", "grub", "shoot borer", "top borer", "root borer",
             "लाल सड़न", "रतुआ", "कंडुआ", "बंट", "झुलसा", "चूर्णी फफूंदी",
-            "तना छेदक", "दीमक", "माहू",
+            "तना छेदक", "दीमक", "माहू", "सफेद सूंडी", "शूट बोरर", "टॉप बोरर", "जड़ छेदक",
         ]
         return any(term in t for term in specific_terms)
 
@@ -1439,7 +1445,7 @@ class RAGAdvisor:
                 strict_match=True,
             )
             if db_lines:
-                disease_label = symptom_label or ", ".join(disease_terms[:3]) or "दिए गए लक्षण"
+                disease_label = self._render_symptom_or_issue_label(symptom_label, disease_terms)
                 lines = [
                     "संरचित कीटनाशक सलाह:",
                     f"- फसल: {self._crop_name_hi(crop)}",
@@ -1487,7 +1493,7 @@ class RAGAdvisor:
                 if len(symptom_db_lines) >= 3:
                     break
             if symptom_db_lines:
-                disease_label = symptom_label or "दिए गए लक्षण"
+                disease_label = self._render_symptom_or_issue_label(symptom_label, disease_terms)
                 lines = [
                     "संरचित कीटनाशक सलाह:",
                     f"- फसल: {self._crop_name_hi(crop)}",
@@ -1674,7 +1680,8 @@ class RAGAdvisor:
         pest_terms = [
             "kida", "kide", "kido", "keeda", "keede", "keet", "pest", "insect",
             "borer", "hopper", "aphid", "termite", "mite", "caterpillar",
-            "कीट", "कीड़ा", "कीड़े", "दीमक", "माहू",
+            "white grub", "grub", "shoot borer", "top borer", "root borer",
+            "कीट", "कीड़ा", "कीड़े", "दीमक", "माहू", "सफेद सूंडी", "शूट बोरर", "टॉप बोरर", "जड़ छेदक",
         ]
         disease_terms = ["fungus", "fungal", "fugal", "rog", "bimari", "disease", "फफूंद", "फंगस", "रोग", "बीमारी"]
         return any(k in t for k in pest_terms) and not any(k in t for k in disease_terms)
@@ -2650,6 +2657,32 @@ class RAGAdvisor:
                 aliases = DISEASE_ALIASES.get(term_l, [term_l])
             expanded_terms.extend(aliases)
         return [str(term).strip().lower() for term in expanded_terms if str(term).strip()]
+
+    def _render_issue_label(self, disease_terms: list[str], fallback: str = "दिए गए लक्षण") -> str:
+        labels: list[str] = []
+        for term in disease_terms[:3]:
+            cleaned = str(term).strip()
+            if not cleaned:
+                continue
+            label = self._translate_disease_name(cleaned) or cleaned
+            if label not in labels:
+                labels.append(label)
+        return ", ".join(labels) if labels else fallback
+
+    def _render_symptom_or_issue_label(
+        self,
+        symptom_label: str | None,
+        disease_terms: list[str],
+        fallback: str = "दिए गए लक्षण",
+    ) -> str:
+        if symptom_label:
+            translated = self._translate_disease_name(symptom_label)
+            if translated and translated != symptom_label:
+                return translated
+            cleaned = str(symptom_label).strip()
+            if cleaned:
+                return cleaned
+        return self._render_issue_label(disease_terms, fallback=fallback)
 
     def _extract_rows_for_pesticide_name(
         self,
