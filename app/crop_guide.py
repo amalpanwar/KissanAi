@@ -1092,6 +1092,72 @@ def _format_water_stages(text: str) -> str:
     return "; ".join(stages[:5])
 
 
+def _translate_irrigation_stage_name(name: str) -> str:
+    normalized = " ".join(str(name or "").lower().split())
+    normalized = normalized.replace("grandgrowth", "grand growth")
+    normalized = re.sub(r"^days of irrigation interval stages\s+", "", normalized)
+    normalized = re.sub(r"^stages\s+", "", normalized)
+    mapping = {
+        "germination phase": "अंकुरण अवस्था",
+        "tillering phase": "टिलरिंग/कल्ले बनने की अवस्था",
+        "grand growth phase": "तेज बढ़वार की अवस्था",
+        "maturity phase": "पकने की अवस्था",
+        "pre-flowering phase": "फूल आने से पहले की अवस्था",
+        "flowering phase": "फूल आने की अवस्था",
+        "flowering stage": "फूल आने की अवस्था",
+        "reproductive phase": "प्रजनन/फलन अवस्था",
+        "vegetative phase": "शाकीय बढ़वार अवस्था",
+        "pod formation stage": "फली बनने की अवस्था",
+        "pod development stage": "फली विकास अवस्था",
+        "pegging stage": "पेगिंग अवस्था",
+        "immediately after sowing": "बुवाई के तुरंत बाद",
+        "crown root intiation": "क्राउन रूट बनने की अवस्था",
+        "active tillering stage": "टिलरिंग अवस्था",
+        "grain filling stage": "दाना भरने की अवस्था",
+        "grain formation stage": "दाना बनने की अवस्था",
+    }
+    return mapping.get(normalized, _translate_terms(name.strip()))
+
+
+def _extract_irrigation_stage_ranges(text: str) -> list[dict[str, object]]:
+    ranges: list[dict[str, object]] = []
+    seen: set[tuple[str, int, int]] = set()
+    patterns = [
+        r"([A-Za-z][A-Za-z \-/]+?phase)\s*\((\d+)\s*(?:-|to)\s*(\d+)\s*days?\)\s*(\d+)\s*(\d+)",
+        r"([A-Za-z][A-Za-z \-/]+?phase)\s*:\s*(\d+)\s*to\s*(\d+)\s*days",
+        r"(Crown root intiation|Active tillering stage|Flowering stage|Grain filling stage)\s*:\s*(\d+)\s*-\s*(\d+)\s*DAS",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            label = _translate_irrigation_stage_name(match.group(1))
+            try:
+                start = int(match.group(2))
+                end = int(match.group(3))
+            except Exception:
+                continue
+            interval_min = interval_max = None
+            if len(match.groups()) >= 5 and match.group(4) and match.group(5):
+                try:
+                    interval_min = int(match.group(4))
+                    interval_max = int(match.group(5))
+                except Exception:
+                    interval_min = interval_max = None
+            key = (label, start, end)
+            if key in seen:
+                continue
+            seen.add(key)
+            ranges.append(
+                {
+                    "label": label,
+                    "start": start,
+                    "end": end,
+                    "interval_min": interval_min,
+                    "interval_max": interval_max,
+                }
+            )
+    return ranges
+
+
 def _extract_crop_age_days(question: str) -> int | None:
     q = str(question or "").lower()
     month_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:mahine|maheene|mahina|month|months)", q)
@@ -1109,17 +1175,32 @@ def _extract_crop_age_days(question: str) -> int | None:
     return None
 
 
-def _sugarcane_age_specific_irrigation_note(question: str) -> str | None:
+def _age_specific_irrigation_note(question: str, irrigation_text: str) -> str | None:
     age_days = _extract_crop_age_days(question)
     if age_days is None:
         return None
-    if age_days <= 35:
-        return "लगभग शुरुआती 0-35 दिन (germination phase) में हल्की 2-3 सेमी सिंचाई कम अंतर पर दें, खासकर हल्की/रेतीली मिट्टी में। हर रोज पानी देना जरूरी नहीं; मिट्टी की नमी देखकर सिंचाई करें।"
-    if age_days <= 100:
-        return "लगभग 3 महीने (~90 दिन) की गन्ने की फसल टिलरिंग/कल्ले बनने की अवस्था में आती है। इस अवस्था में आम तौर पर हर रोज सिंचाई नहीं दी जाती; सामान्यतः लगभग 8-10 दिन के अंतर पर सिंचाई रखें, लेकिन गर्मी, मिट्टी और नमी के अनुसार अंतर बदल सकता है।"
-    if age_days <= 270:
-        return "यह फसल grand growth यानी तेज बढ़वार की अवस्था में मानी जाएगी। इस अवस्था में आम तौर पर लगभग 8-10 दिन के अंतर पर सिंचाई रखें और नमी की कमी न होने दें।"
-    return "यह फसल maturity यानी पकने की अवस्था के करीब मानी जाएगी। सामान्यतः लगभग 10-14 दिन के अंतर पर सिंचाई रखें और खेत में अनावश्यक पानी न भरने दें।"
+    stage_ranges = _extract_irrigation_stage_ranges(irrigation_text)
+    for stage in stage_ranges:
+        start = int(stage.get("start") or 0)
+        end = int(stage.get("end") or 0)
+        if start <= age_days <= end:
+            label = str(stage.get("label") or "इस अवस्था")
+            interval_min = stage.get("interval_min")
+            interval_max = stage.get("interval_max")
+            if interval_min and interval_max:
+                return (
+                    f"लगभग {age_days} दिन की फसल {label} में आती है। "
+                    f"इस अवस्था में आम तौर पर हर रोज सिंचाई नहीं दी जाती; "
+                    f"सामान्यतः लगभग {interval_min}-{interval_max} दिन के अंतर पर सिंचाई रखें, "
+                    "लेकिन गर्मी, मिट्टी और नमी के अनुसार अंतर बदल सकता है।"
+                )
+            return (
+                f"लगभग {age_days} दिन की फसल {label} में आती है। "
+                "इस अवस्था में मिट्टी की नमी बनाए रखें और फसल को पानी की कमी न होने दें।"
+            )
+    if age_days <= 7:
+        return "शुरुआती अवस्था में आम तौर पर हर रोज भारी सिंचाई नहीं दी जाती; हल्की नमी बनाए रखें और खेत में पानी खड़ा न होने दें।"
+    return None
 
 
 def _summarize_block(crop: str, heading: str, body: str) -> str:
@@ -1378,33 +1459,56 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
     if "WATER MANAGEMENT" in heading_key or heading_key == "IRRIGATION":
         irrig = _extract_first(r"requires\s*([0-9 \-]+)\s*irrigations", text)
         stage_text = _format_water_stages(text)
+        stage_ranges = _extract_irrigation_stage_ranges(text)
         parts = []
-        if crop.lower() == "sugarcane":
-            parts.append("फसल की अवस्था के अनुसार सिंचाई दें; हर रोज पानी देना सामान्य सिफारिश नहीं है।")
-            if "0 - 35 days" in text.lower() or "0-35 days" in text.lower():
-                parts.append("अंकुरण अवस्था (0-35 दिन) में 2-3 सेमी की हल्की सिंचाई कम अंतर पर दें, खासकर रेतीली मिट्टी में।")
-            if "tillering phase (36 to 100 days)" in text.lower():
-                parts.append("टिलरिंग/कल्ले बनने की अवस्था (36-100 दिन) में सामान्यतः लगभग 8-10 दिन के अंतर पर सिंचाई रखें।")
-            if "grand growth phase (101 - 270 days)" in text.lower() or "grand growth phase (101-270 days)" in text.lower():
-                parts.append("तेज बढ़वार की अवस्था (101-270 दिन) में सामान्यतः लगभग 8-10 दिन के अंतर पर सिंचाई रखें।")
-            if "maturity phase (271 - harvest)" in text.lower() or "maturity phase (271-harvest)" in text.lower():
-                parts.append("पकने की अवस्था (271 दिन से कटाई तक) में सामान्यतः लगभग 10-14 दिन के अंतर पर सिंचाई रखें।")
-            if "sprinkle irrigation" in text.lower() or "sprinkler irrigation" in text.lower():
-                parts.append("शुरुआती अवस्था में sprinkler irrigation उपयुक्त मानी जाती है।")
-            if "irrigation is given once in three days" in text.lower():
-                parts.append("drip irrigation में evapotranspiration demand के अनुसार लगभग हर 3 दिन पर पानी दिया जा सकता है।")
+        if stage_ranges:
+            stage_lines = []
+            for stage in stage_ranges[:4]:
+                stage_label = str(stage.get("label") or "").strip()
+                start = int(stage.get("start") or 0)
+                end = int(stage.get("end") or 0)
+                interval_min = stage.get("interval_min")
+                interval_max = stage.get("interval_max")
+                if interval_min and interval_max:
+                    stage_lines.append(
+                        f"{stage_label} ({start}-{end} दिन): सामान्यतः लगभग {interval_min}-{interval_max} दिन के अंतर पर सिंचाई रखें"
+                    )
+                else:
+                    stage_lines.append(f"{stage_label} ({start}-{end} दिन)")
+            if stage_lines:
+                parts.append("अवस्था-आधारित सिंचाई: " + "; ".join(stage_lines) + "।")
         if irrig:
             parts.append(f"फसल को लगभग {irrig.strip()} सिंचाइयों की जरूरत पड़ती है।")
         if stage_text:
             parts.append(f"महत्वपूर्ण अवस्थाएं: {stage_text}।")
+        interval_match = re.search(r"interval of\s*([0-9]+)\s*to\s*([0-9]+)\s*days", text, flags=re.IGNORECASE)
+        if interval_match:
+            parts.append(f"इसके बाद सामान्यतः लगभग {interval_match.group(1)}-{interval_match.group(2)} दिन के अंतर पर सिंचाई रखें।")
+        every_match = re.search(r"once in\s*([0-9]+)\s*days", text, flags=re.IGNORECASE)
+        if every_match:
+            parts.append(f"लगभग हर {every_match.group(1)} दिन पर सिंचाई की जा सकती है।")
         if "immediately after sowing" in text.lower():
             parts.append("पहली सिंचाई बुवाई के तुरंत बाद करें।")
+        if "life irrigation on third day" in text.lower():
+            parts.append("इसके बाद तीसरे दिन life irrigation दें।")
         if "4 – 5th day" in text or "4-5th day" in text.lower():
             parts.append("दूसरी सिंचाई 4-5 दिन बाद दें।")
         if "7 to 8 day" in text.lower() or "7 t o 8 d a y s" in text.lower():
             parts.append("इसके बाद 7-8 दिन के अंतर पर सिंचाई करें।")
+        if "2 to 3 cm depth of water" in text.lower():
+            parts.append("शुरुआती अवस्था में 2-3 सेमी की हल्की सिंचाई दें, खासकर रेतीली मिट्टी में।")
+        if "flowering and pod formation stages are critical" in text.lower():
+            parts.append("फूल आने और फली बनने की अवस्था में पानी की कमी न होने दें।")
+        if "pegging stage give one or two irrigations" in text.lower():
+            parts.append("पेगिंग अवस्था में 1-2 सिंचाई दें।")
+        if "pod development stage" in text.lower() and "2 - 3 irri" in text.lower():
+            parts.append("फली विकास अवस्था में मिट्टी के अनुसार 2-3 सिंचाई दें।")
         if "water stagnation should be avoided" in text.lower():
             parts.append("अंकुरण के समय खेत में पानी खड़ा न होने दें।")
+        if "sprinkle irrigation" in text.lower() or "sprinkler irrigation" in text.lower():
+            parts.append("शुरुआती अवस्था या नमी प्रबंधन के लिए sprinkler irrigation उपयोगी हो सकती है।")
+        if "drip irrigation" in text.lower():
+            parts.append("ड्रिप सिंचाई अपनाने पर पानी की बचत और बेहतर नमी प्रबंधन मिल सकता है।")
         return f"{label}: {' '.join(parts)}" if parts else ""
 
     if "TOP DRESSING" in heading_key:
@@ -1583,8 +1687,13 @@ def build_crop_production_followup(question: str, crop_hint: str | None = None) 
     }.get(section, "विस्तृत जानकारी")
 
     lines = [f"{crop_label} के लिए {section_hi} की जानकारी:", ""]
-    if crop == "Sugarcane" and section == "irrigation":
-        age_note = _sugarcane_age_specific_irrigation_note(question)
+    if section == "irrigation":
+        irrigation_blob = " ".join(
+            str(entry.get("body", "")).strip()
+            for entry in entries
+            if _section_matches_followup("irrigation", entry)
+        )
+        age_note = _age_specific_irrigation_note(question, irrigation_blob)
         if age_note:
             lines.append(f"- {age_note}")
     for point in matched_points[:5]:
