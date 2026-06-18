@@ -1092,6 +1092,36 @@ def _format_water_stages(text: str) -> str:
     return "; ".join(stages[:5])
 
 
+def _extract_crop_age_days(question: str) -> int | None:
+    q = str(question or "").lower()
+    month_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:mahine|maheene|mahina|month|months)", q)
+    if month_match:
+        try:
+            return int(round(float(month_match.group(1)) * 30))
+        except Exception:
+            return None
+    day_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:din|days?|dap)\b", q)
+    if day_match:
+        try:
+            return int(round(float(day_match.group(1))))
+        except Exception:
+            return None
+    return None
+
+
+def _sugarcane_age_specific_irrigation_note(question: str) -> str | None:
+    age_days = _extract_crop_age_days(question)
+    if age_days is None:
+        return None
+    if age_days <= 35:
+        return "लगभग शुरुआती 0-35 दिन (germination phase) में हल्की 2-3 सेमी सिंचाई कम अंतर पर दें, खासकर हल्की/रेतीली मिट्टी में। हर रोज पानी देना जरूरी नहीं; मिट्टी की नमी देखकर सिंचाई करें।"
+    if age_days <= 100:
+        return "लगभग 3 महीने (~90 दिन) की गन्ने की फसल टिलरिंग/कल्ले बनने की अवस्था में आती है। इस अवस्था में आम तौर पर हर रोज सिंचाई नहीं दी जाती; सामान्यतः लगभग 8-10 दिन के अंतर पर सिंचाई रखें, लेकिन गर्मी, मिट्टी और नमी के अनुसार अंतर बदल सकता है।"
+    if age_days <= 270:
+        return "यह फसल grand growth यानी तेज बढ़वार की अवस्था में मानी जाएगी। इस अवस्था में आम तौर पर लगभग 8-10 दिन के अंतर पर सिंचाई रखें और नमी की कमी न होने दें।"
+    return "यह फसल maturity यानी पकने की अवस्था के करीब मानी जाएगी। सामान्यतः लगभग 10-14 दिन के अंतर पर सिंचाई रखें और खेत में अनावश्यक पानी न भरने दें।"
+
+
 def _summarize_block(crop: str, heading: str, body: str) -> str:
     text = _clean_text(body)
     heading_key = _heading_key(heading)
@@ -1349,6 +1379,20 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         irrig = _extract_first(r"requires\s*([0-9 \-]+)\s*irrigations", text)
         stage_text = _format_water_stages(text)
         parts = []
+        if crop.lower() == "sugarcane":
+            parts.append("फसल की अवस्था के अनुसार सिंचाई दें; हर रोज पानी देना सामान्य सिफारिश नहीं है।")
+            if "0 - 35 days" in text.lower() or "0-35 days" in text.lower():
+                parts.append("अंकुरण अवस्था (0-35 दिन) में 2-3 सेमी की हल्की सिंचाई कम अंतर पर दें, खासकर रेतीली मिट्टी में।")
+            if "tillering phase (36 to 100 days)" in text.lower():
+                parts.append("टिलरिंग/कल्ले बनने की अवस्था (36-100 दिन) में सामान्यतः लगभग 8-10 दिन के अंतर पर सिंचाई रखें।")
+            if "grand growth phase (101 - 270 days)" in text.lower() or "grand growth phase (101-270 days)" in text.lower():
+                parts.append("तेज बढ़वार की अवस्था (101-270 दिन) में सामान्यतः लगभग 8-10 दिन के अंतर पर सिंचाई रखें।")
+            if "maturity phase (271 - harvest)" in text.lower() or "maturity phase (271-harvest)" in text.lower():
+                parts.append("पकने की अवस्था (271 दिन से कटाई तक) में सामान्यतः लगभग 10-14 दिन के अंतर पर सिंचाई रखें।")
+            if "sprinkle irrigation" in text.lower() or "sprinkler irrigation" in text.lower():
+                parts.append("शुरुआती अवस्था में sprinkler irrigation उपयुक्त मानी जाती है।")
+            if "irrigation is given once in three days" in text.lower():
+                parts.append("drip irrigation में evapotranspiration demand के अनुसार लगभग हर 3 दिन पर पानी दिया जा सकता है।")
         if irrig:
             parts.append(f"फसल को लगभग {irrig.strip()} सिंचाइयों की जरूरत पड़ती है।")
         if stage_text:
@@ -1539,6 +1583,10 @@ def build_crop_production_followup(question: str, crop_hint: str | None = None) 
     }.get(section, "विस्तृत जानकारी")
 
     lines = [f"{crop_label} के लिए {section_hi} की जानकारी:", ""]
+    if crop == "Sugarcane" and section == "irrigation":
+        age_note = _sugarcane_age_specific_irrigation_note(question)
+        if age_note:
+            lines.append(f"- {age_note}")
     for point in matched_points[:5]:
         lines.append(f"- {point}")
     if section == "crop_protection":
