@@ -296,6 +296,23 @@ TERM_REPLACEMENTS = {
     "two hand weedings": "दो बार हाथ से निराई",
     "the crop requires": "फसल को चाहिए",
     "water stagnation should be avoided": "पानी खड़ा नहीं होना चाहिए",
+    "immediately after sowing": "बुवाई के तुरंत बाद",
+    "germination phase": "अंकुरण अवस्था",
+    "crown root intiation": "क्राउन रूट बनने की अवस्था",
+    "active tillering stage": "टिलरिंग अवस्था",
+    "tillering phase": "टिलरिंग/कल्ले बनने की अवस्था",
+    "grand growth phase": "तेज बढ़वार की अवस्था",
+    "flowering phase": "फूल आने की अवस्था",
+    "flowering stage": "फूल आने की अवस्था",
+    "grain filling stage": "दाना भरने की अवस्था",
+    "grain formation stage": "दाना बनने की अवस्था",
+    "maturity phase": "पकने की अवस्था",
+    "pre-flowering phase": "फूल आने से पहले की अवस्था",
+    "reproductive phase": "प्रजनन/फलन अवस्था",
+    "vegetative phase": "शाकीय बढ़वार अवस्था",
+    "pod formation stage": "फली बनने की अवस्था",
+    "pod development stage": "फली विकास अवस्था",
+    "pegging stage": "पेगिंग अवस्था",
     "apply remaining half of n": "बचा हुआ आधा नाइट्रोजन दें",
     "harvest the crop when": "फसल की कटाई तब करें जब",
     "thresh and winnow the grains": "मड़ाई और सफाई कर लें",
@@ -1073,50 +1090,42 @@ def _extract_all(pattern: str, text: str) -> list[tuple[str, ...]]:
     return [tuple(g.strip() for g in m.groups()) for m in re.finditer(pattern, text, flags=re.IGNORECASE)]
 
 
-def _format_water_stages(text: str) -> str:
-    stages = []
-    for stage_match in re.finditer(r"(Immediately after sowing|Crown root intiation|Active tillering stage|Flowering stage|Grain filling stage)\s*:\s*([0-9\- ]+\s*DAS)?", text, flags=re.IGNORECASE):
-        name = stage_match.group(1).strip().lower()
-        days = (stage_match.group(2) or "").strip()
-        label = {
-            "immediately after sowing": "बुवाई के तुरंत बाद",
-            "crown root intiation": "क्राउन रूट बनने की अवस्था",
-            "active tillering stage": "टिलरिंग अवस्था",
-            "flowering stage": "फूल आने की अवस्था",
-            "grain filling stage": "दाना भरने की अवस्था",
-        }.get(name, stage_match.group(1).strip())
-        if days:
-            stages.append(f"{label} ({days})")
-        else:
-            stages.append(label)
-    return "; ".join(stages[:5])
-
-
-def _translate_irrigation_stage_name(name: str) -> str:
+def _normalize_irrigation_stage_name(name: str) -> str:
     normalized = " ".join(str(name or "").lower().split())
     normalized = normalized.replace("grandgrowth", "grand growth")
     normalized = re.sub(r"^days of irrigation interval stages\s+", "", normalized)
     normalized = re.sub(r"^stages\s+", "", normalized)
-    mapping = {
-        "germination phase": "अंकुरण अवस्था",
-        "tillering phase": "टिलरिंग/कल्ले बनने की अवस्था",
-        "grand growth phase": "तेज बढ़वार की अवस्था",
-        "maturity phase": "पकने की अवस्था",
-        "pre-flowering phase": "फूल आने से पहले की अवस्था",
-        "flowering phase": "फूल आने की अवस्था",
-        "flowering stage": "फूल आने की अवस्था",
-        "reproductive phase": "प्रजनन/फलन अवस्था",
-        "vegetative phase": "शाकीय बढ़वार अवस्था",
-        "pod formation stage": "फली बनने की अवस्था",
-        "pod development stage": "फली विकास अवस्था",
-        "pegging stage": "पेगिंग अवस्था",
-        "immediately after sowing": "बुवाई के तुरंत बाद",
-        "crown root intiation": "क्राउन रूट बनने की अवस्था",
-        "active tillering stage": "टिलरिंग अवस्था",
-        "grain filling stage": "दाना भरने की अवस्था",
-        "grain formation stage": "दाना बनने की अवस्था",
-    }
-    return mapping.get(normalized, _translate_terms(name.strip()))
+    normalized = normalized.replace("t o ", "to ")
+    normalized = re.sub(r"\s+", " ", normalized).strip(" :;,-")
+    return normalized
+
+
+def _display_irrigation_stage_name(name: str) -> str:
+    normalized = _normalize_irrigation_stage_name(name)
+    display = _translate_terms(normalized)
+    display = display.replace("pre-फूल आने की अवस्था", "फूल आने से पहले की अवस्था")
+    return _cleanup_bullet_text(display)
+
+
+def _format_water_stages(text: str) -> str:
+    stages = []
+    seen: set[str] = set()
+    patterns = [
+        r"(Immediately after sowing|[A-Za-z][A-Za-z \-/]+?(?:phase|stage))\s*:\s*([0-9\- ]+\s*DAS)",
+        r"(Immediately after sowing)\b",
+    ]
+    for pattern in patterns:
+        for stage_match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            raw_name = stage_match.group(1).strip()
+            label = _display_irrigation_stage_name(raw_name)
+            days = (stage_match.group(2) or "").strip() if stage_match.lastindex and stage_match.lastindex >= 2 else ""
+            item = f"{label} ({days})" if days else label
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            stages.append(item)
+    return "; ".join(stages[:5])
 
 
 def _extract_irrigation_stage_ranges(text: str) -> list[dict[str, object]]:
@@ -1129,7 +1138,7 @@ def _extract_irrigation_stage_ranges(text: str) -> list[dict[str, object]]:
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-            label = _translate_irrigation_stage_name(match.group(1))
+            raw_label = _normalize_irrigation_stage_name(match.group(1))
             try:
                 start = int(match.group(2))
                 end = int(match.group(3))
@@ -1142,13 +1151,13 @@ def _extract_irrigation_stage_ranges(text: str) -> list[dict[str, object]]:
                     interval_max = int(match.group(5))
                 except Exception:
                     interval_min = interval_max = None
-            key = (label, start, end)
+            key = (raw_label, start, end)
             if key in seen:
                 continue
             seen.add(key)
             ranges.append(
                 {
-                    "label": label,
+                    "label": raw_label,
                     "start": start,
                     "end": end,
                     "interval_min": interval_min,
@@ -1184,7 +1193,7 @@ def _age_specific_irrigation_note(question: str, irrigation_text: str) -> str | 
         start = int(stage.get("start") or 0)
         end = int(stage.get("end") or 0)
         if start <= age_days <= end:
-            label = str(stage.get("label") or "इस अवस्था")
+            label = _display_irrigation_stage_name(str(stage.get("label") or "इस अवस्था"))
             interval_min = stage.get("interval_min")
             interval_max = stage.get("interval_max")
             if interval_min and interval_max:
@@ -1464,7 +1473,7 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         if stage_ranges:
             stage_lines = []
             for stage in stage_ranges[:4]:
-                stage_label = str(stage.get("label") or "").strip()
+                stage_label = _display_irrigation_stage_name(str(stage.get("label") or "").strip())
                 start = int(stage.get("start") or 0)
                 end = int(stage.get("end") or 0)
                 interval_min = stage.get("interval_min")
