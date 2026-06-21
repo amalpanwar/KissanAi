@@ -417,7 +417,7 @@ def render_weather_chat_card(text: str, action: str | None = None) -> None:
         </div>
         """
     ).strip()
-    st.html(card_html)
+    st.markdown(card_html, unsafe_allow_html=True)
 
 
 def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | None = None, auto_table: pd.DataFrame | None = None) -> None:
@@ -1352,13 +1352,60 @@ def _set_session_location_context(place: str | None, district: str | None, state
     }
 
 
-def _resolve_query_location(query: str) -> tuple[str | None, str | None, str | None]:
-    place = extract_place_from_query(query)
-    if not place:
-        return None, None, None
+def _extract_explicit_district_from_query(query: str, lookup: pd.DataFrame) -> tuple[str | None, str | None]:
+    if lookup.empty:
+        return None, None
+    q_tokens = re.findall(r"[a-z0-9]+", str(query or "").lower())
+    if not q_tokens:
+        return None, None
+    q_joined = " ".join(q_tokens)
+    best: tuple[int, int, str, str] | None = None
+    for col in ("district", "sub_district"):
+        if col not in lookup.columns:
+            continue
+        for raw in lookup[col].dropna().astype(str).unique().tolist():
+            raw = raw.strip()
+            if not raw or raw.lower() == "nan":
+                continue
+            raw_tokens = re.findall(r"[a-z0-9]+", raw.lower())
+            if not raw_tokens:
+                continue
+            score = 0
+            if len(raw_tokens) == 1:
+                if raw_tokens[0] in q_tokens:
+                    score = 1
+            else:
+                joined = " ".join(raw_tokens)
+                if joined in q_joined:
+                    score = len(raw_tokens) + 1
+            if score <= 0:
+                continue
+            match = lookup[lookup[col].astype(str).str.strip().str.lower() == raw.lower()]
+            if match.empty:
+                continue
+            picked = match.iloc[0]
+            district = str(picked.get("district", "")).strip()
+            state = str(picked.get("state", "")).strip()
+            cand = (score, len(raw_tokens), district or raw, state)
+            if best is None or cand[:2] > best[:2]:
+                best = cand
+    if best is None:
+        return None, None
+    return best[2] or None, best[3] or None
+
+
+def _resolve_query_location(query: str, *, allow_place_lookup: bool = True) -> tuple[str | None, str | None, str | None]:
     lookup_path = Path("data/processed/location_lookup.csv")
     lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
     lookup = load_location_lookup(lookup_mtime)
+    district, state = _extract_explicit_district_from_query(query, lookup)
+    if district or state:
+        return None, district, state
+    if not allow_place_lookup:
+        return None, None, None
+    place = extract_place_from_query(query)
+    if not place:
+        return None, None, None
     district, state = _lookup_district_from_location(place, lookup)
     return place, district, state
 
@@ -1985,6 +2032,38 @@ def clear_auth_cookie() -> None:
         pass
 
 
+def _queue_auth_cookie_write(payload: dict[str, object] | None) -> None:
+    if not payload:
+        return
+    st.session_state["_pending_auth_cookie_payload"] = dict(payload)
+    st.session_state.pop("_pending_auth_cookie_armed", None)
+
+
+def _flush_pending_auth_cookie_write() -> None:
+    payload = st.session_state.get("_pending_auth_cookie_payload")
+    if not isinstance(payload, dict) or not payload:
+        st.session_state.pop("_pending_auth_cookie_armed", None)
+        return
+    if not st.session_state.get("_pending_auth_cookie_armed"):
+        st.session_state["_pending_auth_cookie_armed"] = True
+        return
+    set_auth_cookie_payload(payload)
+    st.session_state.pop("_pending_auth_cookie_payload", None)
+    st.session_state.pop("_pending_auth_cookie_armed", None)
+
+
+def _bootstrap_auth_session(db_path: str) -> None:
+    if st.session_state.get("_auth_bootstrap_done"):
+        return
+    phase = int(st.session_state.get("_auth_bootstrap_phase", 0) or 0)
+    if phase <= 0:
+        st.session_state["_auth_bootstrap_phase"] = 1
+        st.rerun()
+    handle_email_verification(db_path)
+    restore_auth_from_cookie(db_path)
+    st.session_state["_auth_bootstrap_done"] = True
+
+
 def restore_auth_from_cookie(db_path: str) -> None:
     if current_user():
         return
@@ -2029,9 +2108,8 @@ def restore_auth_from_cookie(db_path: str) -> None:
                         "access_token": access_token,
                         "refresh_token": refresh_token,
                     }
-                    set_auth_cookie_payload(st.session_state["auth_session"])
+                    _queue_auth_cookie_write(st.session_state["auth_session"])
                     return
-        clear_auth_cookie()
         return
     raw = _verify_auth_value(str(token))
     if raw and raw.isdigit():
@@ -2140,11 +2218,14 @@ def _set_signed_in_user(local_user: dict, session: dict[str, object] | None = No
     st.session_state["auth_user"] = local_user
     if session and session.get("provider") == "supabase":
         st.session_state["auth_session"] = session
-        set_auth_cookie_payload(session)
+        _queue_auth_cookie_write(session)
 
 
 def handle_email_verification(db_path: str) -> None:
-    token = st.query_params.get("verify_token")
+    try:
+        token = st.query_params.get("verify_token")
+    except Exception:
+        token = None
     if not token:
         return
     ok, msg = verify_user_by_token(db_path, str(token))
@@ -2580,11 +2661,11 @@ if not ok:
     )
     st.stop()
 init_db(cfg.paths["sqlite_db"])
-handle_email_verification(cfg.paths["sqlite_db"])
-restore_auth_from_cookie(cfg.paths["sqlite_db"])
 
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())
+
+_bootstrap_auth_session(cfg.paths["sqlite_db"])
 
 agmarknet_auto_started, agmarknet_auto_reason = _start_agmarknet_auto_refresh()
 if agmarknet_auto_started:
@@ -2997,6 +3078,10 @@ if user_query:
         st.stop()
 
     normalized_user_query = advisor._normalize_hinglish(user_query)
+    weather_intent = advisor._is_weather_intent(normalized_user_query)
+    detected_query_crop = advisor._extract_crop_from_query(normalized_user_query) or ""
+    intent_msp = is_msp_query(user_query)
+    intent_price = is_price_query(user_query) or intent_msp
     crop_protect_followup_checker = getattr(advisor, "_is_crop_protection_followup_intent", None)
     crop_guide_followup_checker = getattr(advisor, "_is_crop_guide_followup_intent", None)
     if callable(crop_protect_followup_checker):
@@ -3019,7 +3104,7 @@ if user_query:
             place_guess
             or advisor._looks_like_location_only(user_query)
             or (
-                advisor._is_weather_intent(normalized_user_query)
+                weather_intent
                 and not crop_guide_followup_detected
                 and not crop_protection_followup
             )
@@ -3093,7 +3178,10 @@ if user_query:
     session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or district or "Meerut").strip() or "Meerut"
     query_place = query_place_district = query_place_state = None
     if not crop_guide_followup_detected and not crop_protection_followup:
-        query_place, query_place_district, query_place_state = _resolve_query_location(user_query)
+        query_place, query_place_district, query_place_state = _resolve_query_location(
+            user_query,
+            allow_place_lookup=bool(weather_intent or intent_price or not detected_query_crop),
+        )
     if query_place and (query_place_district or query_place_state):
         _set_session_location_context(
             query_place,
@@ -3144,7 +3232,7 @@ if user_query:
 
     question_for_advisor = user_query.strip()
     if (
-        advisor._is_weather_intent(advisor._normalize_hinglish(user_query))
+        weather_intent
         and not query_place
         and last_location_ctx.get("place")
     ):
@@ -3156,11 +3244,9 @@ if user_query:
     )
 
     market_df = load_agmarknet_df()
-    intent_msp = is_msp_query(user_query)
-    intent_price = is_price_query(user_query) or intent_msp
     explicit_place = bool(extract_place_from_query(user_query))
     explicit_district = False
-    query_crop_hint = advisor._extract_crop_from_query(normalized_user_query) or preferred_crop_for_query or ""
+    query_crop_hint = detected_query_crop or preferred_crop_for_query or ""
     feedback_hint = None
     if intent_price:
         feedback_hint = find_feedback_memory_hint(
@@ -3309,9 +3395,9 @@ if user_query:
             with st.chat_message("assistant"):
                 st.write(final_answer)
             st.stop()
-        if selected_district:
+        if selected_district and (query_place or explicit_place or explicit_district):
             _set_session_location_context(
-                query_place or last_location_ctx.get("place", ""),
+                query_place,
                 selected_district,
                 selected_state or session_state_hint,
             )
@@ -3735,3 +3821,5 @@ if user_query:
         crop_name=preferred_crop or "unknown",
         recommendation_text=final_answer,
     )
+
+_flush_pending_auth_cookie_write()
