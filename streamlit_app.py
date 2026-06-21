@@ -82,7 +82,7 @@ if BRAND_IMAGE.exists():
 st.title("KisaanAI - Agriculture Assistant")
 
 cfg = load_config()
-APP_BUILD_VERSION = "2026-06-18-irrigation-source-driven-v1"
+APP_BUILD_VERSION = "2026-06-21-white-grub-source-verify-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
@@ -512,6 +512,7 @@ def get_advisor(_build_version: str = APP_BUILD_VERSION) -> RAGAdvisor:
             db_path=cfg.paths["sqlite_db"],
             complex_generator_model=COMPLEX_GENERATOR_MODEL,
             response_cache_path=os.getenv("KISAANAI_RESPONSE_CACHE_PATH", "data/processed/query_response_cache.json"),
+            response_cache_version=APP_BUILD_VERSION,
             query_cache_ttl_sec=int(os.getenv("KISAANAI_QUERY_CACHE_TTL_SEC", str(6 * 60 * 60))),
         )
     )

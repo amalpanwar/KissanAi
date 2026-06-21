@@ -103,7 +103,7 @@ DISEASE_ALIASES = {
     "shoot borer": ["shoot borer", "shootborer", "early shoot borer", "earlyshootborer", "शूट बोरर"],
     "top borer": ["top borer", "topborer", "टॉप बोरर"],
     "root borer": ["root borer", "rootborer", "जड़ छेदक"],
-    "white grub": ["white grub", "whitegrub", "सफेद सूंडी"],
+    "white grub": ["white grub", "whitegrub", "white grubs", "whitegrubs", "white crub", "सफेद सूंडी"],
     "insect pest": [
         "borer",
         "stem borer",
@@ -370,6 +370,7 @@ class AdvisorConfig:
     db_path: str | None = None
     complex_generator_model: str | None = None
     response_cache_path: str = "data/processed/query_response_cache.json"
+    response_cache_version: str = "v1"
     query_cache_ttl_sec: int = 6 * 60 * 60
     response_cache_max_entries: int = 256
 
@@ -406,6 +407,7 @@ class RAGAdvisor:
         self.top_k = cfg.top_k
         self._pdf_text_cache: dict[str, str] = {}
         self._pdf_verification_cache: dict[str, bool] = {}
+        self._source_table_text_cache: dict[str, str] = {}
         self._symptom_index_signature: tuple[int, int] | None = None
         self._symptom_phrase_rows: list[dict[str, str]] = []
         self._symptom_phrase_embeddings: np.ndarray | None = None
@@ -417,7 +419,10 @@ class RAGAdvisor:
         )
         self.response_cache = QueryResponseCache(
             cfg.response_cache_path,
-            version=f"advisor-rag-v2::{cfg.embedding_model}::{cfg.generator_model}::{cfg.complex_generator_model or ''}",
+            version=(
+                f"advisor-rag-v3::{cfg.response_cache_version}::"
+                f"{cfg.embedding_model}::{cfg.generator_model}::{cfg.complex_generator_model or ''}"
+            ),
             max_entries=cfg.response_cache_max_entries,
         )
 
@@ -1298,7 +1303,9 @@ class RAGAdvisor:
             "कीट",
             "रोग",
         ]
-        return any(k in t for k in keys) or self._looks_like_pesticide_name_query(t)
+        if any(k in t for k in keys) or self._looks_like_pesticide_name_query(t):
+            return True
+        return bool(self._extract_disease_terms_from_query(t, allow_symptom_fallback=False))
 
     def _is_crop_protection_followup_intent(self, text: str) -> bool:
         t = text or ""
@@ -2946,6 +2953,23 @@ class RAGAdvisor:
                 return path
         return None
 
+    def _source_table_path(self, source_file: object) -> Path | None:
+        source = str(source_file or "").strip()
+        if not source:
+            return None
+        direct = Path(source)
+        if direct.exists() and direct.suffix.lower() in {".xlsx", ".xls", ".csv"}:
+            return direct
+        candidates = [
+            Path("data/processed/pdf_tables") / source,
+            Path("data/processed/pdf_tables_docling") / source,
+            Path("data/processed") / source,
+        ]
+        for path in candidates:
+            if path.exists() and path.suffix.lower() in {".xlsx", ".xls", ".csv"}:
+                return path
+        return None
+
     def _load_pdf_text(self, pdf_path: Path | None) -> str:
         if not pdf_path:
             return ""
@@ -2960,10 +2984,37 @@ class RAGAdvisor:
         self._pdf_text_cache[key] = text
         return text
 
+    def _load_source_table_text(self, table_path: Path | None) -> str:
+        if not table_path:
+            return ""
+        key = str(table_path)
+        cached = self._source_table_text_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            if table_path.suffix.lower() == ".csv":
+                df = pd.read_csv(table_path, header=None)
+            else:
+                df = pd.read_excel(table_path, header=None, engine="openpyxl")
+        except Exception:
+            text = ""
+        else:
+            rows_text: list[str] = []
+            for row in df.fillna("").itertuples(index=False):
+                cells = [" ".join(str(cell).replace("\xa0", " ").split()) for cell in row if str(cell).strip()]
+                if cells:
+                    rows_text.append(" | ".join(cells))
+            text = "\n".join(rows_text)
+        self._source_table_text_cache[key] = text
+        return text
+
     def _display_pesticide_source_reference(self, source_file: object) -> str | None:
         pdf_path = self._source_pdf_path(source_file)
         if pdf_path:
             return str(pdf_path)
+        table_path = self._source_table_path(source_file)
+        if table_path:
+            return str(table_path)
         source = str(source_file or "").strip()
         if not source:
             return None
@@ -3009,6 +3060,37 @@ class RAGAdvisor:
                 unique.append(tok)
         return unique[:8]
 
+    def _row_matches_pesticide_source_text(
+        self,
+        row: sqlite3.Row,
+        source_text: str,
+        require_crop: bool = False,
+    ) -> bool:
+        if not source_text:
+            return False
+        source_compact = self._compact_norm(source_text)
+        crop = str(row["crop_name"] or "").strip()
+        crop_tokens = [self._compact_norm(crop)] if crop else []
+        crop_hi = self._crop_name_hi(crop) if crop else ""
+        if crop_hi and crop_hi != crop:
+            crop_tokens.append(self._compact_norm(crop_hi))
+        crop_ok = not crop_tokens or any(tok and tok in source_compact for tok in crop_tokens)
+        pname = str(row["pesticide_name"] or "").strip()
+        chem_tokens = self._source_chemical_tokens(pname)
+        chem_hits = sum(1 for tok in chem_tokens if tok in source_compact)
+        chem_ok = self._compact_norm(pname) in source_compact or chem_hits >= min(2, max(1, len(chem_tokens)))
+        issue_tokens = self._source_issue_tokens(row)
+        issue_ok = True
+        if issue_tokens:
+            issue_ok = any(self._compact_norm(tok) in source_compact for tok in issue_tokens)
+        if require_crop:
+            return bool(crop_ok and chem_ok and issue_ok)
+        if chem_ok and issue_ok:
+            return True
+        if chem_ok and crop_ok and not issue_tokens:
+            return True
+        return False
+
     def _verify_pesticide_row_against_pdf(self, row: sqlite3.Row) -> bool:
         source_file = str(row["source_file"] or "")
         pname = str(row["pesticide_name"] or "").strip()
@@ -3025,21 +3107,14 @@ class RAGAdvisor:
         cached = self._pdf_verification_cache.get(cache_key)
         if cached is not None:
             return cached
+        table_path = self._source_table_path(source_file)
+        table_text = self._load_source_table_text(table_path)
+        if self._row_matches_pesticide_source_text(row, table_text):
+            self._pdf_verification_cache[cache_key] = True
+            return True
         pdf_path = self._source_pdf_path(source_file)
         pdf_text = self._load_pdf_text(pdf_path)
-        if not pdf_text:
-            self._pdf_verification_cache[cache_key] = False
-            return False
-        pdf_compact = self._compact_norm(pdf_text)
-        crop_ok = not crop or self._compact_norm(crop) in pdf_compact
-        chem_tokens = self._source_chemical_tokens(pname)
-        chem_hits = sum(1 for tok in chem_tokens if tok in pdf_compact)
-        chem_ok = self._compact_norm(pname) in pdf_compact or chem_hits >= min(2, max(1, len(chem_tokens)))
-        issue_tokens = self._source_issue_tokens(row)
-        issue_ok = True
-        if issue_tokens:
-            issue_ok = any(self._compact_norm(tok) in pdf_compact for tok in issue_tokens)
-        verified = bool(crop_ok and chem_ok and issue_ok)
+        verified = self._row_matches_pesticide_source_text(row, pdf_text, require_crop=True)
         self._pdf_verification_cache[cache_key] = verified
         return verified
 
