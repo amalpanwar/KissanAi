@@ -190,9 +190,17 @@ def _pid_is_running(pid: int | None) -> bool:
     return True
 
 
+def _is_streamlit_cloud_runtime() -> bool:
+    sharing_mode = os.getenv("STREAMLIT_SHARING_MODE", "").strip().lower()
+    cwd = str(Path.cwd())
+    return bool(sharing_mode) or cwd.startswith("/mount/src/")
+
+
 def _should_start_agmarknet_auto_refresh() -> tuple[bool, str]:
     if os.getenv("AGMARKNET_AUTO_REFRESH", "1").strip().lower() in {"0", "false", "no"}:
         return False, "disabled"
+    if _is_streamlit_cloud_runtime() and os.getenv("AGMARKNET_AUTO_REFRESH_ON_CLOUD", "0").strip().lower() not in {"1", "true", "yes"}:
+        return False, "disabled_on_streamlit_cloud"
     meta = _load_agmarknet_auto_refresh_meta()
     last_started_raw = str(meta.get("last_started_at") or "").strip()
     last_pid = int(meta.get("pid") or 0) if str(meta.get("pid") or "").strip().isdigit() else 0
@@ -561,6 +569,7 @@ def build_forecast(
 def clear_local_caches() -> None:
     for fn in (
         get_advisor,
+        _load_agmarknet_df_cached,
         load_market_df,
         build_forecast,
         load_commodity_catalog,
@@ -873,6 +882,13 @@ def _forward_geocode_cached(place: str, region: str = "Uttar Pradesh") -> list[d
 def load_agmarknet_df() -> pd.DataFrame:
     if not AGMARKNET_CSV.exists():
         return pd.DataFrame()
+    mtime_ns = AGMARKNET_CSV.stat().st_mtime_ns
+    return _load_agmarknet_df_cached(mtime_ns)
+
+
+@lru_cache(maxsize=4)
+def _load_agmarknet_df_cached(mtime_ns: int) -> pd.DataFrame:
+    _ = mtime_ns
     try:
         df = pd.read_csv(AGMARKNET_CSV)
         return normalize_agmarknet_df(df)
@@ -3572,15 +3588,6 @@ if user_query:
                 fc_chart = fc_chart.set_index("date")
                 auto_chart = chart_df.join(fc_chart, how="outer")
                 auto_table = fc2
-            else:
-                _hist, fc = build_quick_forecast_from_df(
-                    df=forecast_df,
-                    commodity=selected_commodity,
-                    state=selected_state,
-                    district=selected_district,
-                    horizon=7,
-                )
-                auto_table = fc.rename(columns={"predicted_value": "Forecast"})
         except Exception:
             auto_chart = None
             auto_table = None
@@ -3597,7 +3604,7 @@ if user_query:
         if market_list:
             sample_markets = ", ".join(sorted(market_list)[:8])
             market_answer += f"- उपलब्ध मंडियाँ (नमूना): {sample_markets}\n"
-        if auto_table is not None and not auto_table.empty:
+        if detailed_forecast_requested and auto_table is not None and not auto_table.empty:
             next_vals = auto_table["Forecast"].head(7).tolist()
             vals_str = ", ".join([f"{v:.0f}" for v in next_vals])
             market_answer += f"- अगले 7 दिन के अनुमानित भाव: {vals_str} Rs./Quintal\n"
@@ -3607,17 +3614,17 @@ if user_query:
                 f"- निकटतम मंडी (लगभग): {nearest_market[1]} ({nearest_market[0]:.1f} km)\n"
             )
 
-        if auto_table is not None:
-            query_log_id = log_query_answer(
-                user_query=user_query,
-                composed_query=composed_query,
-                topic="price",
-                answer_text=market_answer,
-                references=[],
-                district=selected_district,
-                season=season,
-                crop_name=selected_commodity or "unknown",
-            )
+        query_log_id = log_query_answer(
+            user_query=user_query,
+            composed_query=composed_query,
+            topic="price",
+            answer_text=market_answer,
+            references=[],
+            district=selected_district,
+            season=season,
+            crop_name=selected_commodity or "unknown",
+        )
+        if detailed_forecast_requested and auto_table is not None:
             market_meta = {
                 "caption": auto_caption,
                 "commodity_label": commodity_label,
@@ -3655,6 +3662,20 @@ if user_query:
             st.session_state.pop("auto_forecast_table", None)
             st.session_state.pop("auto_forecast_caption", None)
             st.session_state.pop("auto_market_meta", None)
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "text": market_answer,
+                    "references": [],
+                    "query_log_id": query_log_id,
+                    "topic": "price",
+                    "user_query": user_query,
+                }
+            )
+            with st.chat_message("assistant"):
+                st.write(market_answer)
+                render_feedback_widget(st.session_state.chat_history[-1], advisor)
+            st.stop()
 
         # Re-render so the market answer and panel appear inline at this chat turn.
         st.rerun()
