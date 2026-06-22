@@ -3704,7 +3704,22 @@ if user_query:
             result = direct_crop_protection_followup
         else:
             with st.spinner("Generating recommendation..."):
-                result = advisor.answer(composed_query)
+                try:
+                    result = advisor.answer(composed_query)
+                except Exception as exc:
+                    import traceback as _traceback
+
+                    print(f"[KisaanAI] advisor.answer failed: {exc}")
+                    _traceback.print_exc()
+                    result = {
+                        "answer": (
+                            "अभी उत्तर तैयार करते समय तकनीकी समस्या आई। "
+                            "कृपया सवाल थोड़ा छोटा लिखें या कुछ देर बाद फिर प्रयास करें।"
+                        ),
+                        "references": [],
+                        "retrieved": [],
+                        "topic": "clarification",
+                    }
         if (
             str(result.get("topic") or "").strip().lower() == "weather"
             and (crop_guide_followup_detected or _looks_like_crop_water_followup(user_query, advisor))

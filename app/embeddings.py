@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 
 class Embedder:
     def __init__(self, model_name: str) -> None:
+        from sentence_transformers import SentenceTransformer
+
         online = os.getenv("KISAANAI_HF_ONLINE", "").strip().lower() in {"1", "true", "yes"}
         try:
             self.model = SentenceTransformer(model_name, local_files_only=not online)
