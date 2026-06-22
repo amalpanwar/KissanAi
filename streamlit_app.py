@@ -27,7 +27,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 import difflib
 
-from app.advisor import RAGAdvisor, WESTERN_UP_CROP_BASELINES, build_advisor_config
+from app.advisor import AdvisorConfig, RAGAdvisor, WESTERN_UP_CROP_BASELINES
 from app.config import load_config
 from app.crop_guide import build_crop_production_followup
 import app.db as db_mod
@@ -499,11 +499,17 @@ def check_ready() -> tuple[bool, str]:
     return True, "System ready"
 
 
+def _build_advisor_config(**kwargs: object) -> AdvisorConfig:
+    supported = set(getattr(AdvisorConfig, "__dataclass_fields__", {}).keys())
+    filtered = {key: value for key, value in kwargs.items() if key in supported}
+    return AdvisorConfig(**filtered)
+
+
 @lru_cache(maxsize=4)
 def get_advisor(_build_version: str = APP_BUILD_VERSION) -> RAGAdvisor:
     _ = _build_version
     return RAGAdvisor(
-        build_advisor_config(
+        _build_advisor_config(
             embedding_model=cfg.embedding_model,
             generator_model=MEDIUM_GENERATOR_MODEL,
             index_path=cfg.paths["vector_store"],
