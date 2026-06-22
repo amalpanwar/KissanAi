@@ -27,7 +27,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 import difflib
 
-from app.advisor import AdvisorConfig, RAGAdvisor, WESTERN_UP_CROP_BASELINES
+from app.advisor import RAGAdvisor, WESTERN_UP_CROP_BASELINES, build_advisor_config
 from app.config import load_config
 from app.crop_guide import build_crop_production_followup
 import app.db as db_mod
@@ -503,7 +503,7 @@ def check_ready() -> tuple[bool, str]:
 def get_advisor(_build_version: str = APP_BUILD_VERSION) -> RAGAdvisor:
     _ = _build_version
     return RAGAdvisor(
-        AdvisorConfig(
+        build_advisor_config(
             embedding_model=cfg.embedding_model,
             generator_model=MEDIUM_GENERATOR_MODEL,
             index_path=cfg.paths["vector_store"],
@@ -2056,10 +2056,8 @@ def _flush_pending_auth_cookie_write() -> None:
 def _bootstrap_auth_session(db_path: str) -> None:
     if st.session_state.get("_auth_bootstrap_done"):
         return
-    phase = int(st.session_state.get("_auth_bootstrap_phase", 0) or 0)
-    if phase <= 0:
-        st.session_state["_auth_bootstrap_phase"] = 1
-        st.rerun()
+    # Avoid forcing a rerun during app startup; bootstrap auth only when the
+    # current Streamlit session is already rendering normally.
     handle_email_verification(db_path)
     restore_auth_from_cookie(db_path)
     st.session_state["_auth_bootstrap_done"] = True
@@ -2243,6 +2241,7 @@ def handle_email_verification(db_path: str) -> None:
 
 
 def render_auth_sidebar(db_path: str) -> None:
+    _bootstrap_auth_session(db_path)
     st.subheader("Account Access")
     smtp_status = smtp_config_status()
     supabase_cfg = get_supabase_config()
@@ -2665,8 +2664,6 @@ init_db(cfg.paths["sqlite_db"])
 
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())
-
-_bootstrap_auth_session(cfg.paths["sqlite_db"])
 
 agmarknet_auto_started, agmarknet_auto_reason = _start_agmarknet_auto_refresh()
 if agmarknet_auto_started:

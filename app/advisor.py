@@ -375,6 +375,12 @@ class AdvisorConfig:
     response_cache_max_entries: int = 256
 
 
+def build_advisor_config(**kwargs: object) -> AdvisorConfig:
+    supported = set(getattr(AdvisorConfig, "__dataclass_fields__", {}).keys())
+    filtered = {key: value for key, value in kwargs.items() if key in supported}
+    return AdvisorConfig(**filtered)
+
+
 @dataclass
 class WeatherRequest:
     intent: str = "weather"

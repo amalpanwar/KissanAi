@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.advisor import AdvisorConfig, RAGAdvisor
+from app.advisor import RAGAdvisor, build_advisor_config
 from app.config import load_config
 
 
@@ -102,7 +102,7 @@ def main() -> None:
     cfg = load_config()
     medium_generator_model = os.getenv("KISAANAI_MEDIUM_GENERATOR_MODEL") or cfg.generator_model
     advisor = RAGAdvisor(
-        AdvisorConfig(
+        build_advisor_config(
             embedding_model=cfg.embedding_model,
             generator_model=medium_generator_model,
             index_path=cfg.paths["vector_store"],
