@@ -2214,6 +2214,8 @@ class RAGAdvisor:
 
     def _split_issue_label(self, label: str) -> list[str]:
         raw = str(label).replace("&", ",").replace(" and ", ",").replace("And", ",")
+        raw = re.sub(r"(?i)\)\s*and\s*", "), ", raw)
+        raw = re.sub(r"(?<=[a-z\)])and(?=[A-Z])", ", ", raw)
         raw = re.sub(r"(?i)\btermitesand\b", "Termites, ", raw)
         raw = re.sub(r"(?i)\bearlyshootborer\b", "Early shoot borer", raw)
         raw = re.sub(r"(?i)\btopborer\b", "Top borer", raw)
@@ -2625,28 +2627,72 @@ class RAGAdvisor:
         def score_row(r: sqlite3.Row) -> int:
             label_text = str(r["disease_name_en"] or r["disease_name_hi"] or "")
             text = f"{r['disease_name_en'] or ''} {r['disease_name_hi'] or ''}".lower()
+            compact_label = self._compact_norm(label_text)
+            compact_parts = [self._compact_norm(part) for part in self._split_issue_label(label_text)]
+            compact_parts = [part for part in compact_parts if part]
             score = 0
-            if expanded_terms:
-                score += sum(10 for term in expanded_terms if term in text)
-                compact_parts = [self._compact_norm(part) for part in self._split_issue_label(label_text)]
-                compact_parts = [part for part in compact_parts if part]
-                for term in expanded_terms:
-                    compact_term = self._compact_norm(term)
-                    if compact_term and compact_term in compact_parts:
-                        score += 8
+            if disease_terms:
+                exact_part_hits = 0
+                for requested_term in disease_terms:
+                    term_l = str(requested_term).strip().lower()
+                    aliases = STRICT_DISEASE_QUERY_ALIASES.get(term_l) if strict_match else None
+                    if not aliases:
+                        aliases = DISEASE_ALIASES.get(term_l, [term_l])
+                    alias_lowers = [str(alias).strip().lower() for alias in aliases if str(alias).strip()]
+                    alias_compacts = [self._compact_norm(alias) for alias in alias_lowers if self._compact_norm(alias)]
+                    if any(alias in text for alias in alias_lowers):
+                        score += 10
+                    if any(compact_term in compact_parts for compact_term in alias_compacts):
+                        exact_part_hits += 1
+                        score += 18
+                    elif any(compact_term in compact_label for compact_term in alias_compacts):
+                        score += 6
+                if exact_part_hits:
+                    # Prefer focused pest labels like "White grub" over broad combined rows.
+                    score += 6
                 if len(compact_parts) > 1:
-                    score -= min(6, (len(compact_parts) - 1) * 2)
+                    score -= min(12, (len(compact_parts) - 1) * 4)
             if r["quality_status"] == "valid":
                 score += 2
+            elif r["quality_status"] == "usable":
+                score += 1
             if r["pesticide_name"]:
                 score += 1
             if r["ai_g"] or r["formulation"] or r["dilution"] or r["dose_text"]:
                 score += 1
             return score
 
+        scored_rows = [(score_row(r), r) for r in rows]
         if expanded_terms:
-            rows = [r for r in rows if score_row(r) >= 10]
-        rows = sorted(rows, key=score_row, reverse=True)
+            scored_rows = [(score, r) for score, r in scored_rows if score >= 12]
+        scored_rows.sort(key=lambda item: item[0], reverse=True)
+        rows = [r for _, r in scored_rows]
+        if disease_terms:
+            focused_rows = [
+                row for row in rows
+                if self._is_focused_issue_row(
+                    str(row["disease_name_en"] or row["disease_name_hi"] or ""),
+                    disease_terms,
+                    strict_match=strict_match,
+                )
+            ]
+            if focused_rows:
+                focused_keys = {
+                    (
+                        str(row["pesticide_name"] or ""),
+                        str(row["disease_name_en"] or row["disease_name_hi"] or ""),
+                        str(row["source_file"] or ""),
+                    )
+                    for row in focused_rows
+                }
+                rows = focused_rows + [
+                    row for row in rows
+                    if (
+                        str(row["pesticide_name"] or ""),
+                        str(row["disease_name_en"] or row["disease_name_hi"] or ""),
+                        str(row["source_file"] or ""),
+                    ) not in focused_keys
+                ]
         rows = self._filter_rows_for_symptom_context(rows, symptom_text=symptom_text, symptom_entry=symptom_entry)[:limit]
         if not rows:
             return [], []
@@ -2660,6 +2706,30 @@ class RAGAdvisor:
             if source_ref:
                 sources.append(source_ref)
         return lines, sorted(set(sources))
+
+    def _is_focused_issue_row(
+        self,
+        label_text: str,
+        disease_terms: list[str],
+        *,
+        strict_match: bool = False,
+    ) -> bool:
+        compact_parts = [self._compact_norm(part) for part in self._split_issue_label(label_text)]
+        compact_parts = [part for part in compact_parts if part]
+        if not compact_parts or len(compact_parts) > 2:
+            return False
+        for requested_term in disease_terms:
+            term_l = str(requested_term).strip().lower()
+            aliases = STRICT_DISEASE_QUERY_ALIASES.get(term_l) if strict_match else None
+            if not aliases:
+                aliases = DISEASE_ALIASES.get(term_l, [term_l])
+            alias_compacts = [self._compact_norm(alias) for alias in aliases if self._compact_norm(alias)]
+            if any(
+                alias_compact and any(alias_compact in part for part in compact_parts)
+                for alias_compact in alias_compacts
+            ):
+                return True
+        return False
 
     def _expanded_disease_query_terms(self, disease_terms: list[str], strict_match: bool = False) -> list[str]:
         expanded_terms: list[str] = []
@@ -3015,12 +3085,14 @@ class RAGAdvisor:
         return text
 
     def _display_pesticide_source_reference(self, source_file: object) -> str | None:
-        pdf_path = self._source_pdf_path(source_file)
-        if pdf_path:
-            return str(pdf_path)
         table_path = self._source_table_path(source_file)
+        pdf_path = self._source_pdf_path(source_file)
+        if table_path and pdf_path:
+            return f"{table_path} (verified against {pdf_path.name})"
         if table_path:
             return str(table_path)
+        if pdf_path:
+            return str(pdf_path)
         source = str(source_file or "").strip()
         if not source:
             return None
@@ -3176,7 +3248,7 @@ class RAGAdvisor:
     def _translate_disease_name(self, disease_en: str) -> str:
         text = disease_en or ""
         raw_entry = GENERATED_RAW_DISEASE_DISPLAY.get(str(text).strip().lower())
-        if raw_entry:
+        if raw_entry and len(self._split_issue_label(text)) <= 1:
             clean_en = str(raw_entry.get("clean_english") or "").strip()
             clean_hi = str(raw_entry.get("clean_hindi") or "").strip()
             if clean_hi and clean_en:
@@ -3184,9 +3256,20 @@ class RAGAdvisor:
             if clean_hi:
                 return clean_hi
             if clean_en:
-                return self._clean_pest_label(clean_en)
+                text = clean_en
         lower = text.lower().replace("downey", "downy")
         compact_lower = self._compact_norm(lower)
+        alias_hits: list[str] = []
+        alias_hi_hits: list[str] = []
+        for canonical, aliases in DISEASE_ALIASES.items():
+            canonical_l = str(canonical).strip().lower()
+            if any(alias and (str(alias).lower() in lower or self._compact_norm(alias) in compact_lower) for alias in aliases):
+                hi = DISEASE_HINDI_TERMS.get(canonical_l, "")
+                if hi and hi not in alias_hi_hits:
+                    alias_hi_hits.append(hi)
+                clean_label = self._clean_pest_label(canonical)
+                if clean_label and clean_label not in alias_hits:
+                    alias_hits.append(clean_label)
         skip_keys: set[str] = set()
         if "white rust" in lower:
             skip_keys.add("rust")
@@ -3201,8 +3284,13 @@ class RAGAdvisor:
             compact_key = self._compact_norm(key)
             if (key in lower or (compact_key and compact_key in compact_lower)) and hi not in hits:
                 hits.append(hi)
+        for hi in alias_hi_hits:
+            if hi not in hits:
+                hits.append(hi)
         if hits:
             return f"{' / '.join(hits)} ({self._clean_pest_label(text)})"
+        if alias_hits:
+            return self._clean_pest_label(" / ".join(alias_hits))
         return self._clean_pest_label(text)
 
     def _clean_pest_label(self, text: str) -> str:
