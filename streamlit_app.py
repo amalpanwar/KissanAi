@@ -570,6 +570,7 @@ def clear_local_caches() -> None:
     for fn in (
         get_advisor,
         _load_agmarknet_df_cached,
+        _load_agmarknet_catalog_cached,
         load_market_df,
         build_forecast,
         load_commodity_catalog,
@@ -894,6 +895,45 @@ def _load_agmarknet_df_cached(mtime_ns: int) -> pd.DataFrame:
         return normalize_agmarknet_df(df)
     except Exception:
         return pd.DataFrame()
+
+
+def load_agmarknet_catalog() -> pd.DataFrame:
+    if not AGMARKNET_CSV.exists():
+        return pd.DataFrame(columns=["State", "District", "Commodity"])
+    mtime_ns = AGMARKNET_CSV.stat().st_mtime_ns
+    return _load_agmarknet_catalog_cached(mtime_ns)
+
+
+@lru_cache(maxsize=4)
+def _load_agmarknet_catalog_cached(mtime_ns: int) -> pd.DataFrame:
+    _ = mtime_ns
+    raw_usecols_candidates = [
+        ["state_name", "district_name", "cmdt_name"],
+        ["State", "District", "Commodity"],
+    ]
+    df = None
+    for usecols in raw_usecols_candidates:
+        try:
+            df = pd.read_csv(AGMARKNET_CSV, usecols=usecols)
+            break
+        except Exception:
+            df = None
+    if df is None:
+        try:
+            df = pd.read_csv(AGMARKNET_CSV)
+        except Exception:
+            return pd.DataFrame(columns=["State", "District", "Commodity"])
+    df = normalize_agmarknet_df(df)
+    keep = [col for col in ["State", "District", "Commodity"] if col in df.columns]
+    if not keep:
+        return pd.DataFrame(columns=["State", "District", "Commodity"])
+    out = df[keep].copy()
+    for col in ["State", "District", "Commodity"]:
+        if col not in out.columns:
+            out[col] = ""
+    out = out[["State", "District", "Commodity"]]
+    out = out.fillna("")
+    return out
 
 
 def is_price_query(text: str) -> bool:
@@ -2741,7 +2781,7 @@ with st.sidebar:
     session_state_default = str(session_location_defaults.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
     session_district_default = str(session_location_defaults.get("district") or "Meerut").strip() or "Meerut"
 
-    _catalog_df = load_agmarknet_df()
+    _catalog_df = load_agmarknet_catalog()
     if not _catalog_df.empty:
         _init_df = _catalog_df.copy()
     elif LIVE_MARKET_CSV.exists():
@@ -3263,12 +3303,13 @@ if user_query:
         f"किसान का प्रश्न: {question_for_advisor}"
     )
 
-    market_df = load_agmarknet_df()
     explicit_place = bool(extract_place_from_query(user_query))
     explicit_district = False
     query_crop_hint = detected_query_crop or preferred_crop_for_query or ""
     feedback_hint = None
+    market_df = pd.DataFrame()
     if intent_price:
+        market_df = load_agmarknet_df()
         feedback_hint = find_feedback_memory_hint(
             user_query,
             topic_hint="price",
@@ -3276,9 +3317,9 @@ if user_query:
             db_path=cfg.paths["sqlite_db"],
             advisor=advisor,
         )
-    if not market_df.empty and "District" in market_df.columns:
-        known_districts = sorted(market_df["District"].dropna().astype(str).unique().tolist())
-        explicit_district = bool(extract_entities_ner(user_query, known_districts, [])[0])
+        if not market_df.empty and "District" in market_df.columns:
+            known_districts = sorted(market_df["District"].dropna().astype(str).unique().tolist())
+            explicit_district = bool(extract_entities_ner(user_query, known_districts, [])[0])
     feedback_district_hint = ""
     feedback_prefers_omit_district = False
     if feedback_hint:
