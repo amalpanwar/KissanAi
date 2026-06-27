@@ -415,6 +415,8 @@ class RAGAdvisor:
         self._pdf_verification_cache: dict[str, bool] = {}
         self._source_table_text_cache: dict[str, str] = {}
         self._source_table_rows_cache: dict[str, list[list[str]]] = {}
+        self._source_table_record_cache: dict[str, list[dict[str, str]]] = {}
+        self._processed_source_file_index: dict[str, Path] | None = None
         self._symptom_index_signature: tuple[int, int] | None = None
         self._symptom_phrase_rows: list[dict[str, str]] = []
         self._symptom_phrase_embeddings: np.ndarray | None = None
@@ -1414,6 +1416,24 @@ class RAGAdvisor:
         if not symptom_label and symptom_entry is not None:
             symptom_label = str(symptom_entry.get("label_hi") or symptom_entry.get("label_en") or "").strip() or None
         generic_issue = request.generic_issue if request else bool(crop and not pesticide_name and self._is_generic_issue_query(question, issue_mode=issue_mode))
+        if crop and disease_terms:
+            source_lines, source_refs = self._extract_pesticides_from_source_tables(
+                crop,
+                disease_terms=disease_terms,
+                issue_mode=issue_mode,
+                limit=3,
+            )
+            if source_lines:
+                disease_label = self._render_symptom_or_issue_label(symptom_label, disease_terms, fallback="दिए गए रोग/कीट")
+                lines = [
+                    "संरचित कीटनाशक सलाह:",
+                    f"- फसल: {self._crop_name_hi(crop)}",
+                    f"- रोग/कीट मिलान: {disease_label}",
+                    "- दवा विकल्प:",
+                ]
+                lines.extend(self._format_numbered_blocks(source_lines[:3]))
+                lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
+                return {"answer": "\n".join(lines), "references": source_refs, "retrieved": []}
         if pesticide_name:
             chem_lines, chem_sources = self._extract_rows_for_pesticide_name(
                 pesticide_name,
@@ -1469,24 +1489,6 @@ class RAGAdvisor:
                 lines.extend(self._format_numbered_blocks(db_lines[:3]))
                 lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
                 return {"answer": "\n".join(lines), "references": db_sources, "retrieved": []}
-            source_lines, source_refs = self._extract_pesticides_from_source_tables(
-                crop,
-                disease_terms=disease_terms,
-                issue_mode=issue_mode,
-                limit=3,
-            )
-            if source_lines:
-                disease_label = self._render_symptom_or_issue_label(symptom_label, disease_terms)
-                lines = [
-                    "संरचित कीटनाशक सलाह:",
-                    f"- फसल: {self._crop_name_hi(crop)}",
-                    f"- लक्षण/रोग-कीट मिलान: {disease_label}",
-                    "- दवा विकल्प:",
-                ]
-                lines.extend(self._format_numbered_blocks(source_lines[:3]))
-                lines.append("- यह उत्तर official PDF से निकाली गई table entries पर आधारित है।")
-                lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
-                return {"answer": "\n".join(lines), "references": source_refs, "retrieved": []}
         if crop and not explicit_terms and self._is_symptom_followup_query(question):
             likely_terms: list[str] = []
             for term in disease_terms:
@@ -1581,7 +1583,7 @@ class RAGAdvisor:
         if crop:
             db_lines, db_sources = self._extract_pesticides_from_db(crop, disease_terms=disease_terms, limit=8)
             if db_lines:
-                disease_label = ", ".join(disease_terms[:3]) if disease_terms else "दिए गए रोग/कीट"
+                disease_label = self._render_issue_label(disease_terms, fallback="दिए गए रोग/कीट")
                 lines = [
                     "संरचित कीटनाशक सलाह:",
                     f"- फसल: {self._crop_name_hi(crop)}",
@@ -1599,7 +1601,7 @@ class RAGAdvisor:
                     limit=3,
                 )
                 if source_lines:
-                    disease_label = ", ".join(disease_terms[:3]) if disease_terms else "दिए गए रोग/कीट"
+                    disease_label = self._render_issue_label(disease_terms, fallback="दिए गए रोग/कीट")
                     lines = [
                         "संरचित कीटनाशक सलाह:",
                         f"- फसल: {self._crop_name_hi(crop)}",
@@ -3075,13 +3077,23 @@ class RAGAdvisor:
         if direct.exists() and direct.suffix.lower() in {".xlsx", ".xls", ".csv"}:
             return direct
         candidates = [
-            Path("data/processed/pdf_tables") / source,
-            Path("data/processed/pdf_tables_docling") / source,
             Path("data/processed") / source,
         ]
         for path in candidates:
             if path.exists() and path.suffix.lower() in {".xlsx", ".xls", ".csv"}:
                 return path
+        source_key = source.lower()
+        if self._processed_source_file_index is None:
+            self._processed_source_file_index = {}
+            for path in self._processed_source_table_inventory():
+                self._processed_source_file_index.setdefault(path.name.lower(), path)
+                for record in self._load_source_table_records(path):
+                    source_ref = str(record.get("source_file") or "").strip().lower()
+                    if source_ref:
+                        self._processed_source_file_index.setdefault(source_ref, path)
+        mapped = self._processed_source_file_index.get(source_key)
+        if mapped and mapped.exists():
+            return mapped
         return None
 
     def _load_pdf_text(self, pdf_path: Path | None) -> str:
@@ -3144,29 +3156,232 @@ class RAGAdvisor:
         self._source_table_rows_cache[key] = rows
         return rows
 
-    def _candidate_source_table_paths(self, issue_mode: str = "general") -> list[Path]:
-        patterns = ["*.xlsx"]
-        if issue_mode == "pest":
-            patterns = ["*insecticide*.xlsx"]
-        elif issue_mode == "fungal":
-            patterns = ["*fungicide*.xlsx"]
-        bases = [
-            Path("data/processed/pdf_tables_docling"),
-            Path("data/processed/pdf_tables"),
+    def _processed_source_table_inventory(self) -> list[Path]:
+        root = Path("data/processed")
+        preferred_names = [
+            "pesticide_recos_usable_with_autofill.xlsx",
+            "Pesticides3.xlsx",
+            "Pesticides1.xlsx",
+            "Pesticdes 4.xlsx",
+            "insecticides1.xlsx",
+            "Insecticides2.xlsx",
         ]
         paths: list[Path] = []
         seen: set[str] = set()
-        for base in bases:
-            if not base.exists():
-                continue
-            for pattern in patterns:
-                for path in sorted(base.glob(pattern)):
-                    key = str(path.resolve())
-                    if key in seen:
-                        continue
+        for name in preferred_names:
+            path = root / name
+            if path.exists():
+                key = str(path.resolve())
+                if key not in seen:
                     seen.add(key)
                     paths.append(path)
+        for path in sorted(root.glob("*.xlsx")):
+            if "reject" in path.name.lower():
+                continue
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
         return paths
+
+    def _normalize_source_column_name(self, name: object) -> str:
+        cleaned = str(name or "").replace("\xa0", " ").strip().lower()
+        cleaned = re.sub(r"[^a-z0-9]+", "_", cleaned).strip("_")
+        return cleaned
+
+    def _load_source_table_records(self, table_path: Path | None) -> list[dict[str, str]]:
+        if not table_path:
+            return []
+        key = str(table_path)
+        cached = self._source_table_record_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            if table_path.suffix.lower() == ".csv":
+                df = pd.read_csv(table_path)
+            else:
+                df = pd.read_excel(table_path, engine="openpyxl")
+        except Exception:
+            records: list[dict[str, str]] = []
+            self._source_table_record_cache[key] = records
+            return records
+
+        raw_columns = [str(col or "").strip() for col in df.columns]
+        normalized_columns = [self._normalize_source_column_name(col) for col in raw_columns]
+        default_source_file = next((col for col in raw_columns if col.lower().endswith(".xlsx")), "")
+
+        def clean_value(value: object) -> str:
+            text = str(value or "").replace("\xa0", " ").strip()
+            if not text or text.lower() == "nan":
+                return ""
+            return " ".join(text.split())
+
+        def pick(row_map: dict[str, str], names: list[str]) -> str:
+            for name in names:
+                value = row_map.get(name, "")
+                if value:
+                    return value
+            return ""
+
+        def pick_with_key(row_map: dict[str, str], names: list[str]) -> tuple[str, str]:
+            for name in names:
+                value = row_map.get(name, "")
+                if value:
+                    return value, name
+            return "", ""
+
+        records = []
+        for row in df.fillna("").itertuples(index=False, name=None):
+            row_map = {
+                normalized_columns[idx]: clean_value(value)
+                for idx, value in enumerate(row)
+                if idx < len(normalized_columns)
+            }
+            ai_value, ai_key = pick_with_key(row_map, ["ai_g", "a_i_gm_ha", "a_i_gm", "dose", "2_a_i_mg_m"])
+            formulation_value, formulation_key = pick_with_key(
+                row_map,
+                ["formulation", "formulation_ml_ha", "formulation_gm", "formulation_kg_ha", "dose_text"],
+            )
+            dilution_value, dilution_key = pick_with_key(
+                row_map,
+                ["dilution", "water_l_ha", "water", "dilution_in_water_liters", "surface", "exposureperiod"],
+            )
+            waiting_value, waiting_key = pick_with_key(
+                row_map,
+                ["waiting_period_day", "waiting_period_days", "waiting_period", "aeration_waiting_period"],
+            )
+            record = {
+                "crop": pick(row_map, ["crop_name", "crop", "nameofcommodity", "commodity", "name_of_commodity"]),
+                "issue": pick(
+                    row_map,
+                    [
+                        "disease_name_en",
+                        "disease_name_hi",
+                        "targetpest",
+                        "commonnameof_thepest",
+                        "pest",
+                        "nameof_insect",
+                        "nameofinsect",
+                        "insect_name_hi",
+                        "insects_name_hi",
+                    ],
+                ),
+                "pesticide_name": pick(
+                    row_map,
+                    ["pesticide_name", "pesticide", "pesticides", "pesticide_name_", "pesticide_name__"],
+                ),
+                "ai": ai_value,
+                "ai_key": ai_key,
+                "formulation": formulation_value,
+                "formulation_key": formulation_key,
+                "dilution": dilution_value,
+                "dilution_key": dilution_key,
+                "waiting": waiting_value,
+                "waiting_key": waiting_key,
+                "dose_text": pick(row_map, ["dose_text"]),
+                "source_file": pick(row_map, ["source_file"]) or default_source_file,
+                "quality_status": pick(row_map, ["quality_status"]),
+                "validation_status": pick(row_map, ["validation_status"]),
+            }
+            row_text = " | ".join(value for value in record.values() if value)
+            if not record["pesticide_name"] and not row_text:
+                continue
+            record["row_text"] = row_text
+            records.append(record)
+        self._source_table_record_cache[key] = records
+        return records
+
+    def _candidate_source_table_paths(self, issue_mode: str = "general") -> list[Path]:
+        preferred_by_mode = {
+            "pest": ["Pesticides3.xlsx", "pesticide_recos_usable_with_autofill.xlsx", "insecticides1.xlsx", "Insecticides2.xlsx"],
+            "fungal": ["pesticide_recos_usable_with_autofill.xlsx", "Pesticides3.xlsx"],
+            "disease": ["pesticide_recos_usable_with_autofill.xlsx", "Pesticides3.xlsx"],
+            "general": ["pesticide_recos_usable_with_autofill.xlsx", "Pesticides3.xlsx", "insecticides1.xlsx", "Insecticides2.xlsx"],
+        }
+        paths: list[Path] = []
+        seen: set[str] = set()
+        inventory = self._processed_source_table_inventory()
+        preferred_names = preferred_by_mode.get(issue_mode, preferred_by_mode["general"])
+        ordered = [path for name in preferred_names for path in inventory if path.name == name]
+        ordered.extend(path for path in inventory if path not in ordered)
+        for path in ordered:
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
+        return paths
+
+    def _source_record_unit_from_key(self, key: str) -> str:
+        normalized = str(key or "").strip().lower()
+        unit_map = {
+            "ai_g": "gm/ha",
+            "a_i_gm_ha": "gm/ha",
+            "a_i_gm": "gm",
+            "2_a_i_mg_m": "mg/m2",
+            "formulation_ml_ha": "ml/ha",
+            "formulation_kg_ha": "kg/ha",
+            "formulation_gm": "gm",
+            "water_l_ha": "Liter/ha",
+            "dilution_in_water_liters": "Liter/ha",
+            "waiting_period_day": "days",
+            "waiting_period_days": "days",
+            "waiting_period": "days",
+            "aeration_waiting_period": "days",
+        }
+        return unit_map.get(normalized, "")
+
+    def _build_hindi_dose_parts_from_source_record(self, record: dict[str, str]) -> list[str]:
+        parts: list[str] = []
+        ai = self._format_value_with_unit(record.get("ai"), self._source_record_unit_from_key(record.get("ai_key", "")))
+        formulation = self._format_value_with_unit(
+            record.get("formulation"),
+            self._source_record_unit_from_key(record.get("formulation_key", "")),
+        )
+        dilution = self._format_value_with_unit(
+            record.get("dilution"),
+            self._source_record_unit_from_key(record.get("dilution_key", "")),
+        )
+        waiting = self._format_value_with_unit(
+            record.get("waiting"),
+            self._source_record_unit_from_key(record.get("waiting_key", "")),
+        )
+        dose_text = str(record.get("dose_text") or "").strip()
+        if ai and re.search(r"\d", ai):
+            parts.append(f"खुराक (a.i.): {ai}")
+        if formulation and re.search(r"\d", formulation):
+            parts.append(f"फॉर्म्यूलेशन मात्रा: {formulation}")
+        if dilution:
+            parts.append(f"पानी/घोल: {dilution}")
+        if waiting and re.search(r"\d", waiting):
+            try:
+                waiting_num = float(re.findall(r"\d+(?:\.\d+)?", waiting)[0])
+            except Exception:
+                waiting_num = 0.0
+            if 0 < waiting_num <= 120:
+                parts.append(f"PHI: {waiting}")
+        if dose_text:
+            dose_text_norm = re.sub(r"\s+", " ", dose_text).strip().lower()
+            rendered_norm = " ".join(part.lower() for part in parts)
+            duplicate_markers = ["a.i.", "formulation", "dilution", "|"]
+            if (
+                dose_text_norm
+                and not any(marker in dose_text_norm for marker in duplicate_markers)
+                and dose_text_norm not in rendered_norm
+            ):
+                parts.append(f"डोज़/अतिरिक्त निर्देश: {dose_text}")
+        return parts
+
+    def _format_source_pesticide_record(self, record: dict[str, str]) -> str:
+        pname = str(record.get("pesticide_name") or "नाम उपलब्ध नहीं").strip()
+        issue_label = str(record.get("issue") or "").strip()
+        disease = self._translate_disease_name(issue_label) or issue_label
+        lines = [f"दवा: {pname}"]
+        if disease:
+            lines.append(f"रोग/कीट: {disease}")
+        lines.extend(self._build_hindi_dose_parts_from_source_record(record))
+        return "\n".join(lines).strip()
 
     def _looks_like_pesticide_name(self, text: str) -> bool:
         t = str(text or "").strip()
@@ -3207,42 +3422,36 @@ class RAGAdvisor:
         refs: list[str] = []
         seen_lines: set[str] = set()
         for table_path in self._candidate_source_table_paths(issue_mode=issue_mode):
-            rows = self._load_source_table_rows(table_path)
-            if not rows:
+            records = self._load_source_table_records(table_path)
+            if not records:
                 continue
-            for idx, cells in enumerate(rows):
-                if len(cells) < 2:
+            for record in records:
+                quality_status = str(record.get("quality_status") or "").strip().lower()
+                validation_status = str(record.get("validation_status") or "").strip().lower()
+                if quality_status == "reject" or validation_status == "reject":
                     continue
-                row_text = " | ".join(cells)
+                row_text = str(record.get("row_text") or "").strip()
+                if not row_text:
+                    continue
                 compact_row = self._compact_norm(row_text)
-                if crop_terms and not any(term in compact_row for term in crop_terms):
+                record_crop = str(record.get("crop") or "").strip()
+                record_crop_hi = self._crop_name_hi(record_crop) if record_crop else ""
+                row_crop_terms = [self._compact_norm(record_crop)]
+                if record_crop_hi and record_crop_hi != record_crop:
+                    row_crop_terms.append(self._compact_norm(record_crop_hi))
+                row_crop_terms = [term for term in row_crop_terms if term]
+                crop_match = any(term in compact_row for term in crop_terms) or any(
+                    crop_term in row_term or row_term in crop_term
+                    for crop_term in crop_terms
+                    for row_term in row_crop_terms
+                )
+                if crop_terms and not crop_match:
                     continue
                 if alias_compacts and not any(alias in compact_row for alias in alias_compacts):
                     continue
-                pesticide_name = self._infer_pesticide_name_from_table_rows(rows, idx)
-                issue_label = cells[1] if len(cells) > 1 else ", ".join(disease_terms[:1])
-                ai = cells[2] if len(cells) > 2 else ""
-                formulation = cells[3] if len(cells) > 3 else ""
-                dilution = cells[4] if len(cells) > 5 else ""
-                waiting = cells[5] if len(cells) > 5 else ""
-                parts = [f"दवा: {pesticide_name or 'नाम उपलब्ध नहीं'}"]
-                translated_issue = self._translate_disease_name(issue_label) or issue_label
-                if translated_issue:
-                    parts.append(f"रोग/कीट: {translated_issue}")
-                if ai:
-                    parts.append(f"खुराक (a.i.): {ai} gm/ha")
-                if formulation:
-                    parts.append(f"फॉर्म्यूलेशन मात्रा: {formulation} gm/ml/ha")
-                if dilution and dilution not in {"-", "--"}:
-                    parts.append(f"पानी/घोल: {dilution} Liter/ha")
-                if waiting and waiting not in {"-", "--"} and re.search(r"\d", waiting):
-                    try:
-                        waiting_num = float(re.findall(r"\d+(?:\.\d+)?", waiting)[0])
-                    except Exception:
-                        waiting_num = 0.0
-                    if 0 < waiting_num <= 120:
-                        parts.append(f"PHI: {waiting} days")
-                line = "\n".join(parts).strip()
+                pesticide_name = str(record.get("pesticide_name") or "").strip()
+                issue_label = str(record.get("issue") or "").strip() or ", ".join(disease_terms[:1])
+                line = self._format_source_pesticide_record(record)
                 line_key = re.sub(r"\s+", " ", line).strip().lower()
                 if not line_key or line_key in seen_lines:
                     continue
@@ -3250,11 +3459,30 @@ class RAGAdvisor:
                 focus_bonus = 0
                 split_parts = [self._compact_norm(part) for part in self._split_issue_label(issue_label)]
                 split_parts = [part for part in split_parts if part]
+                if self._is_focused_issue_row(issue_label, disease_terms, strict_match=True):
+                    focus_bonus += 28
                 if len(split_parts) <= 2 and any(alias in part for alias in alias_compacts for part in split_parts):
                     focus_bonus += 20
+                if any(alias == part for alias in alias_compacts for part in split_parts):
+                    focus_bonus += 20
+                if len(split_parts) > 1:
+                    focus_bonus -= min(14, (len(split_parts) - 1) * 4)
                 if pesticide_name:
                     focus_bonus += 4
-                matches.append((focus_bonus, line, f"{table_path} (extracted from official PDF)"))
+                if record_crop and any(term in self._compact_norm(record_crop) for term in crop_terms):
+                    focus_bonus += 8
+                if quality_status == "valid":
+                    focus_bonus += 12
+                elif quality_status == "usable":
+                    focus_bonus += 5
+                if validation_status == "valid":
+                    focus_bonus += 4
+                if table_path.name == "pesticide_recos_usable_with_autofill.xlsx":
+                    focus_bonus += 10
+                elif table_path.name == "Pesticides3.xlsx":
+                    focus_bonus += 6
+                source_ref = self._display_pesticide_source_reference(record.get("source_file") or table_path.name) or str(table_path)
+                matches.append((focus_bonus, line, source_ref))
         matches.sort(key=lambda item: item[0], reverse=True)
         lines: list[str] = []
         for _score, line, ref in matches[:limit]:
