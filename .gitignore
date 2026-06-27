@@ -25,8 +25,15 @@ data/processed/symptom_alias_candidates.json
 data/processed/guide_review_queue.jsonl
 data/processed/pdf_tables/
 data/processed/*.xlsx
+!data/processed/Insecticides2.xlsx
+!data/processed/Pesticdes 4.xlsx
+!data/processed/Pesticides1.xlsx
+!data/processed/Pesticides3.xlsx
+!data/processed/insecticides1.xlsx
 data/processed/*autofill*.json
 data/processed/*autofill*.xlsx
+!data/processed/pesticide_recos_reject_autofilled_still_reject.xlsx
+!data/processed/pesticide_recos_usable_with_autofill.xlsx
 data/raw/official_sources/*
 !data/raw/official_sources/cacp_sugarcane_latest.pdf
 !data/raw/official_sources/cacp_rabi_latest_en.pdf
