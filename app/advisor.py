@@ -3316,15 +3316,16 @@ class RAGAdvisor:
     def _source_record_unit_from_key(self, key: str) -> str:
         normalized = str(key or "").strip().lower()
         unit_map = {
-            "ai_g": "gm/ha",
-            "a_i_gm_ha": "gm/ha",
-            "a_i_gm": "gm",
+            "ai_g": "g/ha",
+            "a_i_gm_ha": "g/ha",
+            "a_i_gm": "g",
             "2_a_i_mg_m": "mg/m2",
             "formulation_ml_ha": "ml/ha",
             "formulation_kg_ha": "kg/ha",
-            "formulation_gm": "gm",
-            "water_l_ha": "Liter/ha",
-            "dilution_in_water_liters": "Liter/ha",
+            "formulation_gm": "g",
+            "dilution": "L/ha",
+            "water_l_ha": "L/ha",
+            "dilution_in_water_liters": "L/ha",
             "waiting_period_day": "days",
             "waiting_period_days": "days",
             "waiting_period": "days",
@@ -3332,12 +3333,30 @@ class RAGAdvisor:
         }
         return unit_map.get(normalized, "")
 
+    def _infer_formulation_unit_from_pesticide_name(self, pesticide_name: str) -> str:
+        text = str(pesticide_name or "").upper().replace(" ", "")
+        if not text:
+            return ""
+        text = re.sub(r"[^A-Z.]+$", "", text)
+        match = re.search(r"(WDG|WG|WP|SP|WS|SG|DP|GR|SC|EC|SL|SE|ZC|OD|ME|FS|ES|CS|EW)\.?$", text)
+        if not match:
+            return ""
+        code = match.group(1)
+        if code in {"WDG", "WG", "WP", "SP", "WS", "SG", "DP", "GR"}:
+            return "g/ha"
+        if code in {"SC", "EC", "SL", "SE", "ZC", "OD", "ME", "FS", "ES", "CS", "EW"}:
+            return "ml/ha"
+        return ""
+
     def _build_hindi_dose_parts_from_source_record(self, record: dict[str, str]) -> list[str]:
         parts: list[str] = []
         ai = self._format_value_with_unit(record.get("ai"), self._source_record_unit_from_key(record.get("ai_key", "")))
+        formulation_unit = self._source_record_unit_from_key(record.get("formulation_key", ""))
+        if not formulation_unit:
+            formulation_unit = self._infer_formulation_unit_from_pesticide_name(record.get("pesticide_name", ""))
         formulation = self._format_value_with_unit(
             record.get("formulation"),
-            self._source_record_unit_from_key(record.get("formulation_key", "")),
+            formulation_unit,
         )
         dilution = self._format_value_with_unit(
             record.get("dilution"),
@@ -3355,12 +3374,7 @@ class RAGAdvisor:
         if dilution:
             parts.append(f"पानी/घोल: {dilution}")
         if waiting and re.search(r"\d", waiting):
-            try:
-                waiting_num = float(re.findall(r"\d+(?:\.\d+)?", waiting)[0])
-            except Exception:
-                waiting_num = 0.0
-            if 0 < waiting_num <= 120:
-                parts.append(f"PHI: {waiting}")
+            parts.append(f"प्रतीक्षा अवधि (Waiting period): {waiting}")
         if dose_text:
             dose_text_norm = re.sub(r"\s+", " ", dose_text).strip().lower()
             rendered_norm = " ".join(part.lower() for part in parts)
