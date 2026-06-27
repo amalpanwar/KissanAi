@@ -414,6 +414,7 @@ class RAGAdvisor:
         self._pdf_text_cache: dict[str, str] = {}
         self._pdf_verification_cache: dict[str, bool] = {}
         self._source_table_text_cache: dict[str, str] = {}
+        self._source_table_rows_cache: dict[str, list[list[str]]] = {}
         self._symptom_index_signature: tuple[int, int] | None = None
         self._symptom_phrase_rows: list[dict[str, str]] = []
         self._symptom_phrase_embeddings: np.ndarray | None = None
@@ -1468,6 +1469,24 @@ class RAGAdvisor:
                 lines.extend(self._format_numbered_blocks(db_lines[:3]))
                 lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
                 return {"answer": "\n".join(lines), "references": db_sources, "retrieved": []}
+            source_lines, source_refs = self._extract_pesticides_from_source_tables(
+                crop,
+                disease_terms=disease_terms,
+                issue_mode=issue_mode,
+                limit=3,
+            )
+            if source_lines:
+                disease_label = self._render_symptom_or_issue_label(symptom_label, disease_terms)
+                lines = [
+                    "संरचित कीटनाशक सलाह:",
+                    f"- फसल: {self._crop_name_hi(crop)}",
+                    f"- लक्षण/रोग-कीट मिलान: {disease_label}",
+                    "- दवा विकल्प:",
+                ]
+                lines.extend(self._format_numbered_blocks(source_lines[:3]))
+                lines.append("- यह उत्तर official PDF से निकाली गई table entries पर आधारित है।")
+                lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
+                return {"answer": "\n".join(lines), "references": source_refs, "retrieved": []}
         if crop and not explicit_terms and self._is_symptom_followup_query(question):
             likely_terms: list[str] = []
             for term in disease_terms:
@@ -1572,6 +1591,25 @@ class RAGAdvisor:
                 lines.extend(self._format_numbered_blocks(db_lines[:3]))
                 lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
                 return {"answer": "\n".join(lines), "references": db_sources, "retrieved": []}
+            if disease_terms:
+                source_lines, source_refs = self._extract_pesticides_from_source_tables(
+                    crop,
+                    disease_terms=disease_terms,
+                    issue_mode=issue_mode,
+                    limit=3,
+                )
+                if source_lines:
+                    disease_label = ", ".join(disease_terms[:3]) if disease_terms else "दिए गए रोग/कीट"
+                    lines = [
+                        "संरचित कीटनाशक सलाह:",
+                        f"- फसल: {self._crop_name_hi(crop)}",
+                        f"- रोग/कीट मिलान: {disease_label}",
+                        "- दवा विकल्प:",
+                    ]
+                    lines.extend(self._format_numbered_blocks(source_lines[:3]))
+                    lines.append("- यह उत्तर official PDF से निकाली गई table entries पर आधारित है।")
+                    lines.append("- छिड़काव/बीज उपचार से पहले उत्पाद लेबल, PHI और स्थानीय कृषि अधिकारी की सलाह जरूर मिलाएँ।")
+                    return {"answer": "\n".join(lines), "references": source_refs, "retrieved": []}
         if crop or pesticide_name or disease_terms:
             target = self._crop_name_hi(crop) if crop else "दिए गए प्रश्न"
             issue_hint = ", ".join(disease_terms[:2]) if disease_terms else "रोग/कीट"
@@ -3083,6 +3121,147 @@ class RAGAdvisor:
             text = "\n".join(rows_text)
         self._source_table_text_cache[key] = text
         return text
+
+    def _load_source_table_rows(self, table_path: Path | None) -> list[list[str]]:
+        if not table_path:
+            return []
+        key = str(table_path)
+        cached = self._source_table_rows_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            if table_path.suffix.lower() == ".csv":
+                df = pd.read_csv(table_path, header=None)
+            else:
+                df = pd.read_excel(table_path, header=None, engine="openpyxl")
+        except Exception:
+            rows: list[list[str]] = []
+        else:
+            rows = []
+            for row in df.fillna("").itertuples(index=False):
+                cells = [" ".join(str(cell).replace("\xa0", " ").split()) for cell in row if str(cell).strip()]
+                rows.append(cells)
+        self._source_table_rows_cache[key] = rows
+        return rows
+
+    def _candidate_source_table_paths(self, issue_mode: str = "general") -> list[Path]:
+        patterns = ["*.xlsx"]
+        if issue_mode == "pest":
+            patterns = ["*insecticide*.xlsx"]
+        elif issue_mode == "fungal":
+            patterns = ["*fungicide*.xlsx"]
+        bases = [
+            Path("data/processed/pdf_tables_docling"),
+            Path("data/processed/pdf_tables"),
+        ]
+        paths: list[Path] = []
+        seen: set[str] = set()
+        for base in bases:
+            if not base.exists():
+                continue
+            for pattern in patterns:
+                for path in sorted(base.glob(pattern)):
+                    key = str(path.resolve())
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    paths.append(path)
+        return paths
+
+    def _looks_like_pesticide_name(self, text: str) -> bool:
+        t = str(text or "").strip()
+        if not t:
+            return False
+        return bool(
+            re.search(r"(%|WG|WP|SC|GR|EC|ZC|SE|SL|WS|SP)\b", t, flags=re.IGNORECASE)
+        )
+
+    def _infer_pesticide_name_from_table_rows(self, rows: list[list[str]], row_idx: int) -> str:
+        for prev_idx in range(row_idx - 1, max(-1, row_idx - 4), -1):
+            prev_cells = rows[prev_idx]
+            if not prev_cells:
+                continue
+            candidate = " ".join(prev_cells).strip()
+            if self._looks_like_pesticide_name(candidate):
+                return candidate
+        return ""
+
+    def _extract_pesticides_from_source_tables(
+        self,
+        crop: str,
+        disease_terms: list[str],
+        *,
+        issue_mode: str = "general",
+        limit: int = 5,
+    ) -> tuple[list[str], list[str]]:
+        crop_terms = [self._compact_norm(crop), self._compact_norm(self._crop_name_hi(crop))]
+        crop_terms = [term for term in crop_terms if term]
+        alias_compacts: list[str] = []
+        for term in disease_terms:
+            aliases = DISEASE_ALIASES.get(str(term).strip().lower(), [str(term).strip().lower()])
+            for alias in aliases:
+                compact = self._compact_norm(alias)
+                if compact and compact not in alias_compacts:
+                    alias_compacts.append(compact)
+        matches: list[tuple[int, str, str]] = []
+        refs: list[str] = []
+        seen_lines: set[str] = set()
+        for table_path in self._candidate_source_table_paths(issue_mode=issue_mode):
+            rows = self._load_source_table_rows(table_path)
+            if not rows:
+                continue
+            for idx, cells in enumerate(rows):
+                if len(cells) < 2:
+                    continue
+                row_text = " | ".join(cells)
+                compact_row = self._compact_norm(row_text)
+                if crop_terms and not any(term in compact_row for term in crop_terms):
+                    continue
+                if alias_compacts and not any(alias in compact_row for alias in alias_compacts):
+                    continue
+                pesticide_name = self._infer_pesticide_name_from_table_rows(rows, idx)
+                issue_label = cells[1] if len(cells) > 1 else ", ".join(disease_terms[:1])
+                ai = cells[2] if len(cells) > 2 else ""
+                formulation = cells[3] if len(cells) > 3 else ""
+                dilution = cells[4] if len(cells) > 5 else ""
+                waiting = cells[5] if len(cells) > 5 else ""
+                parts = [f"दवा: {pesticide_name or 'नाम उपलब्ध नहीं'}"]
+                translated_issue = self._translate_disease_name(issue_label) or issue_label
+                if translated_issue:
+                    parts.append(f"रोग/कीट: {translated_issue}")
+                if ai:
+                    parts.append(f"खुराक (a.i.): {ai} gm/ha")
+                if formulation:
+                    parts.append(f"फॉर्म्यूलेशन मात्रा: {formulation} gm/ml/ha")
+                if dilution and dilution not in {"-", "--"}:
+                    parts.append(f"पानी/घोल: {dilution} Liter/ha")
+                if waiting and waiting not in {"-", "--"} and re.search(r"\d", waiting):
+                    try:
+                        waiting_num = float(re.findall(r"\d+(?:\.\d+)?", waiting)[0])
+                    except Exception:
+                        waiting_num = 0.0
+                    if 0 < waiting_num <= 120:
+                        parts.append(f"PHI: {waiting} days")
+                line = "\n".join(parts).strip()
+                line_key = re.sub(r"\s+", " ", line).strip().lower()
+                if not line_key or line_key in seen_lines:
+                    continue
+                seen_lines.add(line_key)
+                focus_bonus = 0
+                split_parts = [self._compact_norm(part) for part in self._split_issue_label(issue_label)]
+                split_parts = [part for part in split_parts if part]
+                if len(split_parts) <= 2 and any(alias in part for alias in alias_compacts for part in split_parts):
+                    focus_bonus += 20
+                if pesticide_name:
+                    focus_bonus += 4
+                matches.append((focus_bonus, line, f"{table_path} (extracted from official PDF)"))
+        matches.sort(key=lambda item: item[0], reverse=True)
+        lines: list[str] = []
+        for _score, line, ref in matches[:limit]:
+            lines.append(line)
+            if ref not in refs:
+                refs.append(ref)
+        return lines, refs
 
     def _display_pesticide_source_reference(self, source_file: object) -> str | None:
         table_path = self._source_table_path(source_file)
