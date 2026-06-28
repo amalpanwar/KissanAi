@@ -15,7 +15,6 @@ from app.pdf_extract import read_pdf_pages, read_pdf_text
 
 GUIDE_PDF = Path("data/raw/Crop Production guide.pdf")
 TRENCH_GUIDE_PDF = Path("data/raw/Trench_Planting_Sugarcane.pdf")
-TRENCH_GUIDE_TEXT = Path("data/processed/trench_planting_sugarcane.txt")
 ALIAS_JSON = Path("data/raw/commodity_aliases.json")
 GUIDE_REVIEW_QUEUE = Path("data/processed/guide_review_queue.jsonl")
 PDF_OFFSET = 12  # printed page 1 starts at PDF page 13
@@ -350,7 +349,7 @@ FOLLOWUP_SECTION_KEYWORDS = {
     "harvest": ["कटाई", "katai", "katayi", "katayee", "harvest", "harvesting", "maturity", "pre-harvest"],
     "field_preparation": ["खेत की तैयारी", "जुताई", "field preparation", "land preparation", "मेड़", "नालियां"],
     "sowing": ["बुवाई", "रोपाई", "sowing", "planting", "transplanting", "spacing", "seed treatment"],
-    "planting_method": ["विधि", "vidhi", "method", "planting method", "trench", "trench planting", "furrow planting", "paired row", "ssi", "chip bud", "subsurface drip", "higher yield method", "ज्यादा उपज", "अधिक उपज"],
+    "planting_method": ["विधि", "vidhi", "method", "planting method", "planting", "रोपण", "रोपाई की विधि", "trench", "ज्यादा उपज", "अधिक उपज"],
 }
 
 MONTH_REPLACEMENTS = {
@@ -1640,29 +1639,6 @@ def _section_matches_followup(section: str, entry: dict[str, str]) -> bool:
     return False
 
 
-def _question_mentions_trench_or_method(question: str) -> bool:
-    q = str(question or "").lower()
-    q_norm = _norm(q)
-    keywords = [
-        "trench",
-        "trench planting",
-        "method",
-        "vidhi",
-        "विधि",
-        "paired row",
-        "ssi",
-        "chip bud",
-        "higher yield",
-        "high yield",
-        "ज्यादा उपज",
-        "अधिक उपज",
-        "best method",
-        "kaunsi vidhi",
-        "konsi vidhi",
-    ]
-    return any(k.lower() in q for k in keywords) or any(_norm(k) in q_norm for k in keywords)
-
-
 @lru_cache(maxsize=1)
 def _guide_embedding_model() -> str:
     try:
@@ -1692,23 +1668,19 @@ def _guide_chunk_size() -> int:
         return 6
 
 
-@lru_cache(maxsize=1)
-def _trench_guide_text() -> str:
-    if not TRENCH_GUIDE_PDF.exists() and not TRENCH_GUIDE_TEXT.exists():
+@lru_cache(maxsize=8)
+def _supplemental_pdf_text(pdf_path_str: str) -> str:
+    pdf_path = Path(pdf_path_str)
+    if not pdf_path.exists():
         return ""
     try:
-        text = read_pdf_text(TRENCH_GUIDE_PDF, prefer_docling=True)
+        text = read_pdf_text(pdf_path, prefer_docling=True)
         if text.strip():
             return text
     except Exception:
         pass
-    if TRENCH_GUIDE_TEXT.exists():
-        try:
-            return TRENCH_GUIDE_TEXT.read_text(encoding="utf-8")
-        except Exception:
-            pass
     gs_bin = shutil.which("gs")
-    if gs_bin and TRENCH_GUIDE_PDF.exists():
+    if gs_bin and pdf_path.exists():
         try:
             result = subprocess.run(
                 [
@@ -1718,7 +1690,7 @@ def _trench_guide_text() -> str:
                     "-dBATCH",
                     "-sDEVICE=txtwrite",
                     "-sOutputFile=-",
-                    str(TRENCH_GUIDE_PDF),
+                    str(pdf_path),
                 ],
                 capture_output=True,
                 text=True,
@@ -1730,52 +1702,73 @@ def _trench_guide_text() -> str:
     return ""
 
 
-@lru_cache(maxsize=1)
-def _trench_guide_chunks() -> list[dict[str, Any]]:
-    text = _trench_guide_text()
+def _generic_pdf_section_name(line: str) -> str | None:
+    lower = str(line or "").strip().lower()
+    mapping = {
+        "abstract": "abstract",
+        "introduction": "introduction",
+        "materials and methods": "methods",
+        "materials & methods": "methods",
+        "methodology": "methods",
+        "results and discussion": "results",
+        "results": "results",
+        "discussion": "results",
+        "conclusion": "conclusion",
+        "references": "references",
+    }
+    return mapping.get(lower)
+
+
+def _looks_like_publication_metadata(line: str) -> bool:
+    lower = str(line or "").lower()
+    if re.search(r"\b(received|acceptance|accepted|published|copyright|issn|doi)\b", lower):
+        return True
+    if re.search(r"\bvol\.?\b", lower) and re.search(r"\bno\.?\b", lower):
+        return True
+    if "journal" in lower and len(lower) < 140:
+        return True
+    if re.fullmatch(r"[A-Z0-9 .,&()/:-]{8,}", str(line or "")) and len(str(line or "")) < 110:
+        return True
+    return False
+
+
+def _looks_like_tabular_noise(line: str) -> bool:
+    text = str(line or "")
+    number_tokens = re.findall(r"\b\d+(?:\.\d+)?\b", text)
+    code_tokens = re.findall(r"\b[A-Za-z]{1,8}-?\d{2,8}\b", text)
+    title_tokens = re.findall(r"\b[A-Z][a-z]+\b", text)
+    if len(number_tokens) >= 6:
+        return True
+    if len(code_tokens) >= 2 and len(number_tokens) >= 2:
+        return True
+    if len(title_tokens) >= 6 and len(number_tokens) >= 3:
+        return True
+    return False
+
+
+@lru_cache(maxsize=8)
+def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
+    text = _supplemental_pdf_text(pdf_path_str)
     if not text:
         return []
 
     lines: list[dict[str, Any]] = []
-    current_section = "front_matter"
+    current_section = "body"
     for raw_line in text.splitlines():
         line = " ".join(str(raw_line or "").split())
         if not line:
             continue
-        lower = line.lower()
-        if lower == "abstract":
-            current_section = "abstract"
-            continue
-        if lower == "introduction":
-            current_section = "introduction"
-            continue
-        if lower == "materials and methods":
-            current_section = "materials_and_methods"
-            continue
-        if lower == "results and discussion":
-            current_section = "results_and_discussion"
+        section_name = _generic_pdf_section_name(line)
+        if section_name:
+            current_section = section_name
             continue
         if re.fullmatch(r"[_\-. ]{4,}", line):
             continue
-        if re.fullmatch(r"[0-9 ]{1,8}", line):
+        if re.fullmatch(r"[0-9 ]{1,8}", line) or len(line) < 3:
             continue
-        if "the journal of rural and agricultural research" in lower:
+        if _looks_like_publication_metadata(line):
             continue
-        if lower.startswith("received december") or lower.startswith("acceptance august"):
-            continue
-        if lower.startswith("increase productivity of sugarcane by trench method planting"):
-            continue
-        if lower == "techniques":
-            continue
-        if lower.startswith("a.k. katiyar") or lower.startswith("associate director soil science"):
-            continue
-        if "deputy cane commissioner" in lower or "deputy general manager" in lower:
-            continue
-        if "name of farmer" in lower or "village" in lower or "cane variety" in lower:
-            continue
-        if "agropedia" in lower or "indian journal of agricultural sciences" in lower:
-            continue
-        if re.search(r"\b(sri|smt)[a-z ]+\b", lower):
+        if _looks_like_tabular_noise(line):
             continue
         lines.append({"text": line, "section": current_section})
 
@@ -1812,9 +1805,9 @@ def _trench_guide_chunks() -> list[dict[str, Any]]:
     return chunks
 
 
-@lru_cache(maxsize=1)
-def _trench_guide_vectors() -> Any:
-    chunks = _trench_guide_chunks()
+@lru_cache(maxsize=8)
+def _supplemental_pdf_vectors(pdf_path_str: str) -> Any:
+    chunks = _supplemental_pdf_chunks(pdf_path_str)
     if not chunks:
         return None
     embedder = _guide_embedder()
@@ -1826,7 +1819,7 @@ def _trench_guide_vectors() -> Any:
         return None
 
 
-def _trench_query_tokens(text: str) -> set[str]:
+def _pdf_query_tokens(text: str) -> set[str]:
     return {
         token
         for token in re.findall(r"[a-z\u0900-\u097f]+", str(text or "").lower())
@@ -1834,100 +1827,88 @@ def _trench_query_tokens(text: str) -> set[str]:
     }
 
 
-def _trench_intent_mode(question: str) -> str:
-    q = str(question or "").lower()
-    if any(token in q for token in ["yield", "उपज", "labh", "laabh", "faayda", "fayda", "benefit", "best"]):
-        return "evidence"
-    if any(token in q for token in ["trench", "planting", "method", "vidhi", "विधि", "kaise", "how"]):
-        return "procedure"
-    return "mixed"
+def _semantic_query_variants(question: str, crop: str = "", section: str = "") -> list[str]:
+    base = str(question or "").strip()
+    variants: list[str] = []
+    for candidate in (
+        base,
+        " ".join(part for part in [crop, section, base] if part).strip(),
+        " ".join(part for part in [crop, base] if part).strip(),
+        " ".join(part for part in [section, base] if part).strip(),
+    ):
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+    return variants
 
 
-def _trench_anchor_texts(mode: str) -> list[str]:
-    if mode == "procedure":
-        return [
-            "sugarcane trench planting procedure steps spacing depth trench width sett placement soaking soil cover",
-        ]
-    if mode == "evidence":
-        return [
-            "sugarcane trench planting yield productivity germination irrigation water saving comparison field results",
-        ]
-    return [
-        "sugarcane trench planting procedure spacing setts",
-        "sugarcane trench planting yield productivity evidence",
-    ]
-
-
-def _trench_section_preferences(mode: str) -> set[str]:
-    if mode == "procedure":
-        return {"introduction", "materials_and_methods"}
-    if mode == "evidence":
-        return {"abstract", "results_and_discussion"}
-    return {"abstract", "introduction", "materials_and_methods", "results_and_discussion"}
-
-
-def _retrieve_trench_passages(question: str, k: int = 4) -> list[dict[str, Any]]:
-    chunks = _trench_guide_chunks()
+def _retrieve_pdf_passages(pdf_path: Path, question: str, crop: str = "", section: str = "", k: int = 4) -> list[dict[str, Any]]:
+    chunks = _supplemental_pdf_chunks(str(pdf_path))
     if not chunks:
         return []
 
-    question_text = str(question or "").strip()
-    q_lower = question_text.lower()
-    intent_mode = _trench_intent_mode(question_text)
-    query_texts = [f"sugarcane planting method {question_text}".strip()]
-    if any(token in q_lower for token in ["trench", "planting", "method", "vidhi", "kaise", "how"]):
-        query_texts.append("sugarcane trench planting steps spacing setts soaking soil cover")
-    if any(token in q_lower for token in ["yield", "उपज", "labh", "laabh", "faayda", "fayda", "benefit"]):
-        query_texts.append("sugarcane trench planting productivity germination irrigation water saving")
-    preferred_sections = _trench_section_preferences(intent_mode)
-    candidate_indices = [
-        idx for idx, chunk in enumerate(chunks) if str(chunk.get("section") or "front_matter") in preferred_sections
-    ] or list(range(len(chunks)))
-    vectors = _trench_guide_vectors()
+    query_texts = _semantic_query_variants(question, crop=crop, section=section)
+    vectors = _supplemental_pdf_vectors(str(pdf_path))
     embedder = _guide_embedder()
     if vectors is not None and embedder is not None:
         try:
             query_vecs = embedder.encode(query_texts)
-            anchor_vecs = embedder.encode(_trench_anchor_texts(intent_mode))
             scored: list[tuple[float, int]] = []
-            for idx in candidate_indices:
-                best_score = max(float(vectors[idx] @ qvec) for qvec in query_vecs)
-                anchor_score = max(float(vectors[idx] @ avec) for avec in anchor_vecs)
-                if intent_mode == "procedure":
-                    combined_score = (0.25 * best_score) + (0.75 * anchor_score)
-                elif intent_mode == "evidence":
-                    combined_score = (0.6 * best_score) + (0.4 * anchor_score)
-                else:
-                    combined_score = (0.7 * best_score) + (0.3 * anchor_score)
-                scored.append((combined_score, idx))
+            for idx in range(len(chunks)):
+                score = max(float(vectors[idx] @ qvec) for qvec in query_vecs)
+                scored.append((score, idx))
             scored.sort(reverse=True)
-            return [{**chunks[idx], "score": score} for score, idx in scored[: min(k, len(chunks))]]
+            top_n = min(max(k * 2, k), len(chunks))
+            return [{**chunks[idx], "score": score} for score, idx in scored[:top_n]]
         except Exception:
             pass
 
     query_tokens: set[str] = set()
     for query_text in query_texts:
-        query_tokens.update(_trench_query_tokens(query_text))
+        query_tokens.update(_pdf_query_tokens(query_text))
     scored: list[tuple[int, int, int]] = []
-    for idx in candidate_indices:
+    for idx, chunk in enumerate(chunks):
         chunk = chunks[idx]
         chunk_text = str(chunk.get("text", ""))
-        chunk_tokens = _trench_query_tokens(chunk_text)
+        chunk_tokens = _pdf_query_tokens(chunk_text)
         overlap = len(query_tokens & chunk_tokens)
         scored.append((overlap, -len(chunk_text), idx))
     scored.sort(reverse=True)
     selected = []
-    for overlap, _, idx in scored[:k]:
+    for overlap, _, idx in scored[: min(max(k * 2, k), len(scored))]:
         if overlap <= 0 and selected:
             continue
         selected.append({**chunks[idx], "score": float(overlap)})
     return selected
 
 
-def _summarize_trench_passage(text: str, sentence_limit: int = 2, mode: str = "mixed") -> str:
+def _fragment_is_document_noise(fragment: str) -> bool:
+    frag = str(fragment or "").strip()
+    lower = frag.lower()
+    if len(frag) < 20:
+        return True
+    if re.search(r"\b(received|acceptance|accepted|published|copyright|issn|doi|references)\b", lower):
+        return True
+    if re.search(r"\bet al\b", lower):
+        return True
+    letters = len(re.findall(r"[A-Za-z\u0900-\u097f]", frag))
+    digits = len(re.findall(r"[0-9]", frag))
+    if letters == 0:
+        return True
+    if digits / max(1, letters + digits) > 0.55:
+        return True
+    if _looks_like_tabular_noise(frag):
+        return True
+    if re.search(r"\([12][0-9]{3}\)", frag) and len(re.findall(r"\b[A-Z][a-z]+\b", frag)) >= 3:
+        return True
+    if re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z](?:\.[A-Z])?\.?){1,3}", frag):
+        return True
+    return False
+
+
+def _summarize_pdf_passage(text: str, question: str, crop: str = "", section: str = "", sentence_limit: int = 2) -> str:
     cleaned = _cleanup_bullet_text(text)
-    cleaned = re.sub(r"\b(Abstract|Introduction|Materials and methods|Results and discussion)\b[:\-]?", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\bKey words:.*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(Abstract|Introduction|Materials(?: and| &) Methods|Results(?: and Discussion)?|Discussion|Conclusion|References)\b[:\-]?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bKey words?:.*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bTable\s+\d+\s*:\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bTable\s+\d+\b", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .;:-")
@@ -1940,26 +1921,14 @@ def _summarize_trench_passage(text: str, sentence_limit: int = 2, mode: str = "m
     embedder = _guide_embedder()
     if embedder is not None and fragments:
         try:
+            query_text = " ".join(_semantic_query_variants(question, crop=crop, section=section)).strip()
+            query_vec = embedder.encode([query_text])[0]
             fragment_vecs = embedder.encode(fragments)
-            anchor_vecs = embedder.encode(_trench_anchor_texts(mode))
             scored_fragments: list[tuple[float, int]] = []
-            bad_fragment_markers = [
-                "kiranyadav",
-                "singh a.k.",
-                "rao a.k.",
-                "jaiveer",
-                "agropedia",
-                "indian journal",
-                "journal of",
-                "82, 8",
-            ]
             for idx, fragment in enumerate(fragments):
-                frag_lower = fragment.lower()
-                if re.search(r"\b(sri|smt)[a-z ]+\b", frag_lower):
+                if _fragment_is_document_noise(fragment):
                     continue
-                if any(marker in frag_lower for marker in bad_fragment_markers):
-                    continue
-                score = max(float(fragment_vecs[idx] @ anchor_vec) for anchor_vec in anchor_vecs)
+                score = float(fragment_vecs[idx] @ query_vec)
                 scored_fragments.append((score, idx))
             selected = sorted(scored_fragments, reverse=True)[: max(1, sentence_limit)]
             if selected:
@@ -1971,135 +1940,48 @@ def _summarize_trench_passage(text: str, sentence_limit: int = 2, mode: str = "m
     return _final_phrase_cleanup(summary)
 
 
-def _is_valid_trench_summary(summary: str) -> bool:
+def _is_valid_pdf_summary(summary: str) -> bool:
     text = str(summary or "").strip()
-    if len(text) < 40:
-        return False
-    lower = text.lower()
-    bad_markers = [
-        "agropedia",
-        "indian journal",
-        "journal of",
-        "name of farmer",
-        "cane variety",
-        "village",
-        "received december",
-        "acceptance august",
-        "kiranyadav",
-        "singh a.k.",
-        "rao a.k.",
-        "jaiveer",
-    ]
-    if any(marker in lower for marker in bad_markers):
-        return False
-    if re.search(r"\b(sri|smt)[a-z ]+\b", lower):
-        return False
-    return True
+    return len(text) >= 35 and not _fragment_is_document_noise(text)
 
 
-def _sugarcane_guide_method_signals(entries: list[dict[str, str]]) -> dict[str, str]:
-    signals: dict[str, str] = {}
-    planting_body = ""
-    irrigation_body = ""
+def _build_sugarcane_planting_method_answer(question: str, entries: list[dict[str, str]], crop: str, section: str) -> tuple[str | None, list[str]]:
+    if crop.lower() != "sugarcane" or section != "planting_method":
+        return None, []
+    guide_points: list[str] = []
     for entry in entries:
-        heading_key = _heading_key(entry.get("heading", ""))
-        if heading_key == "PLANTING":
-            planting_body = " ".join(str(entry.get("body", "")).split())
-        elif heading_key == "WATER MANAGEMENT" or heading_key == "IRRIGATION":
-            irrigation_body = " ".join(str(entry.get("body", "")).split())
-    if not planting_body:
-        return signals
+        if _section_matches_followup("planting_method", entry):
+            point = _final_phrase_cleanup(str(entry.get("point", "")).strip())
+            if point and point not in guide_points:
+                guide_points.append(point)
 
-    paired_match = re.search(r"([0-9]+\s*\+\s*[0-9]+\s*cm) spacing", planting_body, flags=re.IGNORECASE)
-    if paired_match:
-        signals["paired_spacing"] = paired_match.group(1)
+    pdf_summaries: list[str] = []
+    for passage in _retrieve_pdf_passages(TRENCH_GUIDE_PDF, question, crop=crop, section="planting method", k=4):
+        summary = _summarize_pdf_passage(str(passage.get("text", "")), question, crop=crop, section="planting method", sentence_limit=2)
+        if not _is_valid_pdf_summary(summary):
+            continue
+        if any(summary == existing or summary in existing or existing in summary for existing in pdf_summaries):
+            continue
+        pdf_summaries.append(summary)
+        if len(pdf_summaries) >= 2:
+            break
 
-    ssi_age = re.search(r"\(([0-9]+\s*-\s*[0-9]+\s*days old)\)", planting_body, flags=re.IGNORECASE)
-    if ssi_age:
-        signals["ssi_age"] = ssi_age.group(1)
-
-    ssi_spacing = re.search(r"wide spacing \(([0-9xX ]+\s*feet)\)", planting_body, flags=re.IGNORECASE)
-    if ssi_spacing:
-        signals["ssi_spacing"] = ssi_spacing.group(1)
-
-    subsurface_depth = re.search(r"laterals may be placed\s*([0-9]+\s*cm)\s*depth", planting_body, flags=re.IGNORECASE)
-    if subsurface_depth:
-        signals["subsurface_depth"] = subsurface_depth.group(1)
-
-    sett_above = re.search(r"setts are placed\s*([0-9]+\s*cm)\s*above the laterals", planting_body, flags=re.IGNORECASE)
-    if sett_above:
-        signals["sett_above_lateral"] = sett_above.group(1)
-
-    ridge_spacing = re.search(r"one side of the ridge for\s*([0-9]+\s*cm)\s*spacing", planting_body, flags=re.IGNORECASE)
-    if ridge_spacing:
-        signals["ridge_spacing"] = ridge_spacing.group(1)
-
-    if "once in three days" in irrigation_body.lower():
-        signals["drip_interval"] = "3 days"
-    return signals
-
-
-def _build_sugarcane_planting_method_answer(question: str, entries: list[dict[str, str]], crop: str) -> tuple[str | None, list[str]]:
-    if crop.lower() != "sugarcane":
-        return None, []
-    guide_signals = _sugarcane_guide_method_signals(entries)
-    trench_passages = _retrieve_trench_passages(question, k=4)
-    if not guide_signals and not trench_passages:
+    if not guide_points and not pdf_summaries:
         return None, []
 
-    q = str(question or "").lower()
-    intent_mode = _trench_intent_mode(question)
-    asks_best = any(token in q for token in ["best", "higher yield", "high yield", "ज्यादा उपज", "अधिक उपज", "labh", "yield"])
-    asks_trench = "trench" in q or "trench planting" in q
-
-    sources = [str(GUIDE_PDF)]
-    if trench_passages:
+    sources: list[str] = []
+    if guide_points:
+        sources.append(str(GUIDE_PDF))
+    if pdf_summaries:
         sources.append(str(TRENCH_GUIDE_PDF))
     lines = [f"{_crop_display_label(crop)} में planting method की जानकारी:", ""]
-    trench_summaries: list[str] = []
-    for passage in trench_passages:
-        summary = _summarize_trench_passage(str(passage.get("text", "")), sentence_limit=2, mode=intent_mode)
-        if _is_valid_trench_summary(summary) and summary not in trench_summaries:
-            trench_summaries.append(summary)
-
-    if asks_best:
-        if trench_summaries:
-            lines.append("- उपलब्ध trench study passages के आधार पर higher yield के लिए trench planting + SSNM का सबसे मजबूत field evidence मिला।")
-            for summary in trench_summaries[:2]:
-                lines.append(f"- {summary}")
-        if guide_signals.get("ssi_age") and guide_signals.get("ssi_spacing"):
-            lines.append(
-                f"- Crop production guide SSI option भी बताती है: लगभग {guide_signals['ssi_age']} की chip-bud seedlings को लगभग {guide_signals['ssi_spacing']} spacing पर drip fertigation के साथ transplant किया जा सकता है।"
-            )
-        if guide_signals.get("paired_spacing"):
-            lines.append(f"- Mechanized harvesting area के लिए guide paired-row planting लगभग {guide_signals['paired_spacing']} spacing पर सुझाती है।")
-        if guide_signals.get("subsurface_depth") and guide_signals.get("sett_above_lateral"):
-            lines.append(
-                f"- Subsurface drip system में laterals लगभग {guide_signals['subsurface_depth']} गहराई पर और setts लगभग {guide_signals['sett_above_lateral']} ऊपर रखने का जिक्र है।"
-            )
-        if guide_signals.get("drip_interval"):
-            lines.append(f"- Drip system में irrigation demand-based रखी गई है; guide में लगभग हर {guide_signals['drip_interval']} पर irrigation का जिक्र है।")
-        return "\n".join(lines).strip(), sources
-
-    if asks_trench:
-        trench_sources = [str(TRENCH_GUIDE_PDF)] if trench_passages else sources
-        for summary in trench_summaries[:3]:
+    for point in guide_points[:2]:
+        lines.append(f"- {point}")
+    if pdf_summaries:
+        lines.append("- Supplemental PDF से semantic retrieval पर मिले relevant points:")
+        for summary in pdf_summaries:
             lines.append(f"- {summary}")
-        return "\n".join(lines).strip(), trench_sources
-
-    if _question_mentions_trench_or_method(question):
-        if trench_summaries:
-            lines.append(f"- {trench_summaries[0]}")
-        if guide_signals.get("paired_spacing"):
-            lines.append(f"- Crop guide में paired-row planting लगभग {guide_signals['paired_spacing']} spacing पर बताई गई है।")
-        if guide_signals.get("ssi_age") and guide_signals.get("ssi_spacing"):
-            lines.append(
-                f"- Guide SSI transplanting का भी जिक्र करती है: लगभग {guide_signals['ssi_age']} की chip-bud seedlings को लगभग {guide_signals['ssi_spacing']} spacing पर लगाया जा सकता है।"
-            )
-        if len(trench_summaries) > 1:
-            lines.append(f"- {trench_summaries[1]}")
-        return "\n".join(lines).strip(), sources
-    return None, []
+    return "\n".join(lines).strip(), sources
 
 
 def build_crop_production_followup(question: str, crop_hint: str | None = None) -> tuple[str | None, list[str]]:
@@ -2118,7 +2000,7 @@ def build_crop_production_followup(question: str, crop_hint: str | None = None) 
     if not phase_points:
         return None, []
 
-    sugarcane_method_answer, sugarcane_method_sources = _build_sugarcane_planting_method_answer(question, entries, crop)
+    sugarcane_method_answer, sugarcane_method_sources = _build_sugarcane_planting_method_answer(question, entries, crop, section)
     if sugarcane_method_answer:
         return sugarcane_method_answer, sugarcane_method_sources or sources
 
@@ -2138,6 +2020,7 @@ def build_crop_production_followup(question: str, crop_hint: str | None = None) 
             "harvest": "harvest",
             "field_preparation": "before_sowing",
             "sowing": "sowing",
+            "planting_method": "sowing",
         }.get(section, "")
         if fallback_phase:
             matched_points = [p for p in (phase_points.get(fallback_phase) or []) if p]
