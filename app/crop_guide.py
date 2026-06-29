@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from app.config import load_config
 from app.embeddings import Embedder
+from app.generator import LocalGenerator
 from app.pdf_extract import read_pdf_pages, read_pdf_text
 
 
@@ -19,6 +21,7 @@ ALIAS_JSON = Path("data/raw/commodity_aliases.json")
 GUIDE_REVIEW_QUEUE = Path("data/processed/guide_review_queue.jsonl")
 PDF_OFFSET = 12  # printed page 1 starts at PDF page 13
 DEFAULT_GUIDE_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+DEFAULT_GUIDE_GENERATOR_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 
 MANUAL_PAGE_MAP = {
     "Rice": 1,
@@ -1652,9 +1655,32 @@ def _guide_embedding_model() -> str:
 
 
 @lru_cache(maxsize=1)
+def _guide_generator_model() -> str:
+    try:
+        cfg = load_config()
+        model_name = str(cfg.generator_model or "").strip()
+        if model_name:
+            return model_name
+    except Exception:
+        pass
+    return DEFAULT_GUIDE_GENERATOR_MODEL
+
+
+@lru_cache(maxsize=1)
 def _guide_embedder() -> Embedder | None:
     try:
         return Embedder(_guide_embedding_model())
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=1)
+def _guide_translation_generator() -> LocalGenerator | None:
+    enabled = os.getenv("KISAANAI_ENABLE_LLM_PDF_TRANSLATION", "").strip().lower() in {"1", "true", "yes"}
+    if not enabled:
+        return None
+    try:
+        return LocalGenerator(_guide_generator_model())
     except Exception:
         return None
 
@@ -1937,7 +1963,31 @@ def _summarize_pdf_passage(text: str, question: str, crop: str = "", section: st
             summary = ""
     if not summary:
         summary = _compress_sentences(cleaned, limit=sentence_limit) or cleaned
-    return _final_phrase_cleanup(summary)
+    return _final_phrase_cleanup(_translate_pdf_summary(summary))
+
+
+def _translate_pdf_summary(text: str) -> str:
+    source_text = str(text or "").strip()
+    generator = _guide_translation_generator()
+    if source_text and generator is not None:
+        try:
+            prompt = (
+                "Translate the following agricultural advisory text into simple Hindi for farmers.\n"
+                "Rules:\n"
+                "- Keep all numbers, percentages, units, and technical codes unchanged.\n"
+                "- Keep crop names and abbreviations like SSNM unchanged when needed.\n"
+                "- Use natural Hindi, not word-for-word English.\n"
+                "- Return only the translated Hindi text.\n\n"
+                f"Text: {source_text}\n\nHindi:"
+            )
+            translated = generator.generate(prompt).strip()
+            translated = re.sub(r"^\s*Hindi\s*:\s*", "", translated, flags=re.IGNORECASE).strip()
+            translated = _cleanup_bullet_text(translated)
+            if translated and not _is_english_heavy(translated, crop="Sugarcane"):
+                return _final_phrase_cleanup(translated)
+        except Exception:
+            pass
+    return _cleanup_bullet_text(source_text)
 
 
 def _is_valid_pdf_summary(summary: str) -> bool:
@@ -1974,11 +2024,11 @@ def _build_sugarcane_planting_method_answer(question: str, entries: list[dict[st
         sources.append(str(GUIDE_PDF))
     if pdf_summaries:
         sources.append(str(TRENCH_GUIDE_PDF))
-    lines = [f"{_crop_display_label(crop)} में planting method की जानकारी:", ""]
+    lines = [f"{_crop_display_label(crop)} में रोपाई/विधि की जानकारी:", ""]
     for point in guide_points[:2]:
         lines.append(f"- {point}")
     if pdf_summaries:
-        lines.append("- Supplemental PDF से semantic retrieval पर मिले relevant points:")
+        lines.append("- पूरक PDF से मिले मुख्य बिंदु:")
         for summary in pdf_summaries:
             lines.append(f"- {summary}")
     return "\n".join(lines).strip(), sources
