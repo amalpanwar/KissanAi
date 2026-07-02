@@ -403,6 +403,18 @@ class PesticideRequest:
     symptom_label: str | None = None
 
 
+@dataclass
+class ParsedAgriIntent:
+    subject: str = "unknown"
+    scope: str = "unknown"
+    objective: str = "unknown"
+    crop: str | None = None
+    season: str | None = None
+    confidence: float = 0.0
+    matched_label: str | None = None
+    matched_phrase: str | None = None
+
+
 class RAGAdvisor:
     def __init__(self, cfg: AdvisorConfig) -> None:
         self.cfg = cfg
@@ -420,6 +432,9 @@ class RAGAdvisor:
         self._symptom_index_signature: tuple[int, int] | None = None
         self._symptom_phrase_rows: list[dict[str, str]] = []
         self._symptom_phrase_embeddings: np.ndarray | None = None
+        self._intent_phrase_rows: list[dict[str, str]] = []
+        self._intent_phrase_embeddings: np.ndarray | None = None
+        self._intent_parse_cache: dict[str, ParsedAgriIntent] = {}
         self._feedback_symptom_candidate_signature: tuple[int, int] | None = None
         self.query_agent = QueryAgent(
             cfg.generator_model,
@@ -493,6 +508,71 @@ class RAGAdvisor:
             weather_result = self._answer_weather_request(weather_request, farmer_question, normalized_question)
             weather_result["topic"] = "weather"
             return weather_result
+        parsed_intent = ParsedAgriIntent()
+        if any(
+            (
+                self._extract_crop_from_query(normalized_question),
+                self._extract_query_season(normalized_question),
+                self._has_crop_method_terms(normalized_question),
+                self._has_profitability_terms(normalized_question),
+                self._has_crop_guide_terms(normalized_question),
+            )
+        ):
+            parsed_intent = self._parse_agri_intent(normalized_question, context_part)
+        if parsed_intent.subject == "crop_method":
+            guide_followup_answer, guide_followup_sources = build_crop_production_followup(
+                normalized_question,
+                crop_hint=parsed_intent.crop or self._extract_preferred_crop_from_context(context_part),
+            )
+            if guide_followup_answer:
+                return {
+                    "answer": guide_followup_answer,
+                    "references": guide_followup_sources,
+                    "retrieved": [],
+                    "topic": "crop_guide_followup",
+                }
+        if parsed_intent.subject == "crop_guide":
+            guide_answer, guide_sources = build_crop_production_guide(normalized_question)
+            if guide_answer:
+                return {
+                    "answer": guide_answer,
+                    "references": guide_sources,
+                    "retrieved": [],
+                    "topic": "crop_guide",
+                }
+        if parsed_intent.subject == "season_crop_list":
+            season_crop_answer, season_crop_sources = self._answer_season_crop_list_query(
+                context_part,
+                normalized_question,
+            )
+            if season_crop_answer:
+                return {
+                    "answer": season_crop_answer,
+                    "references": season_crop_sources,
+                    "retrieved": [],
+                    "topic": "crop_season_list",
+                }
+        if parsed_intent.subject == "crop_choice":
+            place = self._extract_location_from_question(farmer_question)
+            loc = lookup_place_in_text(farmer_question) or lookup_place_in_text(normalized_question)
+            if not loc and place:
+                loc = lookup_place(place)
+            if loc and not place:
+                place = loc.get("place")
+            district_override = loc.get("district") if loc else None
+            structured, sources = self._structured_crop_recommendation(
+                context_part,
+                normalized_question,
+                district_override=district_override,
+            )
+            if structured:
+                refs = list(sources)
+                return {
+                    "answer": structured,
+                    "references": refs,
+                    "retrieved": [],
+                    "topic": "crop_profitability",
+                }
         profitability_followup = (
             self._is_profitability_followup_intent(normalized_question)
             or self._is_profitability_followup_intent(farmer_question)
@@ -4917,86 +4997,85 @@ class RAGAdvisor:
             return f"{int(round(area_acres))} acre"
         return f"{area_acres:.1f} acre"
 
-    def _is_crop_choice_intent(self, text: str) -> bool:
-        t = text.strip().lower()
-        keys = [
-            "what crop should i grow",
-            "कौन सी फसल",
-            "फसल बेहतर",
-            "कौन सी crop",
-            "लाभदायक फसल",
-            "फसल लाभदायक",
-            "लाभ वाली",
-            "लाभदायक",
-            "फायदे की फसल",
-            "फसल फ़ायदेमंद",
-            "best crop",
-            "which crop",
-            "crop to grow",
-            "फसल उगानी",
+    def _extract_query_season(self, text: str) -> str | None:
+        t = (text or "").strip().lower()
+        if not t:
+            return None
+        season_aliases = {
+            "Rabi": ["rabi", "रबी"],
+            "Kharif": ["kharif", "खरीफ"],
+            "Zaid": ["zaid", "जायद"],
+            "Annual": ["annual", "वार्षिक", "सालाना"],
+        }
+        for season, aliases in season_aliases.items():
+            if any(alias in t for alias in aliases):
+                return season
+        return None
+
+    def _has_profitability_terms(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        profit_terms = [
+            "profit",
             "profitable",
-            "laabhdayak",
-            "labhdayak",
             "laabh",
             "labh",
-            "faayde ki",
-            "fayde ki",
-            "faaydemand",
-            "fayemand",
-            "badhiya fasal",
-            "acchi fasal",
-            "achhi fasal",
-            "best fasal",
-            "profit",
+            "laabhdayak",
+            "labhdayak",
+            "लाभ",
+            "फायदे",
+            "munafa",
+            "मुनाफा",
+            "better return",
+            "best return",
+            "कमाई",
+            "income",
+            "earnings",
+            "बेहतर",
+            "behtar",
+            "jyada",
+            "zyada",
         ]
-        return any(k in t for k in keys)
+        return any(term in t for term in profit_terms)
 
-    def _is_season_crop_list_intent(self, text: str) -> bool:
+    def _has_crop_method_terms(self, text: str) -> bool:
         t = text.strip().lower()
-        season_markers = ["rabi", "kharif", "zaid", "annual", "रबी", "खरीफ", "जायद", "वार्षिक", "सालाना"]
-        crop_list_markers = [
-            "fasal",
-            "फसल",
-            "crop",
+        method_markers = [
+            "vidhi",
+            "विधि",
+            "method",
+            "planting method",
+            "रोपाई",
+            "रोपण",
+            "ugane ki",
+            "ugane ki konsi",
+            "ugane ki kaun si",
+            "kheti ki vidhi",
+            "kaunsi vidhi",
+            "konsi vidhi",
+            "kaun si vidhi",
+            "trench",
+            "ssi",
+            "furrow",
+        ]
+        cultivation_markers = [
+            "ugane",
             "ugaye",
-            "उगाएं",
-            "बताये",
-            "बताएं",
-            "btaye",
-            "batao",
-            "list",
-            "kaun si",
-            "कौन सी",
+            "ugaane",
+            "grow",
+            "cultivate",
+            "kheti",
+            "खेती",
         ]
-        if not any(marker in t for marker in season_markers):
-            return False
-        # Let comparative or profit-oriented season queries flow into the crop-choice
-        # ranking path instead of the plain season crop list.
-        if self._is_crop_choice_intent(t):
-            return False
-        if any(
-            marker in t
-            for marker in [
-                "profit",
-                "profitable",
-                "laabh",
-                "labh",
-                "laabhdayak",
-                "labhdayak",
-                "लाभ",
-                "फायदे",
-                "budget",
-                "cost",
-                "comparison",
-                "compare",
-                "बेहतर",
-            ]
-        ):
-            return False
-        return any(marker in t for marker in crop_list_markers)
+        return any(marker in t for marker in method_markers) or (
+            any(marker in t for marker in cultivation_markers) and any(marker in t for marker in ("vidhi", "method", "रोपाई", "रोपण"))
+        )
 
-    def _is_crop_guide_intent(self, text: str) -> bool:
+    def _has_crop_guide_terms(self, text: str) -> bool:
         t = text.strip().lower()
+        if not t:
+            return False
         keys = [
             "how to grow",
             "how to cultivate",
@@ -5028,13 +5107,6 @@ class RAGAdvisor:
             "कैसे उगाएं",
             "कैसे उगाये",
         ]
-        crop_markers: list[str] = []
-        for crop_name, aliases in CROP_ALIASES.items():
-            crop_markers.append(str(crop_name).lower())
-            for alias in aliases:
-                marker = str(alias).strip().lower()
-                if marker and marker not in crop_markers:
-                    crop_markers.append(marker)
         guide_context_words = [
             "खेती",
             "kheti",
@@ -5047,7 +5119,312 @@ class RAGAdvisor:
             "karein",
             "करें",
         ]
-        return (any(k in t for k in keys) or any(w in t for w in guide_context_words)) and any(c in t for c in crop_markers)
+        return any(k in t for k in keys) or any(w in t for w in guide_context_words)
+
+    def _has_crop_list_terms(self, text: str) -> bool:
+        t = text.strip().lower()
+        crop_list_markers = [
+            "fasal",
+            "फसल",
+            "crop",
+            "ugaye",
+            "उगाएं",
+            "बताये",
+            "बताएं",
+            "btaye",
+            "batao",
+            "list",
+            "kaun si",
+            "कौन सी",
+        ]
+        return any(marker in t for marker in crop_list_markers)
+
+    def _looks_like_crop_method_lexically(self, text: str, context_part: str = "") -> bool:
+        t = text.strip().lower()
+        if not t:
+            return False
+        crop = self._extract_crop_from_query(t) or self._extract_preferred_crop_from_context(context_part)
+        return bool(crop and self._has_crop_method_terms(t))
+
+    def _looks_like_crop_choice_lexically(self, text: str) -> bool:
+        t = text.strip().lower()
+        if not t:
+            return False
+        if self._looks_like_crop_method_lexically(t):
+            return False
+        keys = [
+            "what crop should i grow",
+            "कौन सी फसल",
+            "फसल बेहतर",
+            "कौन सी crop",
+            "लाभदायक फसल",
+            "फसल लाभदायक",
+            "लाभ वाली",
+            "लाभदायक",
+            "फायदे की फसल",
+            "फसल फ़ायदेमंद",
+            "best crop",
+            "which crop",
+            "crop to grow",
+            "फसल उगानी",
+            "faayde ki",
+            "fayde ki",
+            "faaydemand",
+            "fayemand",
+            "badhiya fasal",
+            "acchi fasal",
+            "achhi fasal",
+            "best fasal",
+        ]
+        return any(k in t for k in keys) or (self._has_profitability_terms(t) and self._has_crop_list_terms(t))
+
+    def _looks_like_season_crop_list_lexically(self, text: str) -> bool:
+        t = text.strip().lower()
+        if not t:
+            return False
+        if not self._extract_query_season(t):
+            return False
+        if self._looks_like_crop_choice_lexically(t):
+            return False
+        if self._has_profitability_terms(t) or any(
+            marker in t for marker in ["budget", "cost", "comparison", "compare"]
+        ):
+            return False
+        return self._has_crop_list_terms(t)
+
+    def _looks_like_crop_guide_lexically(self, text: str) -> bool:
+        t = text.strip().lower()
+        if not t:
+            return False
+        crop_markers: list[str] = []
+        for crop_name, aliases in CROP_ALIASES.items():
+            crop_markers.append(str(crop_name).lower())
+            for alias in aliases:
+                marker = str(alias).strip().lower()
+                if marker and marker not in crop_markers:
+                    crop_markers.append(marker)
+        return self._has_crop_guide_terms(t) and any(c in t for c in crop_markers)
+
+    def _ensure_agri_intent_semantic_index(self) -> None:
+        if self._intent_phrase_embeddings is not None:
+            return
+        self._ensure_rag_components(load_generator=False)
+        if self.embedder is None:
+            self._intent_phrase_rows = []
+            self._intent_phrase_embeddings = None
+            return
+        rows = [
+            {
+                "label": "crop_choice_profitability",
+                "subject": "crop_choice",
+                "scope": "across_crops",
+                "objective": "profitability",
+                "phrase": phrase,
+            }
+            for phrase in [
+                "कौन सी फसल सबसे ज्यादा लाभदायक है",
+                "which crop is most profitable",
+                "best crop for profit",
+                "rabi ki konsi fasal jyada laabhdayak hai",
+                "kharif me profitable crop",
+            ]
+        ]
+        rows.extend(
+            {
+                "label": "season_crop_list",
+                "subject": "season_crop_list",
+                "scope": "season",
+                "objective": "list",
+                "phrase": phrase,
+            }
+            for phrase in [
+                "kharif ki fasal btaye",
+                "रबी मौसम की फसलें बताएं",
+                "zaid season crops list",
+                "खरीफ की फसल बताओ",
+            ]
+        )
+        rows.extend(
+            {
+                "label": "crop_method_cultivation",
+                "subject": "crop_method",
+                "scope": "within_crop",
+                "objective": "cultivation",
+                "phrase": phrase,
+            }
+            for phrase in [
+                "गन्ने की कौन सी विधि बेहतर है",
+                "which planting method is best in sugarcane",
+                "गेहूं उगाने की विधि",
+                "crop planting method within same crop",
+            ]
+        )
+        rows.extend(
+            {
+                "label": "crop_method_profitability",
+                "subject": "crop_method",
+                "scope": "within_crop",
+                "objective": "profitability",
+                "phrase": phrase,
+            }
+            for phrase in [
+                "गन्ने में कौन सी विधि ज्यादा लाभदायक है",
+                "which sugarcane method gives higher profit",
+                "planting method with better yield in same crop",
+                "ganne ugane ki konsi vidhi jyada profitable hai",
+            ]
+        )
+        rows.extend(
+            {
+                "label": "crop_guide",
+                "subject": "crop_guide",
+                "scope": "within_crop",
+                "objective": "cultivation",
+                "phrase": phrase,
+            }
+            for phrase in [
+                "गेहूं की खेती कैसे करें",
+                "how to grow moong",
+                "गन्ना की खेती guide",
+                "crop production guide for wheat",
+            ]
+        )
+        phrase_texts = [row["phrase"] for row in rows]
+        self._intent_phrase_rows = rows
+        self._intent_phrase_embeddings = np.asarray(self.embedder.encode(phrase_texts), dtype=np.float32)
+
+    def _parse_agri_intent(self, text: str, context_part: str = "") -> ParsedAgriIntent:
+        normalized = self._normalize_hinglish(text or "").strip()
+        context_norm = (context_part or "").strip().lower()
+        cache_key = f"{normalized}||{context_norm}"
+        cached = self._intent_parse_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        crop = (
+            self._extract_crop_from_query(text or "")
+            or self._extract_crop_from_query(normalized)
+            or self._extract_preferred_crop_from_context(context_part)
+        )
+        season = self._extract_query_season(text or "") or self._extract_query_season(normalized) or self._extract_season(context_part)
+        has_crop = bool(crop)
+        has_season = bool(self._extract_query_season(text or "") or self._extract_query_season(normalized))
+        has_profit = self._has_profitability_terms(text) or self._has_profitability_terms(normalized)
+        has_method = self._has_crop_method_terms(text) or self._has_crop_method_terms(normalized)
+        has_guide = self._has_crop_guide_terms(text) or self._has_crop_guide_terms(normalized)
+        has_list = self._has_crop_list_terms(text) or self._has_crop_list_terms(normalized)
+
+        parsed = ParsedAgriIntent(crop=crop, season=season)
+        if has_crop and has_method:
+            parsed.subject = "crop_method"
+            parsed.scope = "within_crop"
+            parsed.objective = "profitability" if has_profit else "cultivation"
+            parsed.confidence = 0.76
+        elif has_season and has_list and not has_profit:
+            parsed.subject = "season_crop_list"
+            parsed.scope = "season"
+            parsed.objective = "list"
+            parsed.confidence = 0.74
+        elif has_profit and (not has_crop or not has_method or has_season):
+            parsed.subject = "crop_choice"
+            parsed.scope = "across_crops"
+            parsed.objective = "profitability"
+            parsed.confidence = 0.72
+        elif has_crop and has_guide:
+            parsed.subject = "crop_guide"
+            parsed.scope = "within_crop"
+            parsed.objective = "cultivation"
+            parsed.confidence = 0.68
+
+        self._ensure_agri_intent_semantic_index()
+        if self.embedder is not None and self._intent_phrase_embeddings is not None and self._intent_phrase_rows:
+            try:
+                query_vec = np.asarray(self.embedder.encode([normalized or (text or "").strip()])[0], dtype=np.float32)
+                scores = self._intent_phrase_embeddings @ query_vec
+                adjusted_scores: list[float] = []
+                for idx, row in enumerate(self._intent_phrase_rows):
+                    score = float(scores[idx])
+                    subject = row["subject"]
+                    objective = row["objective"]
+                    if subject == "crop_method":
+                        if has_crop:
+                            score += 0.05
+                        if has_method:
+                            score += 0.08
+                        if has_profit and objective == "profitability":
+                            score += 0.06
+                        if not has_crop:
+                            score -= 0.10
+                    elif subject == "crop_choice":
+                        if has_profit:
+                            score += 0.08
+                        if has_method:
+                            score -= 0.14
+                        if has_season:
+                            score += 0.04
+                    elif subject == "season_crop_list":
+                        if has_season:
+                            score += 0.10
+                        if has_list:
+                            score += 0.05
+                        if has_profit:
+                            score -= 0.14
+                    elif subject == "crop_guide":
+                        if has_crop:
+                            score += 0.05
+                        if has_guide:
+                            score += 0.08
+                        if has_profit:
+                            score -= 0.04
+                    adjusted_scores.append(score)
+                best_idx = int(np.argmax(adjusted_scores))
+                best_score = float(adjusted_scores[best_idx])
+                best = self._intent_phrase_rows[best_idx]
+                semantic = ParsedAgriIntent(
+                    subject=best["subject"],
+                    scope=best["scope"],
+                    objective=best["objective"],
+                    crop=crop,
+                    season=season,
+                    confidence=best_score,
+                    matched_label=best["label"],
+                    matched_phrase=best["phrase"],
+                )
+                if best_score >= 0.48 and best_score >= (parsed.confidence - 0.02):
+                    if not (
+                        parsed.subject == "crop_method"
+                        and semantic.subject == "crop_choice"
+                        and has_method
+                    ):
+                        if not (semantic.subject == "season_crop_list" and not has_season):
+                            parsed = semantic
+            except Exception:
+                pass
+
+        if len(self._intent_parse_cache) >= 128:
+            oldest_key = next(iter(self._intent_parse_cache), None)
+            if oldest_key is not None:
+                self._intent_parse_cache.pop(oldest_key, None)
+        self._intent_parse_cache[cache_key] = parsed
+        return parsed
+
+    def _is_crop_method_intent(self, text: str) -> bool:
+        parsed = self._parse_agri_intent(text)
+        return parsed.subject == "crop_method" or self._looks_like_crop_method_lexically(text)
+
+    def _is_crop_choice_intent(self, text: str) -> bool:
+        parsed = self._parse_agri_intent(text)
+        if parsed.subject == "crop_method":
+            return False
+        return parsed.subject == "crop_choice" or self._looks_like_crop_choice_lexically(text)
+
+    def _is_season_crop_list_intent(self, text: str) -> bool:
+        parsed = self._parse_agri_intent(text)
+        return parsed.subject == "season_crop_list" or self._looks_like_season_crop_list_lexically(text)
+
+    def _is_crop_guide_intent(self, text: str) -> bool:
+        parsed = self._parse_agri_intent(text)
+        return parsed.subject == "crop_guide" or self._looks_like_crop_guide_lexically(text)
 
     def _structured_crop_recommendation(
         self,
@@ -5059,7 +5436,7 @@ class RAGAdvisor:
             return None, []
 
         district = district_override or self._extract_district(context_part) or "Meerut"
-        season = self._extract_season(context_part)
+        season = self._extract_season(context_part) or self._extract_query_season(question)
         budget = self._extract_budget(question)
         area_acres = self._extract_area_acres(question)
         area_scale = area_acres or 1.0
