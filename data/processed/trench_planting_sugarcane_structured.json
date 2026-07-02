@@ -1,0 +1,28 @@
+{
+  "crop": "Sugarcane",
+  "topic": "planting_method",
+  "source_file": "data/raw/Trench_Planting_Sugarcane.pdf",
+  "source_type": "reviewed_structured_extraction",
+  "method_name": "Trench method with SSNM",
+  "recommendation_hi": "पूरक अध्ययन के आधार पर trench method सामान्य furrow method की तुलना में बेहतर दिखती है, खासकर उपज, अंकुरण और पानी प्रबंधन के लिए। हालांकि इसमें शुरुआती निवेश और पोषक प्रबंधन अधिक लग सकता है।",
+  "evidence_hi": [
+    "128 किसान प्रदर्शनों में trench method के साथ स्थान-विशिष्ट पोषक प्रबंधन (SSNM) का उपयोग किया गया।",
+    "अंकुरण लगभग 38% से बढ़कर 64% दर्ज हुई।",
+    "औसत प्रदर्शन उपज लगभग 1039 q/ha दर्ज हुई।",
+    "तुलनात्मक परीक्षण में सिंचाई खर्च लगभग 2750 से घटकर 2200 रुपये/हेक्टेयर दर्ज हुआ।",
+    "अंतरफसल (intercropping) की संभावना सामान्य method की तुलना में बेहतर बताई गई।"
+  ],
+  "implementation_hi": [
+    "trench लगभग 30 सेमी चौड़ी और 30 सेमी गहरी रखें।",
+    "trench से trench दूरी लगभग 90 सेमी रखें।",
+    "दो-budded setts को trench में end-to-end या stair-type manner में रखें।",
+    "दो setts के बीच लगभग 10 सेमी दूरी रखें।",
+    "setts रखने के बाद उन्हें लगभग 8-10 सेमी मिट्टी से ढकें।"
+  ],
+  "tradeoffs_hi": [
+    "इस विधि में seed rate और fertilizer input बढ़ सकते हैं।",
+    "कुल शुरुआती लागत लगभग 13000 से बढ़कर 18000 रुपये/हेक्टेयर तक जा सकती है।",
+    "बेहतर परिणाम के लिए पोषक प्रबंधन और खेत में सही क्रियान्वयन जरूरी है।"
+  ],
+  "source_context_hi": "यह evidence farmer demonstrations पर आधारित है; स्थानीय मिट्टी, variety, पानी की उपलब्धता और प्रबंधन के अनुसार परिणाम बदल सकते हैं।"
+}

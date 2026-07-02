@@ -17,6 +17,7 @@ from app.pdf_extract import read_pdf_pages, read_pdf_text
 
 GUIDE_PDF = Path("data/raw/Crop Production guide.pdf")
 TRENCH_GUIDE_PDF = Path("data/raw/Trench_Planting_Sugarcane.pdf")
+TRENCH_GUIDE_STRUCTURED_JSON = Path("data/processed/trench_planting_sugarcane_structured.json")
 ALIAS_JSON = Path("data/raw/commodity_aliases.json")
 GUIDE_REVIEW_QUEUE = Path("data/processed/guide_review_queue.jsonl")
 PDF_OFFSET = 12  # printed page 1 starts at PDF page 13
@@ -1742,7 +1743,39 @@ def _generic_pdf_section_name(line: str) -> str | None:
         "conclusion": "conclusion",
         "references": "references",
     }
-    return mapping.get(lower)
+    for key, value in mapping.items():
+        if lower == key or lower.startswith(f"{key}:"):
+            return value
+        if re.search(rf"\b{re.escape(key)}\b", lower):
+            return value
+    return None
+
+
+def _strip_inline_section_heading(line: str) -> tuple[str, str | None]:
+    raw = str(line or "").strip()
+    if not raw:
+        return "", None
+    lower = raw.lower()
+    mapping = [
+        ("results and discussion", "results"),
+        ("materials and methods", "methods"),
+        ("materials & methods", "methods"),
+        ("methodology", "methods"),
+        ("introduction", "introduction"),
+        ("abstract", "abstract"),
+        ("discussion", "results"),
+        ("conclusion", "conclusion"),
+        ("references", "references"),
+        ("results", "results"),
+    ]
+    for marker, section in mapping:
+        match = re.search(rf"\b{re.escape(marker)}\b[:\-]?\s*", lower)
+        if not match:
+            continue
+        cleaned = (raw[: match.start()] + " " + raw[match.end() :]).strip(" :-")
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned, section
+    return raw, None
 
 
 def _looks_like_publication_metadata(line: str) -> bool:
@@ -1752,6 +1785,10 @@ def _looks_like_publication_metadata(line: str) -> bool:
     if re.search(r"\bvol\.?\b", lower) and re.search(r"\bno\.?\b", lower):
         return True
     if "journal" in lower and len(lower) < 140:
+        return True
+    if re.search(r"\b(key words?|keywords?|associate director|deputy cane commissioner|deputy general manager|krishi vigyan kendra|kvk)\b", lower):
+        return True
+    if re.search(r"\b(univ\.|university|department|factory)\b", lower) and len(lower) < 140:
         return True
     if re.fullmatch(r"[A-Z0-9 .,&()/:-]{8,}", str(line or "")) and len(str(line or "")) < 110:
         return True
@@ -1784,10 +1821,17 @@ def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
         line = " ".join(str(raw_line or "").split())
         if not line:
             continue
-        section_name = _generic_pdf_section_name(line)
+        line, inline_section = _strip_inline_section_heading(line)
+        if not line:
+            if inline_section:
+                current_section = inline_section
+            continue
+        section_name = inline_section or _generic_pdf_section_name(line)
         if section_name:
             current_section = section_name
-            continue
+            line, _ = _strip_inline_section_heading(line)
+            if not line:
+                continue
         if re.fullmatch(r"[_\-. ]{4,}", line):
             continue
         if re.fullmatch(r"[0-9 ]{1,8}", line) or len(line) < 3:
@@ -1881,6 +1925,8 @@ def _retrieve_pdf_passages(pdf_path: Path, question: str, crop: str = "", sectio
             scored: list[tuple[float, int]] = []
             for idx in range(len(chunks)):
                 score = max(float(vectors[idx] @ qvec) for qvec in query_vecs)
+                score += _passage_section_bonus(str(chunks[idx].get("section", "")))
+                score += _passage_focus_bonus(str(chunks[idx].get("text", "")), section)
                 scored.append((score, idx))
             scored.sort(reverse=True)
             top_n = min(max(k * 2, k), len(chunks))
@@ -1912,7 +1958,9 @@ def _fragment_is_document_noise(fragment: str) -> bool:
     lower = frag.lower()
     if len(frag) < 20:
         return True
-    if re.search(r"\b(received|acceptance|accepted|published|copyright|issn|doi|references)\b", lower):
+    if re.search(r"\b(received|acceptance|accepted|published|copyright|issn|doi|references|key words?|keywords?|abstract|agropedia)\b", lower):
+        return True
+    if re.search(r"\b(associate director|journal|university|kvk|department|factory)\b", lower):
         return True
     if re.search(r"\bet al\b", lower):
         return True
@@ -1929,6 +1977,67 @@ def _fragment_is_document_noise(fragment: str) -> bool:
     if re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z](?:\.[A-Z])?\.?){1,3}", frag):
         return True
     return False
+
+
+def _section_focus_terms(section: str) -> set[str]:
+    key = str(section or "").strip().lower()
+    mapping = {
+        "planting method": {
+            "trench", "furrow", "germination", "yield", "productivity", "irrigation",
+            "water", "sett", "setts", "trenches", "spacing", "comparison", "beneficial",
+            "input", "cost", "inter-cropping", "intercropping",
+        },
+    }
+    return mapping.get(key, set())
+
+
+def _passage_section_bonus(section_name: str) -> float:
+    bonuses = {
+        "results": 0.18,
+        "conclusion": 0.14,
+        "methods": 0.08,
+        "body": 0.04,
+        "abstract": -0.04,
+        "introduction": -0.06,
+        "references": -0.25,
+    }
+    return bonuses.get(str(section_name or "").strip().lower(), 0.0)
+
+
+def _passage_focus_bonus(text: str, section: str) -> float:
+    lower = str(text or "").lower()
+    focus_terms = _section_focus_terms(section)
+    if not focus_terms:
+        return 0.0
+    hits = sum(1 for term in focus_terms if term in lower)
+    noise_hits = sum(
+        1
+        for term in ("journal", "references", "key words", "keywords", "associate director", "agropedia")
+        if term in lower
+    )
+    return min(0.16, hits * 0.03) - min(0.18, noise_hits * 0.09)
+
+
+def _is_method_comparison_query(question: str) -> bool:
+    q = str(question or "").lower()
+    return any(
+        token in q
+        for token in [
+            "best", "better", "behtar", "बेहतर", "ज्यादा उपज", "अधिक उपज",
+            "jyada upaj", "high yield", "higher yield", "profitable", "लाभदायक",
+        ]
+    )
+
+
+@lru_cache(maxsize=1)
+def _load_trench_method_structured_data() -> dict[str, Any]:
+    if not TRENCH_GUIDE_STRUCTURED_JSON.exists():
+        return {}
+    try:
+        payload = json.loads(TRENCH_GUIDE_STRUCTURED_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _summarize_pdf_passage(text: str, question: str, crop: str = "", section: str = "", sentence_limit: int = 2) -> str:
@@ -1955,6 +2064,7 @@ def _summarize_pdf_passage(text: str, question: str, crop: str = "", section: st
                 if _fragment_is_document_noise(fragment):
                     continue
                 score = float(fragment_vecs[idx] @ query_vec)
+                score += _passage_focus_bonus(fragment, section)
                 scored_fragments.append((score, idx))
             selected = sorted(scored_fragments, reverse=True)[: max(1, sentence_limit)]
             if selected:
@@ -1995,6 +2105,182 @@ def _is_valid_pdf_summary(summary: str) -> bool:
     return len(text) >= 35 and not _fragment_is_document_noise(text)
 
 
+def _extract_method_evidence_summaries(question: str, crop: str, section: str, k: int = 6) -> list[str]:
+    evidence: list[str] = []
+    for passage in _retrieve_pdf_passages(TRENCH_GUIDE_PDF, question, crop=crop, section=section, k=k):
+        summary = _summarize_pdf_passage(
+            str(passage.get("text", "")),
+            question,
+            crop=crop,
+            section=section,
+            sentence_limit=2,
+        )
+        if not _is_valid_pdf_summary(summary):
+            continue
+        if _fragment_is_document_noise(summary):
+            continue
+        cleaned = _final_phrase_cleanup(summary)
+        if any(cleaned == existing or cleaned in existing or existing in cleaned for existing in evidence):
+            continue
+        evidence.append(cleaned)
+        if len(evidence) >= 3:
+            break
+    return evidence
+
+
+def _build_method_comparison_intro(question: str, evidence_points: list[str]) -> str | None:
+    if not _is_method_comparison_query(question) or not evidence_points:
+        return None
+    blob = " ".join(evidence_points).lower()
+    benefits: list[str] = []
+    if any(term in blob for term in ("yield", "productivity", "उपज")):
+        benefits.append("उपज बढ़ाने")
+    if "germination" in blob:
+        benefits.append("अंकुरण/स्थापना सुधारने")
+    if any(term in blob for term in ("irrigation", "water", "पानी")):
+        benefits.append("पानी बचाने")
+    tradeoff = any(term in blob for term in ("input", "cost", "expensive", "fertilizer"))
+    if benefits:
+        intro = f"पूरक अध्ययन के आधार पर trench method {', '.join(benefits)} के लिए बेहतर दिखती है।"
+    else:
+        intro = "पूरक अध्ययन के आधार पर trench method सामान्य furrow method की तुलना में बेहतर दिखती है।"
+    if tradeoff:
+        intro += " हालांकि इसमें शुरुआती input/पोषक प्रबंधन अधिक लग सकता है।"
+    return intro
+
+
+def _extract_trench_method_bullets(pdf_path: Path) -> list[str]:
+    text = _supplemental_pdf_text(str(pdf_path))
+    if not text:
+        return []
+    compact = re.sub(r"\s+", " ", text)
+    bullets: list[str] = []
+
+    dims = re.search(
+        r"Trenches were made.*?(\d+)\s*cm wide and (\d+)\s*cm depth.*?(?:a)?distance\s*(\d+)\s*cm between two trenches",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if dims:
+        bullets.append(
+            f"trench लगभग {dims.group(1)} सेमी चौड़ी, {dims.group(2)} सेमी गहरी और trench से trench दूरी लगभग {dims.group(3)} सेमी रखें।"
+        )
+
+    setts = re.search(
+        r"(\d+)\s*cm distance between two sets.*?covered these sets with\s*(\d+\s*-\s*\d+)\s*cm soil",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if setts:
+        bullets.append(
+            f"setts को trench में end-to-end रखें, दो setts के बीच लगभग {setts.group(1)} सेमी दूरी रखें और ऊपर {setts.group(2).replace(' ', '')} सेमी मिट्टी से ढकें।"
+        )
+
+    germination = re.search(
+        r"germination from\s*(\d+)\s*to\s*(\d+)\s*percent",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if germination:
+        bullets.append(
+            f"प्रदर्शन डेटा में अंकुरण लगभग {germination.group(1)}% से बढ़कर {germination.group(2)}% दर्ज हुई।"
+        )
+
+    avg_yield = re.search(
+        r"Average yield q/ha\s*(\d+)|average yield q/ha\D+(\d+)|average total productivity.*?recorded\s*(\d+)\s*q/ha",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if avg_yield:
+        value = next((group for group in avg_yield.groups() if group), "")
+        if value:
+            bullets.append(f"औसत प्रदर्शन उपज लगभग {value} q/ha दर्ज हुई।")
+
+    water = re.search(
+        r"save\s*(\d+)\s*% percent of irrigation water|Expenses on irrigation\s*(\d+)\s*(\d+)\s*Reduced",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if water:
+        if water.group(1):
+            bullets.append(f"इस विधि में सिंचाई पानी की बचत लगभग {water.group(1)}% तक बताई गई है।")
+        elif water.group(2) and water.group(3):
+            bullets.append(
+                f"तुलनात्मक परीक्षण में सिंचाई खर्च लगभग {water.group(2)} से घटकर {water.group(3)} रुपये/हेक्टेयर दर्ज हुआ।"
+            )
+
+    input_cost = re.search(
+        r"Input\s*Rs\./ha\s*(\d+)\s*(\d+)\s*Increased|increased seed rate and fertilizer cost and doses",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if input_cost:
+        if input_cost.group(1) and input_cost.group(2):
+            bullets.append(
+                f"इस विधि में कुल input cost लगभग {input_cost.group(1)} से बढ़कर {input_cost.group(2)} रुपये/हेक्टेयर तक जा सकती है।"
+            )
+        else:
+            bullets.append("इस विधि में seed rate और fertilizer input बढ़ सकते हैं, इसलिए शुरुआती लागत कुछ अधिक हो सकती है।")
+
+    intercropping = re.search(
+        r"Possibility of inter-cropping\s*Less\s*More\s*Increased",
+        compact,
+        flags=re.IGNORECASE,
+    )
+    if intercropping:
+        bullets.append("इसमें अंतरफसल (intercropping) की संभावना सामान्य method की तुलना में बेहतर मिलती है।")
+
+    cleaned: list[str] = []
+    for bullet in bullets:
+        line = _final_phrase_cleanup(_cleanup_bullet_text(bullet))
+        if line and line not in cleaned:
+            cleaned.append(line)
+    return cleaned[:5]
+
+
+def _structured_trench_method_answer(question: str, crop: str, guide_points: list[str]) -> tuple[str | None, list[str]]:
+    data = _load_trench_method_structured_data()
+    if not data:
+        return None, []
+
+    recommendation = str(data.get("recommendation_hi") or "").strip()
+    evidence_hi = [str(item).strip() for item in (data.get("evidence_hi") or []) if str(item).strip()]
+    implementation_hi = [str(item).strip() for item in (data.get("implementation_hi") or []) if str(item).strip()]
+    tradeoffs_hi = [str(item).strip() for item in (data.get("tradeoffs_hi") or []) if str(item).strip()]
+    source_note = str(data.get("source_context_hi") or "").strip()
+    source_file = str(data.get("source_file") or TRENCH_GUIDE_PDF).strip()
+
+    if not any((recommendation, evidence_hi, implementation_hi, tradeoffs_hi)):
+        return None, []
+
+    is_comparison = _is_method_comparison_query(question)
+    header = "बेहतर रोपाई/विधि" if is_comparison else "रोपाई/विधि की जानकारी"
+    lines = [f"{_crop_display_label(crop)} में {header}:", ""]
+    if recommendation:
+        lines.append(f"- निष्कर्ष: {recommendation}")
+    if evidence_hi:
+        lines.append("- प्रमाण/लाभ:")
+        for item in evidence_hi[:5]:
+            lines.append(f"- {item}")
+    if implementation_hi:
+        lines.append("- अपनाने के मुख्य बिंदु:")
+        for item in implementation_hi[:5]:
+            lines.append(f"- {item}")
+    if tradeoffs_hi:
+        lines.append("- ध्यान देने वाली बातें:")
+        for item in tradeoffs_hi[:4]:
+            lines.append(f"- {item}")
+    sources = [source_file]
+    if guide_points and not is_comparison:
+        lines.append("- मुख्य guide के अनुसार:")
+        for point in guide_points[:2]:
+            lines.append(f"- {point}")
+        sources = [source_file, str(GUIDE_PDF)]
+    if source_note:
+        lines.append(f"- नोट: {source_note}")
+    return "\n".join(lines).strip(), sources
+
+
 def _build_sugarcane_planting_method_answer(question: str, entries: list[dict[str, str]], crop: str, section: str) -> tuple[str | None, list[str]]:
     if crop.lower() != "sugarcane" or section != "planting_method":
         return None, []
@@ -2005,30 +2291,37 @@ def _build_sugarcane_planting_method_answer(question: str, entries: list[dict[st
             if point and point not in guide_points:
                 guide_points.append(point)
 
-    pdf_summaries: list[str] = []
-    for passage in _retrieve_pdf_passages(TRENCH_GUIDE_PDF, question, crop=crop, section="planting method", k=4):
-        summary = _summarize_pdf_passage(str(passage.get("text", "")), question, crop=crop, section="planting method", sentence_limit=2)
-        if not _is_valid_pdf_summary(summary):
-            continue
-        if any(summary == existing or summary in existing or existing in summary for existing in pdf_summaries):
-            continue
-        pdf_summaries.append(summary)
-        if len(pdf_summaries) >= 2:
-            break
+    structured_answer, structured_sources = _structured_trench_method_answer(question, crop, guide_points)
+    if structured_answer:
+        return structured_answer, structured_sources
 
-    if not guide_points and not pdf_summaries:
+    pdf_summaries = _extract_method_evidence_summaries(question, crop, "planting method", k=6)
+    trench_bullets = _extract_trench_method_bullets(TRENCH_GUIDE_PDF)
+
+    if not guide_points and not pdf_summaries and not trench_bullets:
         return None, []
 
     sources: list[str] = []
     if guide_points:
         sources.append(str(GUIDE_PDF))
-    if pdf_summaries:
+    if pdf_summaries or trench_bullets:
         sources.append(str(TRENCH_GUIDE_PDF))
-    lines = [f"{_crop_display_label(crop)} में रोपाई/विधि की जानकारी:", ""]
-    for point in guide_points[:2]:
-        lines.append(f"- {point}")
-    if pdf_summaries:
-        lines.append("- पूरक PDF से मिले मुख्य बिंदु:")
+    header = "बेहतर रोपाई/विधि" if _is_method_comparison_query(question) else "रोपाई/विधि की जानकारी"
+    lines = [f"{_crop_display_label(crop)} में {header}:", ""]
+    comparison_intro = _build_method_comparison_intro(question, trench_bullets or pdf_summaries)
+    if comparison_intro:
+        lines.append(f"- {comparison_intro}")
+    show_guide_points = bool(guide_points[:2]) and not (_is_method_comparison_query(question) and trench_bullets)
+    if show_guide_points:
+        lines.append("- मुख्य guide के अनुसार:")
+        for point in guide_points[:2]:
+            lines.append(f"- {point}")
+    if trench_bullets:
+        lines.append("- trench method से जुड़े उपयोगी बिंदु:")
+        for bullet in trench_bullets:
+            lines.append(f"- {bullet}")
+    elif pdf_summaries:
+        lines.append("- पूरक अध्ययन से मिले मुख्य बिंदु:")
         for summary in pdf_summaries:
             lines.append(f"- {summary}")
     return "\n".join(lines).strip(), sources
