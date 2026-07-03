@@ -2024,7 +2024,21 @@ def _is_method_comparison_query(question: str) -> bool:
         token in q
         for token in [
             "best", "better", "behtar", "बेहतर", "ज्यादा उपज", "अधिक उपज",
-            "jyada upaj", "high yield", "higher yield", "profitable", "लाभदायक",
+            "jyada upaj", "high yield", "higher yield", "profitable", "profit",
+            "लाभदायक", "लाभ", "laabh", "labh", "laabhdayak", "labhdayak",
+            "fayda", "faayda", "फायदा", "कमाई", "income", "return", "returns",
+        ]
+    )
+
+
+def _is_method_profit_query(question: str) -> bool:
+    q = str(question or "").lower()
+    return any(
+        token in q
+        for token in [
+            "profitable", "profit", "लाभ", "लाभदायक", "laabh", "labh",
+            "laabhdayak", "labhdayak", "fayda", "faayda", "फायदा",
+            "कमाई", "income", "return", "returns",
         ]
     )
 
@@ -2244,6 +2258,7 @@ def _structured_trench_method_answer(question: str, crop: str, guide_points: lis
         return None, []
 
     recommendation = str(data.get("recommendation_hi") or "").strip()
+    profitability_note = str(data.get("profitability_note_hi") or "").strip()
     evidence_hi = [str(item).strip() for item in (data.get("evidence_hi") or []) if str(item).strip()]
     implementation_hi = [str(item).strip() for item in (data.get("implementation_hi") or []) if str(item).strip()]
     tradeoffs_hi = [str(item).strip() for item in (data.get("tradeoffs_hi") or []) if str(item).strip()]
@@ -2254,10 +2269,18 @@ def _structured_trench_method_answer(question: str, crop: str, guide_points: lis
         return None, []
 
     is_comparison = _is_method_comparison_query(question)
-    header = "बेहतर रोपाई/विधि" if is_comparison else "रोपाई/विधि की जानकारी"
+    is_profit_query = _is_method_profit_query(question)
+    if is_profit_query:
+        header = "ज्यादा लाभ वाली रोपाई/विधि"
+    elif is_comparison:
+        header = "बेहतर रोपाई/विधि"
+    else:
+        header = "रोपाई/विधि की जानकारी"
     lines = [f"{_crop_display_label(crop)} में {header}:", ""]
     if recommendation:
         lines.append(f"- निष्कर्ष: {recommendation}")
+    if is_profit_query and profitability_note:
+        lines.append(f"- लाभ के हिसाब से: {profitability_note}")
     if evidence_hi:
         lines.append("- प्रमाण/लाभ:")
         for item in evidence_hi[:5]:
