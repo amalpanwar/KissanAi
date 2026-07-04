@@ -1685,14 +1685,6 @@ def _guide_translation_generator() -> LocalGenerator | None:
 
 
 @lru_cache(maxsize=1)
-def _guide_reasoning_generator() -> LocalGenerator | None:
-    try:
-        return LocalGenerator(_guide_generator_model())
-    except Exception:
-        return None
-
-
-@lru_cache(maxsize=1)
 def _guide_chunk_size() -> int:
     try:
         cfg = load_config()
@@ -1981,7 +1973,7 @@ def _build_supplemental_pdf_answer(
     if not evidence_blocks:
         return None, []
 
-    generator = reasoning_generator or _guide_reasoning_generator()
+    generator = reasoning_generator
     if generator is not None:
         guide_context = "\n".join(f"- {point}" for point in guide_points[:2]) if guide_points else "नहीं"
         prompt = (
