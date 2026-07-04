@@ -3736,6 +3736,7 @@ if user_query:
             guide_answer, guide_sources = build_crop_production_followup(
                 normalized_user_query,
                 crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+                reasoning_generator=advisor.generator,
             )
             if guide_answer:
                 direct_crop_followup = {
@@ -3790,6 +3791,7 @@ if user_query:
             guide_answer, guide_sources = build_crop_production_followup(
                 normalized_user_query,
                 crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+                reasoning_generator=advisor.generator,
             )
             if guide_answer:
                 result = {

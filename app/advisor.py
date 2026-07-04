@@ -523,6 +523,7 @@ class RAGAdvisor:
             guide_followup_answer, guide_followup_sources = build_crop_production_followup(
                 normalized_question,
                 crop_hint=parsed_intent.crop or self._extract_preferred_crop_from_context(context_part),
+                reasoning_generator=self.generator,
             )
             if guide_followup_answer:
                 return {
@@ -672,6 +673,7 @@ class RAGAdvisor:
         guide_followup_answer, guide_followup_sources = build_crop_production_followup(
             normalized_question,
             crop_hint=self._extract_preferred_crop_from_context(context_part),
+            reasoning_generator=self.generator,
         )
         if guide_followup_answer:
             return {
