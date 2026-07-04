@@ -1904,6 +1904,210 @@ def _supplemental_passage_summary(passage: dict[str, Any], question: str, crop: 
     return _passage_prompt_snippet(text)
 
 
+def _first_supplemental_match(patterns: list[str], texts: list[str]) -> re.Match[str] | None:
+    for text in texts:
+        blob = str(text or "")
+        if not blob:
+            continue
+        for pattern in patterns:
+            match = re.search(pattern, blob, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                return match
+    return None
+
+
+def _extract_supplemental_facts(passages: list[dict[str, Any]]) -> dict[str, Any]:
+    merged = "\n".join(str(p.get("text", "")) for p in passages)
+    texts = [merged]
+    facts: dict[str, Any] = {}
+
+    germination = _first_supplemental_match(
+        [
+            r"germination\s*(?:from|%)\s*(\d+(?:\.\d+)?)\s*(?:to)?\s*(\d+(?:\.\d+)?)\s*(?:percent|increase|increased)?",
+        ],
+        texts,
+    )
+    if germination:
+        facts["germination"] = (germination.group(1), germination.group(2))
+
+    yield_ratio = _first_supplemental_match(
+        [
+            r"(\d+(?:\.\d+)?)\s*to\s*(\d+(?:\.\d+)?)\s*times\s*more(?:\s+of)?\s+.*?yield",
+            r"increased\s+in\s+productivity\s+(\d+(?:\.\d+)?)\s*to\s*(\d+(?:\.\d+)?)\s*times",
+        ],
+        texts,
+    )
+    if yield_ratio:
+        facts["yield_ratio"] = (yield_ratio.group(1), yield_ratio.group(2))
+
+    avg_qha = _first_supplemental_match(
+        [
+            r"average(?:\s+total)?\s+productivity.*?(\d+(?:\.\d+)?)\s*q/ha",
+            r"were\s*(\d+(?:\.\d+)?)\s*q/ha\s*productivity",
+        ],
+        texts,
+    )
+    if avg_qha:
+        facts["avg_qha"] = avg_qha.group(1)
+
+    higher_yield = _first_supplemental_match(
+        [
+            r"higher\s+cane\s+yield\s*(\d+(?:\.\d+)?)\s*and\s*(\d+(?:\.\d+)?)\s*tonnes/ha",
+        ],
+        texts,
+    )
+    if higher_yield:
+        facts["higher_yield_tha"] = (higher_yield.group(1), higher_yield.group(2))
+
+    water_saving = _first_supplemental_match(
+        [
+            r"save\s*(\d+)\s*%\s*percent.*?irrigation\s*water",
+        ],
+        texts,
+    )
+    if water_saving:
+        facts["water_saving_pct"] = water_saving.group(1)
+
+    irrigation_cost = _first_supplemental_match(
+        [
+            r"expenses\s+on\s+irrigation\s*(\d+(?:\.\d+)?)\s*(\d+(?:\.\d+)?)\s*reduced",
+        ],
+        texts,
+    )
+    if irrigation_cost:
+        facts["irrigation_cost"] = (irrigation_cost.group(1), irrigation_cost.group(2))
+
+    input_cost = _first_supplemental_match(
+        [
+            r"input\s+rs\.?/ha\s*(\d+(?:\.\d+)?)\s*(\d+(?:\.\d+)?)\s*increased",
+        ],
+        texts,
+    )
+    if input_cost:
+        facts["input_cost"] = (input_cost.group(1), input_cost.group(2))
+
+    if re.search(r"inter-?cropping.*?less.*?more.*?increased", merged, flags=re.IGNORECASE | re.DOTALL):
+        facts["intercropping_better"] = True
+
+    dims = _first_supplemental_match(
+        [
+            r"(\d+)\s*cm\s*wide\s*and\s*(\d+)\s*cm\s*depth.*?(\d+)\s*cm\s*between\s*two\s*trenches",
+        ],
+        texts,
+    )
+    if dims:
+        facts["dims"] = (dims.group(1), dims.group(2), dims.group(3))
+
+    setts = _first_supplemental_match(
+        [
+            r"(\d+)\s*cm\s*distance.*?between\s*two\s*sets.*?(\d+\s*-\s*\d+)\s*cm\s*soil",
+        ],
+        texts,
+    )
+    if setts:
+        facts["setts"] = (setts.group(1), re.sub(r"\s+", "", setts.group(2)))
+
+    if re.search(r"increased\s+seed\s+rate\s+and\s+fertilizer\s+cost\s+and\s+doses", merged, flags=re.IGNORECASE):
+        facts["higher_input_need"] = True
+    return facts
+
+
+def _structured_supplemental_fallback(
+    question: str,
+    crop: str,
+    section: str,
+    guide_points: list[str],
+    pdf_path: Path,
+    passages: list[dict[str, Any]],
+) -> str | None:
+    mode = _supplemental_query_mode(question, section)
+    facts = _extract_supplemental_facts(passages)
+    crop_label = _crop_display_label(crop)
+    section_hi = _followup_section_title_hi(section)
+
+    if mode == "comparison":
+        evidence: list[str] = []
+        method_steps: list[str] = []
+        cautions: list[str] = []
+        benefits: list[str] = []
+
+        if facts.get("germination"):
+            before, after = facts["germination"]
+            evidence.append(f"अंकुरण लगभग {before}% से बढ़कर {after}% दर्ज हुई।")
+            benefits.append("अंकुरण बेहतर")
+        if facts.get("yield_ratio"):
+            low, high = facts["yield_ratio"]
+            evidence.append(f"उपज/उत्पादकता लगभग {low} से {high} गुना अधिक दर्ज हुई।")
+            benefits.append("उपज अधिक")
+        if facts.get("avg_qha"):
+            evidence.append(f"औसत productivity लगभग {facts['avg_qha']} q/ha दर्ज हुई।")
+            if "उपज अधिक" not in benefits:
+                benefits.append("उपज अधिक")
+        if facts.get("higher_yield_tha"):
+            low, high = facts["higher_yield_tha"]
+            evidence.append(f"कुछ field trials में गन्ने की उपज लगभग {low} और {high} t/ha तक रिपोर्ट हुई।")
+            if "उपज अधिक" not in benefits:
+                benefits.append("उपज अधिक")
+        if facts.get("water_saving_pct"):
+            evidence.append(f"सिंचाई पानी की बचत लगभग {facts['water_saving_pct']}% बताई गई है।")
+            benefits.append("पानी/सिंचाई खर्च कम")
+        if facts.get("irrigation_cost"):
+            before, after = facts["irrigation_cost"]
+            evidence.append(f"सिंचाई खर्च लगभग ₹{before} से घटकर ₹{after} प्रति हेक्टेयर दिखा।")
+            if "पानी/सिंचाई खर्च कम" not in benefits:
+                benefits.append("पानी/सिंचाई खर्च कम")
+        if facts.get("intercropping_better"):
+            evidence.append("अंतरफसल की संभावना भी बेहतर बताई गई।")
+
+        if facts.get("dims"):
+            width, depth, distance = facts["dims"]
+            method_steps.append(
+                f"खांचे/ट्रेंच लगभग {width} सेमी चौड़े, {depth} सेमी गहरे और एक-दूसरे से लगभग {distance} सेमी दूरी पर रखें।"
+            )
+        if facts.get("setts"):
+            spacing, cover = facts["setts"]
+            method_steps.append(
+                f"2-budded setts को end-to-end/stair-type ढंग से रखें, दो setts के बीच लगभग {spacing} सेमी दूरी रखें और ऊपर {cover} सेमी मिट्टी से ढकें।"
+            )
+        if len(method_steps) < 2 and guide_points:
+            for point in guide_points[:2]:
+                clean = _final_phrase_cleanup(str(point).strip())
+                if clean and clean not in method_steps:
+                    method_steps.append(clean)
+                if len(method_steps) >= 2:
+                    break
+
+        if facts.get("input_cost"):
+            before, after = facts["input_cost"]
+            cautions.append(f"शुरुआती input cost लगभग ₹{before} से बढ़कर ₹{after} प्रति हेक्टेयर तक जा सकती है।")
+        elif facts.get("higher_input_need"):
+            cautions.append("इस विधि में बीज दर, खाद की मात्रा और शुरुआती लागत अधिक लग सकती है।")
+
+        if evidence:
+            benefit_text = " और ".join(benefits[:3]) if benefits else "कुछ मुख्य पैरामीटर बेहतर"
+            lines = [f"{crop_label} में ज्यादा लाभ वाली {section_hi}:", ""]
+            lines.append(f"- निष्कर्ष: उपलब्ध तुलना डेटा के आधार पर यह विधि सामान्य पद्धति की तुलना में बेहतर दिखती है, क्योंकि {benefit_text} दिखा।")
+            lines.append("- आधार:")
+            for item in evidence[:5]:
+                lines.append(f"- {item}")
+            if method_steps:
+                lines.append("- कैसे करें:")
+                for item in method_steps[:3]:
+                    lines.append(f"- {item}")
+            elif guide_points:
+                lines.append("- कैसे करें:")
+                for point in guide_points[:2]:
+                    lines.append(f"- {point}")
+            if cautions:
+                lines.append("- ध्यान दें:")
+                for item in cautions[:3]:
+                    lines.append(f"- {item}")
+            lines.append(f"- स्रोत: {pdf_path.name}")
+            return "\n".join(lines).strip()
+
+    return None
+
+
 def _passage_prompt_snippet(text: str) -> str:
     cleaned = _cleanup_bullet_text(str(text or ""))
     cleaned = re.sub(
@@ -1926,6 +2130,9 @@ def _fallback_supplemental_answer(
     pdf_path: Path,
     passages: list[dict[str, Any]],
 ) -> str:
+    structured = _structured_supplemental_fallback(question, crop, section, guide_points, pdf_path, passages)
+    if structured:
+        return structured
     crop_label = _crop_display_label(crop)
     section_hi = _followup_section_title_hi(section)
     mode = _supplemental_query_mode(question, section)
