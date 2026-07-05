@@ -686,9 +686,15 @@ def _final_phrase_cleanup(text: str) -> str:
         (r"\bbasal\b", "बेसल"),
         (r"\bsplit dose\b", "भागों में"),
         (r"\bbud damage\b", "bud को नुकसान"),
+        (r"\bproductivity\b", "उत्पादकता"),
+        (r"\binput cost\b", "शुरुआती लागत"),
+        (r"\bfield trials\b", "परीक्षणों"),
+        (r"\btrials\b", "परीक्षणों"),
         (r"\bmid-season\b", "मध्यम अवधि वाली"),
         (r"\bearly variety\b", "जल्दी पकने वाली किस्म"),
         (r"\bmid-season variety\b", "मध्यम अवधि वाली किस्म"),
+        (r"\bt/ha\b", "टन/हेक्टेयर"),
+        (r"\bq/ha\b", "क्विंटल/हेक्टेयर"),
     ]
     for pat, repl in replacements:
         out = re.sub(pat, repl, out, flags=re.IGNORECASE)
@@ -1709,7 +1715,6 @@ def _supplemental_pdf_catalog() -> list[Path]:
         docs.append(pdf_path)
     return docs
 
-
 def _followup_section_title_hi(section: str) -> str:
     return {
         "variety": "किस्म और बीज दर",
@@ -1808,6 +1813,7 @@ def _supplemental_query_expansions(question: str, crop: str, section: str, pdf_p
     ]
     if mode == "comparison":
         expansions.append(f"{crop} compare method yield cost benefit profit {question}")
+        expansions.append(f"{crop} comparison germination input irrigation expenses intercropping increased reduced {question}")
     elif mode == "instructional":
         expansions.append(f"{crop} method steps spacing distance process {question}")
     return [item.strip() for item in expansions if item.strip()]
@@ -1839,16 +1845,26 @@ def _rerank_supplemental_passages(
             compare_hits = sum(1 for term in compare_terms if term in lower)
             if section_name in {"results", "conclusion"}:
                 score += 0.14
+            if _looks_like_informative_table_row(text):
+                score += 0.28
+            if re.search(r"^table\s+\d+[:\s]", lower) and compare_hits < 2:
+                score -= 0.18
+            if "average yield data recorded" in lower and "comparison" not in lower:
+                score -= 0.14
             if compare_hits:
                 score += min(0.18, compare_hits * 0.03)
             else:
                 score -= 0.12
             if any(term in lower for term in ["increase", "decrease", "reduced", "higher", "improved"]):
                 score += 0.06
+            if len(text.split()) <= 18 and compare_hits >= 1:
+                score += 0.08
         elif mode == "instructional":
             method_terms = ["apply", "plant", "spacing", "distance", "cm", "kg", "treatment", "sowing", "depth", "step"]
             method_hits = sum(1 for term in method_terms if term in lower)
             if section_name in {"methods", "body"}:
+                score += 0.14
+            if _looks_like_informative_method_line(text):
                 score += 0.14
             if method_hits:
                 score += min(0.18, method_hits * 0.03)
@@ -1890,7 +1906,13 @@ def _retrieve_supplemental_passages(pdf_path: Path, question: str, crop: str, se
     return _rerank_supplemental_passages(passages, question=question, section=section, mode=mode, top_k=k)
 
 
-def _supplemental_passage_summary(passage: dict[str, Any], question: str, crop: str, section: str) -> str:
+def _supplemental_passage_summary(
+    passage: dict[str, Any],
+    question: str,
+    crop: str,
+    section: str,
+    translation_generator: LocalGenerator | None = None,
+) -> str:
     text = str(passage.get("text", ""))
     summary = _summarize_pdf_passage(
         text,
@@ -1898,214 +1920,11 @@ def _supplemental_passage_summary(passage: dict[str, Any], question: str, crop: 
         crop=crop,
         section=section.replace("_", " "),
         sentence_limit=2,
+        translation_generator=translation_generator,
     )
     if summary and not _fragment_is_document_noise(summary):
         return summary
-    return _passage_prompt_snippet(text)
-
-
-def _first_supplemental_match(patterns: list[str], texts: list[str]) -> re.Match[str] | None:
-    for text in texts:
-        blob = str(text or "")
-        if not blob:
-            continue
-        for pattern in patterns:
-            match = re.search(pattern, blob, flags=re.IGNORECASE | re.DOTALL)
-            if match:
-                return match
-    return None
-
-
-def _extract_supplemental_facts(passages: list[dict[str, Any]]) -> dict[str, Any]:
-    merged = "\n".join(str(p.get("text", "")) for p in passages)
-    texts = [merged]
-    facts: dict[str, Any] = {}
-
-    germination = _first_supplemental_match(
-        [
-            r"germination\s*(?:from|%)\s*(\d+(?:\.\d+)?)\s*(?:to)?\s*(\d+(?:\.\d+)?)\s*(?:percent|increase|increased)?",
-        ],
-        texts,
-    )
-    if germination:
-        facts["germination"] = (germination.group(1), germination.group(2))
-
-    yield_ratio = _first_supplemental_match(
-        [
-            r"(\d+(?:\.\d+)?)\s*to\s*(\d+(?:\.\d+)?)\s*times\s*more(?:\s+of)?\s+.*?yield",
-            r"increased\s+in\s+productivity\s+(\d+(?:\.\d+)?)\s*to\s*(\d+(?:\.\d+)?)\s*times",
-        ],
-        texts,
-    )
-    if yield_ratio:
-        facts["yield_ratio"] = (yield_ratio.group(1), yield_ratio.group(2))
-
-    avg_qha = _first_supplemental_match(
-        [
-            r"average(?:\s+total)?\s+productivity.*?(\d+(?:\.\d+)?)\s*q/ha",
-            r"were\s*(\d+(?:\.\d+)?)\s*q/ha\s*productivity",
-        ],
-        texts,
-    )
-    if avg_qha:
-        facts["avg_qha"] = avg_qha.group(1)
-
-    higher_yield = _first_supplemental_match(
-        [
-            r"higher\s+cane\s+yield\s*(\d+(?:\.\d+)?)\s*and\s*(\d+(?:\.\d+)?)\s*tonnes/ha",
-        ],
-        texts,
-    )
-    if higher_yield:
-        facts["higher_yield_tha"] = (higher_yield.group(1), higher_yield.group(2))
-
-    water_saving = _first_supplemental_match(
-        [
-            r"save\s*(\d+)\s*%\s*percent.*?irrigation\s*water",
-        ],
-        texts,
-    )
-    if water_saving:
-        facts["water_saving_pct"] = water_saving.group(1)
-
-    irrigation_cost = _first_supplemental_match(
-        [
-            r"expenses\s+on\s+irrigation\s*(\d+(?:\.\d+)?)\s*(\d+(?:\.\d+)?)\s*reduced",
-        ],
-        texts,
-    )
-    if irrigation_cost:
-        facts["irrigation_cost"] = (irrigation_cost.group(1), irrigation_cost.group(2))
-
-    input_cost = _first_supplemental_match(
-        [
-            r"input\s+rs\.?/ha\s*(\d+(?:\.\d+)?)\s*(\d+(?:\.\d+)?)\s*increased",
-        ],
-        texts,
-    )
-    if input_cost:
-        facts["input_cost"] = (input_cost.group(1), input_cost.group(2))
-
-    if re.search(r"inter-?cropping.*?less.*?more.*?increased", merged, flags=re.IGNORECASE | re.DOTALL):
-        facts["intercropping_better"] = True
-
-    dims = _first_supplemental_match(
-        [
-            r"(\d+)\s*cm\s*wide\s*and\s*(\d+)\s*cm\s*depth.*?(\d+)\s*cm\s*between\s*two\s*trenches",
-        ],
-        texts,
-    )
-    if dims:
-        facts["dims"] = (dims.group(1), dims.group(2), dims.group(3))
-
-    setts = _first_supplemental_match(
-        [
-            r"(\d+)\s*cm\s*distance.*?between\s*two\s*sets.*?(\d+\s*-\s*\d+)\s*cm\s*soil",
-        ],
-        texts,
-    )
-    if setts:
-        facts["setts"] = (setts.group(1), re.sub(r"\s+", "", setts.group(2)))
-
-    if re.search(r"increased\s+seed\s+rate\s+and\s+fertilizer\s+cost\s+and\s+doses", merged, flags=re.IGNORECASE):
-        facts["higher_input_need"] = True
-    return facts
-
-
-def _structured_supplemental_fallback(
-    question: str,
-    crop: str,
-    section: str,
-    guide_points: list[str],
-    pdf_path: Path,
-    passages: list[dict[str, Any]],
-) -> str | None:
-    mode = _supplemental_query_mode(question, section)
-    facts = _extract_supplemental_facts(passages)
-    crop_label = _crop_display_label(crop)
-    section_hi = _followup_section_title_hi(section)
-
-    if mode == "comparison":
-        evidence: list[str] = []
-        method_steps: list[str] = []
-        cautions: list[str] = []
-        benefits: list[str] = []
-
-        if facts.get("germination"):
-            before, after = facts["germination"]
-            evidence.append(f"अंकुरण लगभग {before}% से बढ़कर {after}% दर्ज हुई।")
-            benefits.append("अंकुरण बेहतर")
-        if facts.get("yield_ratio"):
-            low, high = facts["yield_ratio"]
-            evidence.append(f"उपज/उत्पादकता लगभग {low} से {high} गुना अधिक दर्ज हुई।")
-            benefits.append("उपज अधिक")
-        if facts.get("avg_qha"):
-            evidence.append(f"औसत productivity लगभग {facts['avg_qha']} q/ha दर्ज हुई।")
-            if "उपज अधिक" not in benefits:
-                benefits.append("उपज अधिक")
-        if facts.get("higher_yield_tha"):
-            low, high = facts["higher_yield_tha"]
-            evidence.append(f"कुछ field trials में गन्ने की उपज लगभग {low} और {high} t/ha तक रिपोर्ट हुई।")
-            if "उपज अधिक" not in benefits:
-                benefits.append("उपज अधिक")
-        if facts.get("water_saving_pct"):
-            evidence.append(f"सिंचाई पानी की बचत लगभग {facts['water_saving_pct']}% बताई गई है।")
-            benefits.append("पानी/सिंचाई खर्च कम")
-        if facts.get("irrigation_cost"):
-            before, after = facts["irrigation_cost"]
-            evidence.append(f"सिंचाई खर्च लगभग ₹{before} से घटकर ₹{after} प्रति हेक्टेयर दिखा।")
-            if "पानी/सिंचाई खर्च कम" not in benefits:
-                benefits.append("पानी/सिंचाई खर्च कम")
-        if facts.get("intercropping_better"):
-            evidence.append("अंतरफसल की संभावना भी बेहतर बताई गई।")
-
-        if facts.get("dims"):
-            width, depth, distance = facts["dims"]
-            method_steps.append(
-                f"खांचे/ट्रेंच लगभग {width} सेमी चौड़े, {depth} सेमी गहरे और एक-दूसरे से लगभग {distance} सेमी दूरी पर रखें।"
-            )
-        if facts.get("setts"):
-            spacing, cover = facts["setts"]
-            method_steps.append(
-                f"2-budded setts को end-to-end/stair-type ढंग से रखें, दो setts के बीच लगभग {spacing} सेमी दूरी रखें और ऊपर {cover} सेमी मिट्टी से ढकें।"
-            )
-        if len(method_steps) < 2 and guide_points:
-            for point in guide_points[:2]:
-                clean = _final_phrase_cleanup(str(point).strip())
-                if clean and clean not in method_steps:
-                    method_steps.append(clean)
-                if len(method_steps) >= 2:
-                    break
-
-        if facts.get("input_cost"):
-            before, after = facts["input_cost"]
-            cautions.append(f"शुरुआती input cost लगभग ₹{before} से बढ़कर ₹{after} प्रति हेक्टेयर तक जा सकती है।")
-        elif facts.get("higher_input_need"):
-            cautions.append("इस विधि में बीज दर, खाद की मात्रा और शुरुआती लागत अधिक लग सकती है।")
-
-        if evidence:
-            benefit_text = " और ".join(benefits[:3]) if benefits else "कुछ मुख्य पैरामीटर बेहतर"
-            lines = [f"{crop_label} में ज्यादा लाभ वाली {section_hi}:", ""]
-            lines.append(f"- निष्कर्ष: उपलब्ध तुलना डेटा के आधार पर यह विधि सामान्य पद्धति की तुलना में बेहतर दिखती है, क्योंकि {benefit_text} दिखा।")
-            lines.append("- आधार:")
-            for item in evidence[:5]:
-                lines.append(f"- {item}")
-            if method_steps:
-                lines.append("- कैसे करें:")
-                for item in method_steps[:3]:
-                    lines.append(f"- {item}")
-            elif guide_points:
-                lines.append("- कैसे करें:")
-                for point in guide_points[:2]:
-                    lines.append(f"- {point}")
-            if cautions:
-                lines.append("- ध्यान दें:")
-                for item in cautions[:3]:
-                    lines.append(f"- {item}")
-            lines.append(f"- स्रोत: {pdf_path.name}")
-            return "\n".join(lines).strip()
-
-    return None
+    return _final_phrase_cleanup(_translate_pdf_summary(_passage_prompt_snippet(text), generator=translation_generator))
 
 
 def _passage_prompt_snippet(text: str) -> str:
@@ -2122,6 +1941,17 @@ def _passage_prompt_snippet(text: str) -> str:
     return _compress_sentences(cleaned, limit=3) or cleaned
 
 
+def _supplemental_header(question: str, crop: str, section: str) -> str:
+    crop_label = _crop_display_label(crop)
+    section_hi = _followup_section_title_hi(section)
+    mode = _supplemental_query_mode(question, section)
+    if mode == "comparison":
+        return f"{crop_label} में {section_hi} की तुलना:"
+    if mode == "instructional":
+        return f"{crop_label} में {section_hi} की जानकारी:"
+    return f"{crop_label} के लिए {section_hi} से जुड़ी जानकारी:"
+
+
 def _fallback_supplemental_answer(
     question: str,
     crop: str,
@@ -2129,28 +1959,21 @@ def _fallback_supplemental_answer(
     guide_points: list[str],
     pdf_path: Path,
     passages: list[dict[str, Any]],
+    translation_generator: LocalGenerator | None = None,
 ) -> str:
-    structured = _structured_supplemental_fallback(question, crop, section, guide_points, pdf_path, passages)
-    if structured:
-        return structured
-    crop_label = _crop_display_label(crop)
-    section_hi = _followup_section_title_hi(section)
-    mode = _supplemental_query_mode(question, section)
-    if mode == "comparison":
-        header = f"{crop_label} में {section_hi} के बारे में:"
-        lead = "- पूरक दस्तावेज़ से मिले तुलना के मुख्य बिंदु:"
-    else:
-        header = f"{crop_label} के लिए {section_hi} की जानकारी:"
-        lead = "- पूरक दस्तावेज़ से मिले मुख्य बिंदु:"
-    lines = [header, "", lead]
+    del guide_points
+    header = _supplemental_header(question, crop, section)
+    lines = [header, "", "- PDF से प्राप्त संबंधित बिंदु:"]
     for passage in passages[:4]:
-        snippet = _supplemental_passage_summary(passage, question, crop, section)
+        snippet = _supplemental_passage_summary(
+            passage,
+            question,
+            crop,
+            section,
+            translation_generator=translation_generator,
+        )
         if snippet:
-            lines.append(f"- {_translate_pdf_summary(snippet)}")
-    if guide_points:
-        lines.append("- मुख्य guide के सहायक बिंदु:")
-        for point in guide_points[:2]:
-            lines.append(f"- {point}")
+            lines.append(f"- {snippet}")
     lines.append(f"- स्रोत: {pdf_path.name}")
     return "\n".join(lines).strip()
 
@@ -2169,43 +1992,48 @@ def _build_supplemental_pdf_answer(
     if not passages:
         return None, []
 
-    crop_label = _crop_display_label(crop)
-    section_hi = _followup_section_title_hi(section)
     mode = _supplemental_query_mode(question, section)
     evidence_blocks = []
     for idx, passage in enumerate(passages[:4], start=1):
-        snippet = _supplemental_passage_summary(passage, question, crop, section)
+        snippet = _supplemental_passage_summary(
+            passage,
+            question,
+            crop,
+            section,
+            translation_generator=reasoning_generator,
+        )
         if snippet:
-            evidence_blocks.append(f"[{idx}] {snippet}")
+            section_name = str(passage.get("section") or "body")
+            evidence_blocks.append(f"[{idx}] ({section_name}) {snippet}")
     if not evidence_blocks:
         return None, []
 
     generator = reasoning_generator
     if generator is not None:
-        guide_context = "\n".join(f"- {point}" for point in guide_points[:2]) if guide_points else "नहीं"
+        header = _supplemental_header(question, crop, section)
+        task_instruction = {
+            "comparison": "अगर सवाल तुलना, बेहतर या लाभदायक विधि का है, तो केवल evidence में दिखी विधियों/प्रथाओं की तुलना करें।",
+            "instructional": "अगर सवाल किसी विधि या प्रक्रिया के बारे में है, तो केवल evidence में दिखे कदम और शर्तें बताएं।",
+        }.get(mode, "केवल evidence में मिली जानकारी को किसान-हितैषी ढंग से संक्षेप में समझाएं।")
         prompt = (
             "You are an agricultural retrieval assistant.\n"
             "Use only the supplied evidence. Do not invent facts.\n"
             "Answer in simple Hindi for farmers.\n"
-            "If the question asks which method is better/profitable, compare only the methods or practices mentioned in the evidence.\n"
-            "If the question asks how to do something, give clear steps from the evidence.\n"
+            f"{task_instruction}\n"
             "Keep all numbers, units, and product/method names exactly when present.\n"
-            "Do not mention chunks, retrieval, ranking, or internal analysis.\n"
+            "Do not mention chunks, retrieval, ranking, OCR, JSON, code, or internal analysis.\n"
             "If evidence is not enough for a firm conclusion, say so clearly.\n\n"
             f"Question: {question}\n"
             f"Crop: {crop}\n"
-            f"Topic: {section_hi}\n"
-            f"Guide context:\n{guide_context}\n\n"
             f"Evidence:\n" + "\n".join(evidence_blocks) + "\n\n"
-            "Return a concise structured answer in Hindi using this style:\n"
-            f"{crop_label} ...\n"
+            "Return a concise structured answer in Hindi using this exact structure:\n"
+            f"{header}\n"
             "- निष्कर्ष: ...\n"
-            "- आधार:\n"
+            "- प्रमाण:\n"
             "- ...\n"
-            "- कैसे करें:\n"
+            "- सावधानियां/नोट:\n"
             "- ...\n"
-            "- ध्यान दें:\n"
-            "- ...\n"
+            "Use only the sections that are supported by the evidence. If a section is not supported, omit it.\n"
             "Return only the answer.\n"
         )
         try:
@@ -2214,13 +2042,24 @@ def _build_supplemental_pdf_answer(
             answer = _cleanup_bullet_text(answer)
             if answer:
                 if _is_english_heavy(answer, crop):
-                    answer = _translate_pdf_summary(answer)
+                    answer = _translate_pdf_summary(answer, generator=generator)
                 if answer:
-                    return _final_phrase_cleanup(answer), [str(pdf_path)]
+                    answer = _final_phrase_cleanup(answer)
+                    if f"स्रोत:" not in answer:
+                        answer = answer.rstrip() + f"\n- स्रोत: {pdf_path.name}"
+                    return answer, [str(pdf_path)]
         except Exception:
             pass
 
-    return _fallback_supplemental_answer(question, crop, section, guide_points, pdf_path, passages), [str(pdf_path)]
+    return _fallback_supplemental_answer(
+        question,
+        crop,
+        section,
+        guide_points,
+        pdf_path,
+        passages,
+        translation_generator=reasoning_generator,
+    ), [str(pdf_path)]
 
 
 @lru_cache(maxsize=8)
@@ -2323,8 +2162,77 @@ def _looks_like_publication_metadata(line: str) -> bool:
     return False
 
 
+def _looks_like_informative_table_row(line: str) -> bool:
+    lower = str(line or "").lower()
+    keywords = (
+        "yield",
+        "productivity",
+        "germination",
+        "irrigation",
+        "water",
+        "cost",
+        "input",
+        "expenses",
+        "spacing",
+        "distance",
+        "seed rate",
+        "inter-cropping",
+        "intercropping",
+        "trench method",
+        "farmers practices",
+        "farmers practice",
+        "furrow method",
+        "result",
+        "reduced",
+        "increased",
+        "higher",
+        "less",
+        "more",
+        "kg/ha",
+        "q/ha",
+        "tonnes/ha",
+        "t/ha",
+        "cm",
+    )
+    if not any(term in lower for term in keywords):
+        return False
+    number_tokens = re.findall(r"\b\d+(?:\.\d+)?\b", lower)
+    return bool(number_tokens) or any(token in lower for token in ("increased", "reduced", "less", "more", "higher"))
+
+
+def _looks_like_informative_method_line(line: str) -> bool:
+    lower = str(line or "").lower()
+    keywords = (
+        "spacing",
+        "distance",
+        "depth",
+        "width",
+        "trench",
+        "furrow",
+        "setts",
+        "sets",
+        "buds",
+        "seed treatment",
+        "soaking",
+        "sowing",
+        "planted",
+        "planting",
+        "soil",
+        "cm",
+        "kg",
+        "das",
+    )
+    if not any(term in lower for term in keywords):
+        return False
+    return bool(re.search(r"\b\d+(?:\.\d+)?\b", lower)) or any(
+        token in lower for token in ("soaking", "planted", "sowing", "distance", "depth", "width")
+    )
+
+
 def _looks_like_tabular_noise(line: str) -> bool:
     text = str(line or "")
+    if _looks_like_informative_table_row(text):
+        return False
     number_tokens = re.findall(r"\b\d+(?:\.\d+)?\b", text)
     code_tokens = re.findall(r"\b[A-Za-z]{1,8}-?\d{2,8}\b", text)
     title_tokens = re.findall(r"\b[A-Z][a-z]+\b", text)
@@ -2344,10 +2252,13 @@ def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
         return []
 
     lines: list[dict[str, Any]] = []
+    priority_chunks: list[dict[str, Any]] = []
     current_section = "body"
-    for raw_line in text.splitlines():
+    current_table = ""
+    for raw_index, raw_line in enumerate(text.splitlines(), start=1):
         line = " ".join(str(raw_line or "").split())
         if not line:
+            current_table = ""
             continue
         line, inline_section = _strip_inline_section_heading(line)
         if not line:
@@ -2357,23 +2268,51 @@ def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
         section_name = inline_section or _generic_pdf_section_name(line)
         if section_name:
             current_section = section_name
+            current_table = ""
             line, _ = _strip_inline_section_heading(line)
             if not line:
                 continue
         if re.fullmatch(r"[_\-. ]{4,}", line):
             continue
+        if re.match(r"^table\s+\d+", line, flags=re.IGNORECASE):
+            current_table = line
+            continue
         if re.fullmatch(r"[0-9 ]{1,8}", line) or len(line) < 3:
             continue
         if _looks_like_publication_metadata(line):
             continue
+        row_like = not re.search(r"[.?!]", line) and len(re.findall(r"[A-Za-z\u0900-\u097f]+", line)) <= 18
+        if current_table and not row_like and not _looks_like_informative_method_line(line):
+            current_table = ""
+        if _looks_like_informative_table_row(line):
+            chunk_text = f"{current_table}. {line}".strip(" .") if current_table and row_like else line
+            priority_chunks.append(
+                {
+                    "text": chunk_text,
+                    "start_line": raw_index,
+                    "end_line": raw_index,
+                    "section": current_section,
+                }
+            )
+            continue
+        if _looks_like_informative_method_line(line):
+            chunk_text = f"{current_table}. {line}".strip(" .") if current_table else line
+            priority_chunks.append(
+                {
+                    "text": chunk_text,
+                    "start_line": raw_index,
+                    "end_line": raw_index,
+                    "section": current_section,
+                }
+            )
         if _looks_like_tabular_noise(line):
             continue
-        lines.append({"text": line, "section": current_section})
+        lines.append({"text": line, "section": current_section, "line_no": raw_index})
 
-    if not lines:
+    if not lines and not priority_chunks:
         return []
 
-    window_lines = _guide_chunk_size()
+    window_lines = max(3, min(4, _guide_chunk_size()))
     overlap_lines = max(1, window_lines // 3)
     chunks: list[dict[str, Any]] = []
     start = 0
@@ -2392,15 +2331,25 @@ def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
             chunks.append(
                 {
                     "text": chunk_text,
-                    "start_line": start + 1,
-                    "end_line": end,
+                    "start_line": int(parts[0].get("line_no") or (start + 1)),
+                    "end_line": int(parts[-1].get("line_no") or end),
                     "section": dominant_section,
                 }
             )
         if end >= len(lines):
             break
         start = max(start + 1, end - overlap_lines)
-    return chunks
+
+    combined = priority_chunks + chunks
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for chunk in combined:
+        key = _normalize_line_key(str(chunk.get("text", "")))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(chunk)
+    return deduped
 
 
 @lru_cache(maxsize=8)
@@ -2461,6 +2410,9 @@ def _retrieve_pdf_passages(
         return []
 
     query_texts = _semantic_query_variants(question, crop=crop, section=section, extra_queries=extra_queries)
+    query_tokens: set[str] = set()
+    for query_text in query_texts:
+        query_tokens.update(_pdf_query_tokens(query_text))
     vectors = _supplemental_pdf_vectors(str(pdf_path))
     embedder = _guide_embedder()
     if vectors is not None and embedder is not None:
@@ -2469,8 +2421,11 @@ def _retrieve_pdf_passages(
             scored: list[tuple[float, int]] = []
             for idx in range(len(chunks)):
                 score = max(float(vectors[idx] @ qvec) for qvec in query_vecs)
+                chunk_tokens = _pdf_query_tokens(str(chunks[idx].get("text", "")))
+                overlap = len(query_tokens & chunk_tokens)
                 score += _passage_section_bonus(str(chunks[idx].get("section", "")))
                 score += _passage_focus_bonus(str(chunks[idx].get("text", "")), section)
+                score += min(0.24, overlap * 0.04)
                 scored.append((score, idx))
             scored.sort(reverse=True)
             top_n = min(max(k * 2, k), len(chunks))
@@ -2478,9 +2433,6 @@ def _retrieve_pdf_passages(
         except Exception:
             pass
 
-    query_tokens: set[str] = set()
-    for query_text in query_texts:
-        query_tokens.update(_pdf_query_tokens(query_text))
     scored: list[tuple[int, int, int]] = []
     for idx, chunk in enumerate(chunks):
         chunk = chunks[idx]
@@ -2592,7 +2544,14 @@ def _is_method_profit_query(question: str) -> bool:
     )
 
 
-def _summarize_pdf_passage(text: str, question: str, crop: str = "", section: str = "", sentence_limit: int = 2) -> str:
+def _summarize_pdf_passage(
+    text: str,
+    question: str,
+    crop: str = "",
+    section: str = "",
+    sentence_limit: int = 2,
+    translation_generator: LocalGenerator | None = None,
+) -> str:
     cleaned = _cleanup_bullet_text(text)
     cleaned = re.sub(r"\b(Abstract|Introduction|Materials(?: and| &) Methods|Results(?: and Discussion)?|Discussion|Conclusion|References)\b[:\-]?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\bKey words?:.*", "", cleaned, flags=re.IGNORECASE)
@@ -2625,13 +2584,13 @@ def _summarize_pdf_passage(text: str, question: str, crop: str = "", section: st
             summary = ""
     if not summary:
         summary = _compress_sentences(cleaned, limit=sentence_limit) or cleaned
-    return _final_phrase_cleanup(_translate_pdf_summary(summary))
+    return _final_phrase_cleanup(_translate_pdf_summary(summary, generator=translation_generator))
 
 
-def _translate_pdf_summary(text: str) -> str:
+def _translate_pdf_summary(text: str, generator: LocalGenerator | None = None) -> str:
     source_text = str(text or "").strip()
-    generator = _guide_translation_generator()
-    if source_text and generator is not None:
+    translator = generator or _guide_translation_generator()
+    if source_text and translator is not None:
         try:
             prompt = (
                 "Translate the following agricultural advisory text into simple Hindi for farmers.\n"
@@ -2642,7 +2601,7 @@ def _translate_pdf_summary(text: str) -> str:
                 "- Return only the translated Hindi text.\n\n"
                 f"Text: {source_text}\n\nHindi:"
             )
-            translated = generator.generate(prompt).strip()
+            translated = translator.generate(prompt).strip()
             translated = re.sub(r"^\s*Hindi\s*:\s*", "", translated, flags=re.IGNORECASE).strip()
             translated = _cleanup_bullet_text(translated)
             if translated and not _is_english_heavy(translated, crop="Sugarcane"):

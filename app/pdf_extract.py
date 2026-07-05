@@ -9,7 +9,7 @@ from typing import Any
 
 
 CACHE_DIR = Path("data/processed/pdf_text_cache")
-PDF_CACHE_VERSION = "v3"
+PDF_CACHE_VERSION = "v4"
 
 
 def _clean_text(text: str) -> str:
@@ -36,7 +36,7 @@ def _docling_converter():
         pipeline_options = PdfPipelineOptions()
         pipeline_options.do_ocr = False
         pipeline_options.force_backend_text = True
-        pipeline_options.do_table_structure = False
+        pipeline_options.do_table_structure = True
         pipeline_options.do_code_enrichment = False
         pipeline_options.do_formula_enrichment = False
         return DocumentConverter(
