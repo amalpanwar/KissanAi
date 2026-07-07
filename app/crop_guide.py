@@ -1778,6 +1778,55 @@ def _supplemental_query_mode(question: str, section: str) -> str:
     return "informational"
 
 
+def _supplemental_generic_hyde(question: str, crop: str, section: str, mode: str) -> str:
+    section_hi = _followup_section_title_hi(section)
+    if mode == "comparison":
+        return (
+            f"Farmer wants a source-grounded comparison for {crop} {section_hi}, including the standard method, "
+            "alternative method, yield, cost, irrigation, germination, and key trade-offs in simple Hindi."
+        )
+    if mode == "instructional":
+        return (
+            f"Farmer wants a source-grounded step-by-step answer for {crop} {section_hi}, including method, spacing, "
+            "process, and precautions in simple Hindi."
+        )
+    return (
+        f"Farmer wants a source-grounded answer for {crop} {section_hi} with practical field guidance in simple Hindi."
+    )
+
+
+def _supplemental_llm_hyde(
+    question: str,
+    crop: str,
+    section: str,
+    mode: str,
+    reasoning_generator: LocalGenerator | None = None,
+) -> str:
+    enabled = os.getenv("KISAANAI_ENABLE_LLM_PDF_HYDE", "").strip().lower() in {"1", "true", "yes"}
+    if not enabled:
+        return ""
+    generator = reasoning_generator or _guide_reasoning_generator()
+    if generator is None:
+        return ""
+    try:
+        prompt = (
+            "Write one short hypothetical agricultural evidence paragraph for retrieval.\n"
+            "Rules:\n"
+            "- Use English.\n"
+            "- Keep it source-grounded in style, not conversational.\n"
+            "- Mention likely comparison factors such as yield, cost, irrigation, spacing, germination, or risk only if relevant.\n"
+            "- Do not invent brand names or unsupported conclusions.\n"
+            "- Return only one paragraph.\n\n"
+            f"Crop: {crop}\n"
+            f"Section: {section}\n"
+            f"Mode: {mode}\n"
+            f"Question: {question}\n\nParagraph:"
+        )
+        return str(generator.generate(prompt) or "").strip()
+    except Exception:
+        return ""
+
+
 def _supplemental_pdf_score(pdf_path: Path, crop: str, section: str, question: str) -> float:
     stem = pdf_path.stem.replace("_", " ").replace("-", " ").lower()
     text = _supplemental_pdf_text(str(pdf_path))
@@ -1828,7 +1877,13 @@ def _select_supplemental_pdf(question: str, crop: str, section: str) -> Path | N
     return best_path if best_score >= 4.0 else None
 
 
-def _supplemental_query_expansions(question: str, crop: str, section: str, pdf_path: Path) -> list[str]:
+def _supplemental_query_expansions(
+    question: str,
+    crop: str,
+    section: str,
+    pdf_path: Path,
+    reasoning_generator: LocalGenerator | None = None,
+) -> list[str]:
     section_text = section.replace("_", " ")
     stem = pdf_path.stem.replace("_", " ").replace("-", " ")
     mode = _supplemental_query_mode(question, section)
@@ -1836,7 +1891,11 @@ def _supplemental_query_expansions(question: str, crop: str, section: str, pdf_p
         f"{crop} {question}",
         f"{crop} {section_text} {question}",
         f"{stem} {crop} {question}",
+        _supplemental_generic_hyde(question, crop, section, mode),
     ]
+    llm_hyde = _supplemental_llm_hyde(question, crop, section, mode, reasoning_generator=reasoning_generator)
+    if llm_hyde:
+        expansions.append(llm_hyde)
     if mode == "comparison":
         expansions.append(f"{crop} compare method yield cost benefit profit {question}")
         expansions.append(f"{crop} comparison germination input irrigation expenses intercropping increased reduced {question}")
@@ -1919,7 +1978,14 @@ def _rerank_supplemental_passages(
     return ranked
 
 
-def _retrieve_supplemental_passages(pdf_path: Path, question: str, crop: str, section: str, k: int = 4) -> list[dict[str, Any]]:
+def _retrieve_supplemental_passages(
+    pdf_path: Path,
+    question: str,
+    crop: str,
+    section: str,
+    k: int = 4,
+    reasoning_generator: LocalGenerator | None = None,
+) -> list[dict[str, Any]]:
     mode = _supplemental_query_mode(question, section)
     passages = _retrieve_pdf_passages(
         pdf_path,
@@ -1927,7 +1993,13 @@ def _retrieve_supplemental_passages(pdf_path: Path, question: str, crop: str, se
         crop=crop,
         section=section.replace("_", " "),
         k=max(k * 2, k),
-        extra_queries=_supplemental_query_expansions(question, crop, section, pdf_path),
+        extra_queries=_supplemental_query_expansions(
+            question,
+            crop,
+            section,
+            pdf_path,
+            reasoning_generator=reasoning_generator,
+        ),
     )
     return _rerank_supplemental_passages(passages, question=question, section=section, mode=mode, top_k=k)
 
@@ -2013,6 +2085,17 @@ def _fallback_supplemental_answer(
     translation_generator: LocalGenerator | None = None,
 ) -> str:
     header = _supplemental_header(question, crop, section)
+    mode = _supplemental_query_mode(question, section)
+    if mode == "comparison":
+        return _fallback_comparison_answer(
+            question,
+            crop,
+            section,
+            guide_points,
+            pdf_path,
+            passages,
+            translation_generator=translation_generator,
+        )
     lines = [header, ""]
     guide_blocks = _guide_evidence_blocks(
         guide_points,
@@ -2041,6 +2124,269 @@ def _fallback_supplemental_answer(
     return "\n".join(lines).strip()
 
 
+def _metric_label_hi(label: str) -> str:
+    t = str(label or "").strip().lower()
+    mapping = [
+        ("germination", "अंकुरण"),
+        ("irrigation", "सिंचाई खर्च"),
+        ("expenses on irrigation", "सिंचाई खर्च"),
+        ("irrigation expenses", "सिंचाई खर्च"),
+        ("irrigation cost", "सिंचाई खर्च"),
+        ("seed rate", "बीज दर"),
+        ("fertilizer cost and doses", "उर्वरक लागत और मात्रा"),
+        ("fertilizer cost", "उर्वरक लागत"),
+        ("fertilizer doses", "उर्वरक मात्रा"),
+        ("fertilizer", "उर्वरक"),
+        ("cane yield", "गन्ना उपज"),
+        ("yield", "उपज"),
+        ("productivity", "उत्पादकता"),
+        ("inter-cropping", "अंतरफसल की संभावना"),
+        ("intercropping", "अंतरफसल की संभावना"),
+        ("logging", "पानी भराव"),
+        ("mother shoots", "प्रारंभिक तनों की संख्या"),
+    ]
+    for key, value in mapping:
+        if key in t:
+            return value
+    return _final_phrase_cleanup(_cleanup_bullet_text(label))
+
+
+def _extract_method_mentions_from_text(text: str) -> list[str]:
+    raw = str(text or "")
+    matches: list[str] = []
+    patterns = [
+        r"\b([A-Za-z][A-Za-z /-]{2,40}\s+method)\b",
+        r"([\u0900-\u097fA-Za-z /-]{2,40}\s+विधि)",
+    ]
+    for pat in patterns:
+        for match in re.findall(pat, raw, flags=re.IGNORECASE):
+            cleaned = _final_phrase_cleanup(_cleanup_bullet_text(match))
+            cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,:;-")
+            if cleaned and cleaned not in matches:
+                matches.append(cleaned)
+    return matches
+
+
+def _normalize_comparison_line(text: str) -> str:
+    source = " ".join(str(text or "").split())
+    lower = source.lower()
+
+    from_to_match = re.search(
+        r"([a-z /()_-]{2,60}?)\s+"
+        r"(increase|increased|improved|higher|reduced|decrease|decreased|lower)\s+"
+        r"([a-z% /()_-]{2,60}?)\s+from\s+([0-9]+(?:\.[0-9]+)?)\s+to\s+([0-9]+(?:\.[0-9]+)?)",
+        lower,
+    )
+    if from_to_match:
+        subject = _final_phrase_cleanup(_cleanup_bullet_text(from_to_match.group(1)))
+        metric = _metric_label_hi(from_to_match.group(3))
+        first = from_to_match.group(4)
+        second = from_to_match.group(5)
+        direction = from_to_match.group(2)
+        if direction in {"reduced", "decrease", "decreased", "lower"}:
+            return f"{subject} में {metric} लगभग {first} से घटकर {second} हुआ।"
+        return f"{subject} में {metric} लगभग {first} से बढ़कर {second} हुआ।"
+
+    pair_match = re.search(
+        r"([a-z% /()_-]{3,80}?)\s+([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)\s+"
+        r"(increase|increased|higher|improved|reduced|decrease|decreased|lower)\b",
+        lower,
+    )
+    if pair_match:
+        label = _metric_label_hi(pair_match.group(1))
+        first = pair_match.group(2)
+        second = pair_match.group(3)
+        direction = pair_match.group(4)
+        if direction in {"reduced", "decrease", "decreased", "lower"}:
+            return f"{label} लगभग {first} से घटकर {second} हुआ।"
+        return f"{label} लगभग {first} से बढ़कर {second} हुआ।"
+
+    yield_match = re.search(
+        r"(?:higher|increased|improved)\s+([a-z /_-]{2,40}?)\s+([0-9]+(?:\.[0-9]+)?)"
+        r"(?:\s+and\s+([0-9]+(?:\.[0-9]+)?))?\s+tonnes?/ha",
+        lower,
+    )
+    if yield_match:
+        label = _metric_label_hi(yield_match.group(1))
+        first = yield_match.group(2)
+        second = yield_match.group(3)
+        if second:
+            return f"{label} लगभग {first} और {second} टन/हेक्टेयर तक अधिक दर्ज हुई।"
+        return f"{label} लगभग {first} टन/हेक्टेयर तक अधिक दर्ज हुई।"
+
+    cost_tradeoff_match = re.search(
+        r"(increase|increased|higher|improved)\s+([a-z /()_-]{2,80}?)\s+and\s+([a-z /()_-]{2,80}?)\b",
+        lower,
+    )
+    if cost_tradeoff_match:
+        first_label = _metric_label_hi(cost_tradeoff_match.group(2))
+        second_label = _metric_label_hi(cost_tradeoff_match.group(3))
+        if first_label and second_label:
+            return f"{first_label} और {second_label} बढ़े।"
+
+    recorded_match = re.search(
+        r"(?:recorded|average|observed)?\s*([0-9]+(?:\.[0-9]+)?)\s+(?:tonnes?|t|q)/ha.*?(trench|furrow|farmers practice|method)",
+        lower,
+    )
+    if recorded_match:
+        qty = recorded_match.group(1)
+        return f"उपज लगभग {qty} टन/हेक्टेयर दर्ज हुई।"
+
+    cleaned = _final_phrase_cleanup(_cleanup_bullet_text(source))
+    cleaned = re.sub(r"\bgermination\b", "अंकुरण", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bseed rate\b", "बीज दर", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bfertilizer cost\b", "उर्वरक लागत", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bdoses\b", "मात्रा", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bcost\b", "लागत", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\btonnes?/ha\b", "टन/हेक्टेयर", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bcompared\b", "की तुलना में", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bincreased\b", "बढ़ी", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bhigher\b", "अधिक", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\breduced\b", "घटा", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bdecreased\b", "घटा", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bimproved\b", "बेहतर हुआ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bfrom\b", "से", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bto\b", "तक", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\band\b", "और", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bpercentage\b", "प्रतिशत", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bnumber of tillers\b", "टिलर्स की संख्या", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bshows from above data that\b", "उपलब्ध डेटा से संकेत मिलता है कि", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bwere costly compare to\b", "की तुलना में अधिक खर्चीली थी", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bwere costly compared to\b", "की तुलना में अधिक खर्चीली थी", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .;:-")
+    if cleaned and not cleaned.endswith(("।", ".")):
+        cleaned += "।"
+    return cleaned
+
+
+def _comparison_line_is_noise(text: str) -> bool:
+    lower = str(text or "").lower()
+    noise_terms = [
+        "table", "aes", "which shows", "above data", "due to which",
+        "associate director", "key words", "journal", "references",
+        "population for better growth", "yield data were recorded", "also tillers",
+    ]
+    if any(term in lower for term in noise_terms):
+        return True
+    english_words = re.findall(r"[A-Za-z]{3,}", str(text or ""))
+    if len(english_words) >= 8:
+        return True
+    return False
+
+
+def _comparison_line_weight(text: str) -> float:
+    lower = str(text or "").lower()
+    score = 0.0
+    if re.search(r"[0-9]+(?:\.[0-9]+)?", lower):
+        score += 0.25
+    for token in [
+        "increase", "increased", "higher", "improved", "reduced", "decrease",
+        "decreased", "lower", "yield", "cost", "irrigation", "germination",
+        "productivity", "seed rate", "fertilizer", "intercropping",
+    ]:
+        if token in lower:
+            score += 0.08
+    if _comparison_line_is_noise(text):
+        score -= 0.4
+    if _fragment_is_document_noise(text):
+        score -= 0.35
+    return score
+
+
+def _comparison_evidence_lines(passages: list[dict[str, Any]], limit: int = 3) -> list[str]:
+    candidates: list[tuple[float, str]] = []
+    for passage in passages:
+        raw = str(passage.get("text", "")).strip()
+        if not raw:
+            continue
+        normalized = _normalize_comparison_line(raw)
+        if not normalized or _fragment_is_document_noise(normalized) or _comparison_line_is_noise(normalized):
+            continue
+        candidates.append((_comparison_line_weight(raw), normalized))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    lines: list[str] = []
+    seen: set[str] = set()
+    for _, line in candidates:
+        key = _normalize_line_key(line)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        lines.append(line)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _comparison_conclusion(question: str, passages: list[dict[str, Any]], evidence_lines: list[str]) -> str:
+    method_counts: dict[str, int] = {}
+    for passage in passages:
+        for method in _extract_method_mentions_from_text(str(passage.get("text", ""))):
+            method_counts[method] = method_counts.get(method, 0) + 1
+    primary_method = max(method_counts.items(), key=lambda item: item[1])[0] if method_counts else "वैकल्पिक विधि"
+    positive = 0
+    caution = 0
+    for line in evidence_lines:
+        ll = line.lower()
+        if any(token in ll for token in ["बढ़कर", "अधिक", "बेहतर", "घटकर"]):
+            positive += 1
+        if any(token in ll for token in ["लागत", "बीज दर", "उर्वरक", "खर्चीली"]):
+            caution += 1
+    if _is_method_profit_query(question):
+        if positive >= 2 and caution >= 1:
+            return f"उपलब्ध तुलना-अंशों के आधार पर {primary_method} ज्यादा लाभदायक दिखती है, लेकिन शुरुआती बीज/उर्वरक लागत बढ़ सकती है।"
+        if positive >= 2:
+            return f"उपलब्ध तुलना-अंशों के आधार पर {primary_method} बेहतर और ज्यादा लाभदायक दिखती है।"
+        return "उपलब्ध अंशों में कुछ फायदे दिखते हैं, लेकिन निर्णायक लाभ-निष्कर्ष सीमित है।"
+    if positive >= 2 and caution >= 1:
+        return f"उपलब्ध तुलना-अंशों के आधार पर {primary_method} बेहतर दिखती है, लेकिन शुरुआती इनपुट लागत बढ़ सकती है।"
+    if positive >= 2:
+        return f"उपलब्ध तुलना-अंशों के आधार पर {primary_method} बेहतर दिखती है।"
+    return "उपलब्ध अंश तुलना तो दिखाते हैं, लेकिन निर्णायक निष्कर्ष सीमित है।"
+
+
+def _fallback_comparison_answer(
+    question: str,
+    crop: str,
+    section: str,
+    guide_points: list[str],
+    pdf_path: Path,
+    passages: list[dict[str, Any]],
+    translation_generator: LocalGenerator | None = None,
+) -> str:
+    header = _supplemental_header(question, crop, section)
+    guide_blocks = _guide_evidence_blocks(
+        guide_points,
+        crop,
+        section,
+        translation_generator=translation_generator,
+        max_items=2,
+    )
+    evidence_lines = _comparison_evidence_lines(passages, limit=3)
+    conclusion = _comparison_conclusion(question, passages, evidence_lines)
+    note_lines = [line for line in evidence_lines if any(tok in line for tok in ["लागत", "बीज दर", "उर्वरक", "खर्चीली"])]
+    if not note_lines:
+        note_lines = ["स्थानीय मिट्टी, पानी और प्रबंधन के अनुसार परिणाम बदल सकते हैं।"]
+    else:
+        note_lines = ["शुरुआती बीज दर और उर्वरक लागत/मात्रा बढ़ सकती है।"]
+
+    lines = [header, ""]
+    lines.append(f"- निष्कर्ष: {conclusion}")
+    if guide_blocks:
+        lines.append("- मुख्य crop guide में दिखी सामान्य पद्धति:")
+        for block in guide_blocks:
+            clean_block = re.sub(r"^\[[^\]]+\]\s*\([^\)]+\)\s*", "", block).strip()
+            lines.append(f"- {clean_block}")
+    if evidence_lines:
+        lines.append("- पूरक PDF से मिले मुख्य प्रमाण:")
+        for line in evidence_lines:
+            lines.append(f"- {line}")
+    lines.append("- सावधानियां/नोट:")
+    for line in note_lines[:2]:
+        lines.append(f"- {line}")
+    lines.append(f"- स्रोत: {pdf_path.name}")
+    return "\n".join(lines).strip()
+
+
 def _build_supplemental_pdf_answer(
     question: str,
     crop: str,
@@ -2051,7 +2397,14 @@ def _build_supplemental_pdf_answer(
     pdf_path = _select_supplemental_pdf(question, crop, section)
     if pdf_path is None:
         return None, []
-    passages = _retrieve_supplemental_passages(pdf_path, question, crop, section, k=4)
+    passages = _retrieve_supplemental_passages(
+        pdf_path,
+        question,
+        crop,
+        section,
+        k=4,
+        reasoning_generator=reasoning_generator,
+    )
     if not passages:
         return None, []
     response_sources = [str(pdf_path)]
