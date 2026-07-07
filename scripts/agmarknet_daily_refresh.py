@@ -11,6 +11,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_CSV = ROOT / "data" / "raw" / "live" / "agmarknet_report.csv"
+CATALOG_CSV = ROOT / "data" / "processed" / "agmarknet_catalog.csv"
 STATUS_JSON = ROOT / "data" / "raw" / "live" / "agmarknet_refresh_status.json"
 
 
@@ -27,6 +28,22 @@ def _latest_report_date(path: Path) -> str:
     if dt.dropna().empty:
         return ""
     return dt.max().date().isoformat()
+
+
+def _write_catalog(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        df = pd.read_csv(path, usecols=["state_name", "district_name", "cmdt_name"])
+        df = df.rename(columns={"state_name": "State", "district_name": "District", "cmdt_name": "Commodity"})
+    except Exception:
+        try:
+            df = pd.read_csv(path, usecols=["State", "District", "Commodity"])
+        except Exception:
+            return
+    df = df.fillna("").astype(str).drop_duplicates().sort_values(["State", "District", "Commodity"])
+    CATALOG_CSV.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(CATALOG_CSV, index=False)
 
 
 def main() -> int:
@@ -161,6 +178,7 @@ def main() -> int:
             if not after_latest:
                 continue
             if (not before_latest) or after_latest > before_latest:
+                _write_catalog(OUT_CSV)
                 msg = (
                     f"Agmarknet refresh advanced report date from {before_latest or 'N/A'} "
                     f"to {after_latest} using lookback_days={lb}, limit={limit_value}"
@@ -177,6 +195,7 @@ def main() -> int:
                 )
                 return 0
             if run_status == "success":
+                _write_catalog(OUT_CSV)
                 msg = (
                     f"Agmarknet refresh completed successfully with lookback_days={lb}, "
                     f"limit={limit_value}; latest report date remains {after_latest}."
@@ -201,6 +220,7 @@ def main() -> int:
         print("Agmarknet refresh finished but no output date could be read.", file=sys.stderr)
         write_status("failed", "Agmarknet refresh finished but no output date could be read.")
         return 2
+    _write_catalog(OUT_CSV)
     msg = f"Agmarknet refresh finished but report date did not advance (before={before_latest}, after={after_latest})."
     print(msg, file=sys.stderr)
     write_status("stale", msg, {"after_latest": after_latest})

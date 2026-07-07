@@ -86,6 +86,7 @@ cfg = load_config()
 APP_BUILD_VERSION = "2026-06-21-white-grub-source-verify-v1"
 LIVE_MARKET_CSV = Path("data/raw/live/datagov_commodity.csv")
 AGMARKNET_CSV = Path("data/raw/live/agmarknet_report.csv")
+AGMARKNET_CATALOG_CSV = Path("data/processed/agmarknet_catalog.csv")
 AGMARKNET_AUTO_REFRESH_META = Path("data/raw/live/agmarknet_auto_refresh.json")
 AGMARKNET_AUTO_REFRESH_LOG = Path("logs/agmarknet_auto_refresh.log")
 AGMARKNET_AUTO_REFRESH_RETRY_MINUTES = 30
@@ -748,6 +749,26 @@ def normalize_agmarknet_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def build_agmarknet_catalog_df(df: pd.DataFrame) -> pd.DataFrame:
+    out = normalize_agmarknet_df(df)
+    keep = [col for col in ["State", "District", "Commodity"] if col in out.columns]
+    if not keep:
+        return pd.DataFrame(columns=["State", "District", "Commodity"])
+    catalog = out[keep].copy()
+    for col in ["State", "District", "Commodity"]:
+        if col not in catalog.columns:
+            catalog[col] = ""
+    catalog = catalog[["State", "District", "Commodity"]].fillna("")
+    catalog = catalog.astype(str).drop_duplicates().sort_values(["State", "District", "Commodity"])
+    return catalog.reset_index(drop=True)
+
+
+def save_agmarknet_catalog(df: pd.DataFrame, out_path: Path = AGMARKNET_CATALOG_CSV) -> None:
+    catalog = build_agmarknet_catalog_df(df)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog.to_csv(out_path, index=False)
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     from math import radians, sin, cos, asin, sqrt
 
@@ -899,6 +920,9 @@ def _load_agmarknet_df_cached(mtime_ns: int) -> pd.DataFrame:
 
 
 def load_agmarknet_catalog() -> pd.DataFrame:
+    if AGMARKNET_CATALOG_CSV.exists():
+        mtime_ns = AGMARKNET_CATALOG_CSV.stat().st_mtime_ns
+        return _load_agmarknet_catalog_cached(mtime_ns)
     if not AGMARKNET_CSV.exists():
         return pd.DataFrame(columns=["State", "District", "Commodity"])
     mtime_ns = AGMARKNET_CSV.stat().st_mtime_ns
@@ -908,6 +932,15 @@ def load_agmarknet_catalog() -> pd.DataFrame:
 @lru_cache(maxsize=4)
 def _load_agmarknet_catalog_cached(mtime_ns: int) -> pd.DataFrame:
     _ = mtime_ns
+    if AGMARKNET_CATALOG_CSV.exists():
+        try:
+            df = pd.read_csv(AGMARKNET_CATALOG_CSV)
+            for col in ["State", "District", "Commodity"]:
+                if col not in df.columns:
+                    df[col] = ""
+            return df[["State", "District", "Commodity"]].fillna("").astype(str)
+        except Exception:
+            pass
     raw_usecols_candidates = [
         ["state_name", "district_name", "cmdt_name"],
         ["State", "District", "Commodity"],
@@ -924,16 +957,11 @@ def _load_agmarknet_catalog_cached(mtime_ns: int) -> pd.DataFrame:
             df = pd.read_csv(AGMARKNET_CSV)
         except Exception:
             return pd.DataFrame(columns=["State", "District", "Commodity"])
-    df = normalize_agmarknet_df(df)
-    keep = [col for col in ["State", "District", "Commodity"] if col in df.columns]
-    if not keep:
-        return pd.DataFrame(columns=["State", "District", "Commodity"])
-    out = df[keep].copy()
-    for col in ["State", "District", "Commodity"]:
-        if col not in out.columns:
-            out[col] = ""
-    out = out[["State", "District", "Commodity"]]
-    out = out.fillna("")
+    out = build_agmarknet_catalog_df(df)
+    try:
+        save_agmarknet_catalog(out)
+    except Exception:
+        pass
     return out
 
 
@@ -2924,6 +2952,10 @@ with st.sidebar:
             new_df = pd.DataFrame(recs)
             merged = merge_market_data(LIVE_MARKET_CSV, new_df)
             merged.to_csv(LIVE_MARKET_CSV, index=False)
+            try:
+                save_agmarknet_catalog(merged)
+            except Exception:
+                pass
             clear_local_caches()
             return len(new_df), len(merged)
         return 0, 0
