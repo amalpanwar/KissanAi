@@ -2021,7 +2021,8 @@ def _fallback_supplemental_answer(
     if guide_blocks:
         lines.append("- मुख्य crop guide से मिले बिंदु:")
         for block in guide_blocks:
-            lines.append(f"- {re.sub(r'^\\[[^\\]]+\\]\\s*\\([^\\)]+\\)\\s*', '', block).strip()}")
+            clean_block = re.sub(r"^\[[^\]]+\]\s*\([^\)]+\)\s*", "", block).strip()
+            lines.append(f"- {clean_block}")
     lines.append("- पूरक PDF से प्राप्त संबंधित बिंदु:")
     for passage in passages[:4]:
         snippet = _supplemental_passage_summary(
