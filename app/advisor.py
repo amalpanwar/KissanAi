@@ -520,7 +520,7 @@ class RAGAdvisor:
         ):
             parsed_intent = self._parse_agri_intent(normalized_question, context_part)
         if parsed_intent.subject == "crop_method":
-            self._ensure_rag_components(load_generator=True)
+            self._ensure_rag_components(load_generator=False)
             guide_followup_answer, guide_followup_sources = build_crop_production_followup(
                 normalized_question,
                 crop_hint=parsed_intent.crop or self._extract_preferred_crop_from_context(context_part),
@@ -671,7 +671,7 @@ class RAGAdvisor:
             )
             result["topic"] = "pesticide"
             return result
-        self._ensure_rag_components(load_generator=True)
+        self._ensure_rag_components(load_generator=False)
         guide_followup_answer, guide_followup_sources = build_crop_production_followup(
             normalized_question,
             crop_hint=self._extract_preferred_crop_from_context(context_part),

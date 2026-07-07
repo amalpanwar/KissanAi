@@ -3796,7 +3796,7 @@ if user_query:
                 and advisor._has_agri_intent(normalized_user_query)
                 and not advisor._is_weather_intent(normalized_user_query)
             ):
-                advisor._ensure_rag_components(load_generator=True)
+                advisor._ensure_rag_components(load_generator=False)
                 guide_answer, guide_sources = build_crop_production_followup(
                     normalized_user_query,
                     crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
@@ -3852,7 +3852,7 @@ if user_query:
                 and (crop_guide_followup_detected or _looks_like_crop_water_followup(user_query, advisor))
                 and advisor._has_agri_intent(normalized_user_query)
             ):
-                advisor._ensure_rag_components(load_generator=True)
+                advisor._ensure_rag_components(load_generator=False)
                 guide_answer, guide_sources = build_crop_production_followup(
                     normalized_user_query,
                     crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,

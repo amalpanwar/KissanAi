@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -25,8 +26,14 @@ def _load_pypdf_reader():
     return PdfReader
 
 
+def _docling_runtime_enabled() -> bool:
+    return os.getenv("KISAANAI_ENABLE_DOCLING_RUNTIME", "").strip().lower() in {"1", "true", "yes"}
+
+
 @lru_cache(maxsize=1)
 def _docling_converter():
+    if not _docling_runtime_enabled():
+        return None
     try:
         from docling.document_converter import DocumentConverter, InputFormat, PdfFormatOption
         from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -52,7 +59,7 @@ def _docling_converter():
 def _cache_file(pdf_path: Path, prefer_docling: bool = True) -> Path:
     stat = pdf_path.stat()
     if prefer_docling:
-        engine_state = "docling" if _docling_converter() is not None else "pypdf-fallback"
+        engine_state = "docling" if (_docling_runtime_enabled() and _docling_converter() is not None) else "pypdf-fallback"
     else:
         engine_state = "pypdf-only"
     cache_key = hashlib.sha1(
@@ -141,6 +148,8 @@ def _extract_docling_pages(doc: Any) -> list[str]:
 
 
 def _extract_with_docling(pdf_path: Path) -> dict[str, Any] | None:
+    if not _docling_runtime_enabled():
+        return None
     converter = _docling_converter()
     if converter is None:
         return None

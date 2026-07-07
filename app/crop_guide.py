@@ -1707,6 +1707,9 @@ def _guide_translation_generator() -> LocalGenerator | None:
 
 @lru_cache(maxsize=1)
 def _guide_reasoning_generator() -> LocalGenerator | None:
+    enabled = os.getenv("KISAANAI_ENABLE_LLM_PDF_REASONING", "").strip().lower() in {"1", "true", "yes"}
+    if not enabled:
+        return None
     try:
         return LocalGenerator(_guide_generator_model())
     except Exception:
