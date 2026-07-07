@@ -686,10 +686,24 @@ def _final_phrase_cleanup(text: str) -> str:
         (r"\bbasal\b", "बेसल"),
         (r"\bsplit dose\b", "भागों में"),
         (r"\bbud damage\b", "bud को नुकसान"),
+        (r"\bseed cane\b", "बीज गन्ना"),
+        (r"\bsett material\b", "सेट सामग्री"),
+        (r"\bsetts\b", "सेट्स"),
+        (r"\bsett\b", "सेट"),
+        (r"\bbuds\b", "बड्स"),
+        (r"\bbud\b", "बड"),
+        (r"\bfurrow\b", "नाली/फरो"),
+        (r"\bslurry\b", "गीला घोल"),
         (r"\bproductivity\b", "उत्पादकता"),
         (r"\binput cost\b", "शुरुआती लागत"),
+        (r"\binput\b", "प्रारंभिक निवेश"),
         (r"\bfield trials\b", "परीक्षणों"),
         (r"\btrials\b", "परीक्षणों"),
+        (r"\btrench method\b", "ट्रेंच विधि"),
+        (r"\bfurrow method\b", "फरो/नाली विधि"),
+        (r"\bfarmers practices?\b", "सामान्य किसान पद्धति"),
+        (r"\bcutting machine\b", "कटिंग मशीन"),
+        (r"\bcane\b", "गन्ना"),
         (r"\bmid-season\b", "मध्यम अवधि वाली"),
         (r"\bearly variety\b", "जल्दी पकने वाली किस्म"),
         (r"\bmid-season variety\b", "मध्यम अवधि वाली किस्म"),
@@ -701,6 +715,7 @@ def _final_phrase_cleanup(text: str) -> str:
     out = re.sub(r"\bNAA का पत्तियों पर छिड़काव\b", "NAA का छिड़काव", out)
     out = re.sub(r"\bBoric Acid\b", "Boric Acid", out)
     out = out.replace("पीछे की पीछे की पत्तियां", "पीछे की पत्तियां")
+    out = out.replace("गीली गीला घोल", "गीला घोल")
     out = out.replace("flower flower heads/capitulum", "flower heads/capitulum")
     out = out.replace("flower flower heads", "flower heads")
     out = out.replace("heads को", "flower heads को")
@@ -1691,6 +1706,14 @@ def _guide_translation_generator() -> LocalGenerator | None:
 
 
 @lru_cache(maxsize=1)
+def _guide_reasoning_generator() -> LocalGenerator | None:
+    try:
+        return LocalGenerator(_guide_generator_model())
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=1)
 def _guide_chunk_size() -> int:
     try:
         cfg = load_config()
@@ -2029,7 +2052,7 @@ def _build_supplemental_pdf_answer(
         return None, []
     response_sources = [str(pdf_path)]
 
-    generator = reasoning_generator or _guide_translation_generator()
+    generator = reasoning_generator or _guide_reasoning_generator() or _guide_translation_generator()
     mode = _supplemental_query_mode(question, section)
     guide_blocks = _guide_evidence_blocks(
         guide_points,
