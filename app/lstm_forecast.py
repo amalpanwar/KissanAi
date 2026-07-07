@@ -4,21 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-import torch
-from torch import nn
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-
-
-class PriceLSTM(nn.Module):
-    def __init__(self, input_size: int = 1, hidden_size: int = 64, num_layers: int = 1) -> None:
-        super().__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, 1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out, _ = self.lstm(x)
-        out = out[:, -1, :]
-        return self.fc(out)
 
 
 @dataclass
@@ -70,6 +55,8 @@ def quick_forecast(
 
 
 def _auto_sarima_forecast(values: np.ndarray, horizon_days: int) -> np.ndarray:
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+
     # Simple auto-SARIMA via small AIC grid search.
     best_aic = None
     best_model = None
@@ -202,7 +189,6 @@ def train_and_forecast(
     max_daily_change_pct: float = 0.05,
     model: str = "sarima",
 ) -> ForecastResult:
-    torch.manual_seed(seed)
     np.random.seed(seed)
 
     data = series_df.sort_values("date").reset_index(drop=True).copy()
@@ -228,6 +214,29 @@ def train_and_forecast(
             return ForecastResult(history=data, forecast=forecast_df)
         except Exception:
             pass
+
+    try:
+        import torch
+        from torch import nn
+    except Exception:
+        return quick_forecast(
+            series_df=data,
+            horizon_days=horizon_days,
+            max_daily_change_pct=max_daily_change_pct,
+        )
+
+    class PriceLSTM(nn.Module):
+        def __init__(self, input_size: int = 1, hidden_size: int = 64, num_layers: int = 1) -> None:
+            super().__init__()
+            self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, batch_first=True)
+            self.fc = nn.Linear(hidden_size, 1)
+
+        def forward(self, x):
+            out, _ = self.lstm(x)
+            out = out[:, -1, :]
+            return self.fc(out)
+
+    torch.manual_seed(seed)
 
     vmin, vmax = float(values.min()), float(values.max())
     denom = (vmax - vmin) if (vmax - vmin) > 1e-8 else 1.0
