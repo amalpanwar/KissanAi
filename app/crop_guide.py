@@ -1952,6 +1952,31 @@ def _supplemental_header(question: str, crop: str, section: str) -> str:
     return f"{crop_label} के लिए {section_hi} से जुड़ी जानकारी:"
 
 
+def _guide_evidence_blocks(
+    guide_points: list[str],
+    crop: str,
+    section: str,
+    translation_generator: LocalGenerator | None = None,
+    max_items: int = 3,
+) -> list[str]:
+    blocks: list[str] = []
+    seen: set[str] = set()
+    for idx, point in enumerate(guide_points[:max_items], start=1):
+        text = _final_phrase_cleanup(str(point or "").strip())
+        if not text:
+            continue
+        key = _normalize_line_key(text)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _is_english_heavy(text, crop):
+            text = _translate_pdf_summary(text, generator=translation_generator)
+        if not text:
+            continue
+        blocks.append(f"[G{idx}] (crop_guide) {text}")
+    return blocks
+
+
 def _fallback_supplemental_answer(
     question: str,
     crop: str,
@@ -1961,9 +1986,20 @@ def _fallback_supplemental_answer(
     passages: list[dict[str, Any]],
     translation_generator: LocalGenerator | None = None,
 ) -> str:
-    del guide_points
     header = _supplemental_header(question, crop, section)
-    lines = [header, "", "- PDF से प्राप्त संबंधित बिंदु:"]
+    lines = [header, ""]
+    guide_blocks = _guide_evidence_blocks(
+        guide_points,
+        crop,
+        section,
+        translation_generator=translation_generator,
+        max_items=3,
+    )
+    if guide_blocks:
+        lines.append("- मुख्य crop guide से मिले बिंदु:")
+        for block in guide_blocks:
+            lines.append(f"- {re.sub(r'^\\[[^\\]]+\\]\\s*\\([^\\)]+\\)\\s*', '', block).strip()}")
+    lines.append("- पूरक PDF से प्राप्त संबंधित बिंदु:")
     for passage in passages[:4]:
         snippet = _supplemental_passage_summary(
             passage,
@@ -1991,29 +2027,47 @@ def _build_supplemental_pdf_answer(
     passages = _retrieve_supplemental_passages(pdf_path, question, crop, section, k=4)
     if not passages:
         return None, []
+    response_sources = [str(pdf_path)]
 
+    generator = reasoning_generator or _guide_translation_generator()
     mode = _supplemental_query_mode(question, section)
-    evidence_blocks = []
+    guide_blocks = _guide_evidence_blocks(
+        guide_points,
+        crop,
+        section,
+        translation_generator=generator,
+        max_items=3,
+    )
+    if guide_blocks:
+        response_sources = [str(GUIDE_PDF), str(pdf_path)]
+    supplemental_blocks: list[str] = []
     for idx, passage in enumerate(passages[:4], start=1):
         snippet = _supplemental_passage_summary(
             passage,
             question,
             crop,
             section,
-            translation_generator=reasoning_generator,
+            translation_generator=generator,
         )
         if snippet:
             section_name = str(passage.get("section") or "body")
-            evidence_blocks.append(f"[{idx}] ({section_name}) {snippet}")
+            supplemental_blocks.append(f"[S{idx}] (supplemental_pdf:{section_name}) {snippet}")
+    evidence_blocks = guide_blocks + supplemental_blocks
     if not evidence_blocks:
         return None, []
 
-    generator = reasoning_generator
     if generator is not None:
         header = _supplemental_header(question, crop, section)
         task_instruction = {
-            "comparison": "अगर सवाल तुलना, बेहतर या लाभदायक विधि का है, तो केवल evidence में दिखी विधियों/प्रथाओं की तुलना करें।",
-            "instructional": "अगर सवाल किसी विधि या प्रक्रिया के बारे में है, तो केवल evidence में दिखे कदम और शर्तें बताएं।",
+            "comparison": (
+                "अगर सवाल तुलना, बेहतर या लाभदायक विधि का है, तो crop guide में दिखी सामान्य/मानक पद्धति "
+                "और supplemental PDF में दिखी वैकल्पिक/तुलनात्मक पद्धति को केवल evidence के आधार पर compare करें। "
+                "जिस पद्धति के पक्ष में yield, cost, water, germination या risk का evidence मजबूत हो, उसी को निष्कर्ष में बताएं।"
+            ),
+            "instructional": (
+                "अगर सवाल किसी विधि या प्रक्रिया के बारे में है, तो crop guide और supplemental PDF दोनों में मिले प्रासंगिक कदम "
+                "और शर्तें मिलाकर साफ तरीके से बताएं।"
+            ),
         }.get(mode, "केवल evidence में मिली जानकारी को किसान-हितैषी ढंग से संक्षेप में समझाएं।")
         prompt = (
             "You are an agricultural retrieval assistant.\n"
@@ -2025,15 +2079,19 @@ def _build_supplemental_pdf_answer(
             "If evidence is not enough for a firm conclusion, say so clearly.\n\n"
             f"Question: {question}\n"
             f"Crop: {crop}\n"
+            f"Section: {section}\n"
             f"Evidence:\n" + "\n".join(evidence_blocks) + "\n\n"
             "Return a concise structured answer in Hindi using this exact structure:\n"
             f"{header}\n"
             "- निष्कर्ष: ...\n"
             "- प्रमाण:\n"
             "- ...\n"
+            "- मुख्य अंतर:\n"
+            "- ...\n"
             "- सावधानियां/नोट:\n"
             "- ...\n"
             "Use only the sections that are supported by the evidence. If a section is not supported, omit it.\n"
+            "If both crop_guide and supplemental_pdf evidence exist, do not ignore either source.\n"
             "Return only the answer.\n"
         )
         try:
@@ -2047,7 +2105,7 @@ def _build_supplemental_pdf_answer(
                     answer = _final_phrase_cleanup(answer)
                     if f"स्रोत:" not in answer:
                         answer = answer.rstrip() + f"\n- स्रोत: {pdf_path.name}"
-                    return answer, [str(pdf_path)]
+                    return answer, response_sources
         except Exception:
             pass
 
@@ -2058,8 +2116,8 @@ def _build_supplemental_pdf_answer(
         guide_points,
         pdf_path,
         passages,
-        translation_generator=reasoning_generator,
-    ), [str(pdf_path)]
+        translation_generator=generator,
+    ), response_sources
 
 
 @lru_cache(maxsize=8)
