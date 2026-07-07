@@ -32,6 +32,12 @@ It combines:
    pip install -r requirements.txt
    ```
 
+   Optional extras:
+   ```bash
+   pip install -r requirements-docling.txt   # PDF extraction utilities
+   pip install -r requirements-train.txt     # fine-tuning stack
+   ```
+
 2. Add source documents in `data/raw/`:
    - Research papers (PDF/TXT)
    - Government advisories
@@ -76,6 +82,11 @@ make ci
    ```bash
    pip install -r requirements.txt
    ```
+   Optional:
+   ```bash
+   pip install -r requirements-docling.txt
+   pip install -r requirements-train.txt
+   ```
 2. Initialize and index data
    ```bash
    python scripts/init_db.py
@@ -119,6 +130,7 @@ Notes:
 
 Notes:
 - First startup can take time due to model download.
+- Streamlit Cloud installs only `requirements.txt`. Keep heavy offline extraction and training dependencies in the optional requirements files above.
 - Cloud secrets should be added in the Streamlit app settings, not by committing `.env`.
 
 ### Streamlit secrets for email + APIs
