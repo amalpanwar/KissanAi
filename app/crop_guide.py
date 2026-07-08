@@ -13,6 +13,12 @@ from app.config import load_config
 from app.embeddings import Embedder
 from app.generator import LocalGenerator
 from app.pdf_extract import read_pdf_pages, read_pdf_text
+from app.pdf_vector_cache import (
+    load_cached_chunks,
+    load_cached_vectors,
+    save_cached_chunks,
+    save_cached_vectors,
+)
 
 
 GUIDE_PDF = Path("data/raw/Crop Production guide.pdf")
@@ -21,6 +27,7 @@ GUIDE_REVIEW_QUEUE = Path("data/processed/guide_review_queue.jsonl")
 PDF_OFFSET = 12  # printed page 1 starts at PDF page 13
 DEFAULT_GUIDE_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_GUIDE_GENERATOR_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+SUPPLEMENTAL_VECTOR_CACHE_VERSION = "supplemental-v2"
 
 MANUAL_PAGE_MAP = {
     "Rice": 1,
@@ -1726,6 +1733,17 @@ def _guide_chunk_size() -> int:
 
 
 @lru_cache(maxsize=1)
+def _supplemental_chunk_params() -> tuple[int, int]:
+    try:
+        cfg = load_config()
+        chunk_size = max(320, int(cfg.chunk_size))
+        overlap = max(60, min(int(cfg.overlap), chunk_size // 2))
+        return chunk_size, overlap
+    except Exception:
+        return 800, 120
+
+
+@lru_cache(maxsize=1)
 def _supplemental_pdf_catalog() -> list[Path]:
     raw_dir = GUIDE_PDF.parent
     docs: list[Path] = []
@@ -2683,8 +2701,74 @@ def _looks_like_tabular_noise(line: str) -> bool:
     return False
 
 
+def _build_overlap_line_chunks(
+    lines: list[dict[str, Any]],
+    *,
+    target_chars: int,
+    overlap_chars: int,
+) -> list[dict[str, Any]]:
+    if not lines:
+        return []
+    chunks: list[dict[str, Any]] = []
+    window: list[dict[str, Any]] = []
+    window_chars = 0
+
+    def emit(parts: list[dict[str, Any]]) -> None:
+        if not parts:
+            return
+        chunk_text = re.sub(r"\s+", " ", " ".join(str(part.get("text", "")) for part in parts)).strip()
+        if len(chunk_text) < 80:
+            return
+        section_counts: dict[str, int] = {}
+        for part in parts:
+            section = str(part.get("section") or "front_matter")
+            section_counts[section] = section_counts.get(section, 0) + 1
+        dominant_section = max(section_counts.items(), key=lambda item: item[1])[0]
+        chunks.append(
+            {
+                "text": chunk_text,
+                "start_line": int(parts[0].get("line_no") or 1),
+                "end_line": int(parts[-1].get("line_no") or len(parts)),
+                "section": dominant_section,
+            }
+        )
+
+    for entry in lines:
+        text = str(entry.get("text", "")).strip()
+        if not text:
+            continue
+        line_chars = len(text) + 1
+        if window and window_chars + line_chars > target_chars and window_chars >= max(160, int(target_chars * 0.6)):
+            emit(window)
+            retained: list[dict[str, Any]] = []
+            retained_chars = 0
+            for prev in reversed(window):
+                retained.insert(0, prev)
+                retained_chars += len(str(prev.get("text", "")).strip()) + 1
+                if retained_chars >= overlap_chars:
+                    break
+            window = retained
+            window_chars = retained_chars
+        window.append(entry)
+        window_chars += line_chars
+
+    emit(window)
+    return chunks
+
+
 @lru_cache(maxsize=8)
 def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
+    target_chars, overlap_chars = _supplemental_chunk_params()
+    cached = load_cached_chunks(
+        pdf_path_str,
+        version=SUPPLEMENTAL_VECTOR_CACHE_VERSION,
+        chunk_size=target_chars,
+        overlap=overlap_chars,
+        prefer_docling=True,
+    )
+    if cached:
+        return cached
+
     text = _supplemental_pdf_text(pdf_path_str)
     if not text:
         return []
@@ -2750,33 +2834,11 @@ def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
     if not lines and not priority_chunks:
         return []
 
-    window_lines = max(3, min(4, _guide_chunk_size()))
-    overlap_lines = max(1, window_lines // 3)
-    chunks: list[dict[str, Any]] = []
-    start = 0
-    while start < len(lines):
-        end = min(len(lines), start + window_lines)
-        parts = lines[start:end]
-        if not parts:
-            break
-        chunk_text = re.sub(r"\s+", " ", " ".join(str(part.get("text", "")) for part in parts)).strip()
-        if len(chunk_text) >= 80:
-            section_counts: dict[str, int] = {}
-            for part in parts:
-                section = str(part.get("section") or "front_matter")
-                section_counts[section] = section_counts.get(section, 0) + 1
-            dominant_section = max(section_counts.items(), key=lambda item: item[1])[0]
-            chunks.append(
-                {
-                    "text": chunk_text,
-                    "start_line": int(parts[0].get("line_no") or (start + 1)),
-                    "end_line": int(parts[-1].get("line_no") or end),
-                    "section": dominant_section,
-                }
-            )
-        if end >= len(lines):
-            break
-        start = max(start + 1, end - overlap_lines)
+    chunks = _build_overlap_line_chunks(
+        lines,
+        target_chars=target_chars,
+        overlap_chars=overlap_chars,
+    )
 
     combined = priority_chunks + chunks
     deduped: list[dict[str, Any]] = []
@@ -2787,11 +2849,32 @@ def _supplemental_pdf_chunks(pdf_path_str: str) -> list[dict[str, Any]]:
             continue
         seen.add(key)
         deduped.append(chunk)
+    try:
+        save_cached_chunks(
+            pdf_path_str,
+            deduped,
+            version=SUPPLEMENTAL_VECTOR_CACHE_VERSION,
+            chunk_size=target_chars,
+            overlap=overlap_chars,
+            prefer_docling=True,
+        )
+    except Exception:
+        pass
     return deduped
 
 
 @lru_cache(maxsize=8)
 def _supplemental_pdf_vectors(pdf_path_str: str) -> Any:
+    target_chars, overlap_chars = _supplemental_chunk_params()
+    cached = load_cached_vectors(
+        pdf_path_str,
+        version=SUPPLEMENTAL_VECTOR_CACHE_VERSION,
+        chunk_size=target_chars,
+        overlap=overlap_chars,
+        prefer_docling=True,
+    )
+    if cached is not None:
+        return cached
     chunks = _supplemental_pdf_chunks(pdf_path_str)
     if not chunks:
         return None
@@ -2799,7 +2882,16 @@ def _supplemental_pdf_vectors(pdf_path_str: str) -> Any:
     if embedder is None:
         return None
     try:
-        return embedder.encode([str(chunk.get("text", "")) for chunk in chunks])
+        vectors = embedder.encode([str(chunk.get("text", "")) for chunk in chunks])
+        save_cached_vectors(
+            pdf_path_str,
+            vectors,
+            version=SUPPLEMENTAL_VECTOR_CACHE_VERSION,
+            chunk_size=target_chars,
+            overlap=overlap_chars,
+            prefer_docling=True,
+        )
+        return vectors
     except Exception:
         return None
 

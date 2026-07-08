@@ -94,6 +94,10 @@ make ci
    python scripts/ingest_documents.py --input_dir data/raw
    python scripts/build_index.py
    ```
+   For non-pesticide PDF retrieval quality, prebuild Docling-first overlap chunk caches:
+   ```bash
+   KISAANAI_ENABLE_DOCLING_RUNTIME=1 python scripts/build_pdf_vector_cache.py
+   ```
 3. Run Streamlit app
    ```bash
    streamlit run streamlit_app.py
