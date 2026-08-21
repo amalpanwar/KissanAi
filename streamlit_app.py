@@ -1492,7 +1492,8 @@ def _resolve_query_location(query: str, *, allow_place_lookup: bool = True) -> t
     lookup = load_location_lookup(lookup_mtime)
     district, state = _extract_explicit_district_from_query(query, lookup)
     if district or state:
-        return None, district, state
+        explicit_place = district or None
+        return explicit_place, district, state
     if not allow_place_lookup:
         return None, None, None
     place = extract_place_from_query(query)
@@ -3356,7 +3357,7 @@ if user_query:
         question_for_advisor = user_query.strip()
         if (
             weather_intent
-            and not query_place
+            and not (query_place or query_place_district or query_place_state)
             and last_location_ctx.get("place")
         ):
             question_for_advisor = f"{last_location_ctx['place']} में {question_for_advisor}"
@@ -3913,9 +3914,9 @@ if user_query:
                 st.session_state["last_structured_topic"] = topic
                 if topic == "weather":
                     place_guess, weather_district, weather_state = _resolve_query_location(user_query)
-                    if place_guess:
+                    if place_guess or weather_district:
                         _set_session_location_context(
-                            place_guess,
+                            place_guess or weather_district,
                             weather_district or last_location_ctx.get("district", ""),
                             weather_state or last_location_ctx.get("state", "Uttar Pradesh") or "Uttar Pradesh",
                         )
