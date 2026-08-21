@@ -200,6 +200,20 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
             for norm in phrase_norms:
                 if norm in place_map:
                     return _row_to_result(place_map[norm], norm)
+        # Prefer exact sub-district/district matches before village-prefix matches.
+        for col in ["sub_district", "district"]:
+            if col not in df.columns:
+                continue
+            for _, row in df.iterrows():
+                cand = (row.get(col) or "").strip()
+                if not cand:
+                    continue
+                if _normalize_place(cand) in phrase_norms:
+                    row_dict = row.to_dict()
+                    row_dict["place"] = cand
+                    return _row_to_result(row_dict, cand)
+        if "place_norm" in df.columns:
+            place_map = {str(v): row for v, row in zip(df["place_norm"], df.to_dict(orient="records")) if v}
             # Prefix match: handle shortened village names like "doghat" -> "doghatrural"
             best_row = None
             best_len = None
@@ -215,18 +229,6 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
                     best_row = place_map[pick]
             if best_row:
                 return _row_to_result(best_row, best_row.get("place", text))
-        # Fallback: match sub-district or district if explicitly mentioned
-        for col in ["sub_district", "district"]:
-            if col not in df.columns:
-                continue
-            for _, row in df.iterrows():
-                cand = (row.get(col) or "").strip()
-                if not cand:
-                    continue
-                if _normalize_place(cand) in phrase_norms:
-                    row_dict = row.to_dict()
-                    row_dict["place"] = cand
-                    return _row_to_result(row_dict, cand)
 
     # Fallback: prefix match for shortened village names (e.g., "doghat" -> "doghatrural")
     try:
