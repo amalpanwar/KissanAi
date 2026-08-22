@@ -1514,10 +1514,6 @@ def _set_session_location_context(place: str | None, district: str | None, state
         "district": clean_district,
         "state": clean_state,
     }
-    st.session_state["pending_sidebar_location"] = {
-        "state": clean_state,
-        "district": clean_district,
-    }
 
 
 def _extract_explicit_district_from_query(query: str, lookup: pd.DataFrame) -> tuple[str | None, str | None]:
@@ -3065,14 +3061,7 @@ if isinstance(pending, dict):
     if "fc_commodity_override" not in st.session_state:
         st.session_state["fc_commodity_override"] = pending.get("commodity", "")
 
-pending_sidebar_location = st.session_state.pop("pending_sidebar_location", None)
-if isinstance(pending_sidebar_location, dict):
-    pending_state = str(pending_sidebar_location.get("state") or "").strip()
-    pending_district = str(pending_sidebar_location.get("district") or "").strip()
-    if pending_state:
-        st.session_state["fc_state"] = pending_state
-    if pending_district:
-        st.session_state["fc_district"] = pending_district
+st.session_state.pop("pending_sidebar_location", None)
 
 agmarknet_status = _load_agmarknet_refresh_status()
 latest_report_date = _latest_agmarknet_report_date(AGMARKNET_CSV)
