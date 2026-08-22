@@ -1229,7 +1229,25 @@ def _normalize_district_name(name: str) -> str:
     return n
 
 
-def extract_place_from_query(query: str) -> str | None:
+
+def _filter_location_lookup_scope(
+    lookup: pd.DataFrame,
+    state: str | None = None,
+    district: str | None = None,
+) -> pd.DataFrame:
+    if lookup.empty:
+        return lookup
+    out = lookup.copy()
+    state_norm = str(state or "").strip().lower()
+    district_norm = _normalize_district_name(district or "")
+    if state_norm and "state" in out.columns:
+        out = out[out["state"].astype(str).str.strip().str.lower() == state_norm]
+    if district_norm and "district" in out.columns:
+        out = out[out["district"].astype(str).map(_normalize_district_name) == district_norm]
+    return out
+
+
+def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> str | None:
     # Prefer a direct lookup match from the known location table before falling
     # back to token filtering. This keeps place parsing stable even when the
     # query contains extra words like commodity names or question words.
@@ -1258,9 +1276,10 @@ def extract_place_from_query(query: str) -> str | None:
             for t in re.findall(r"[a-z0-9]+", alias.lower()):
                 commodity_tokens.add(t)
 
-    lookup_path = Path("data/processed/location_lookup.csv")
-    lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
-    lookup = load_location_lookup(lookup_mtime)
+    if lookup is None:
+        lookup_path = Path("data/processed/location_lookup.csv")
+        lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+        lookup = load_location_lookup(lookup_mtime)
     q_norm = _normalize_text(q)
     q_tokens = re.findall(r"[a-z0-9]+", q.lower())
     if q_norm and not lookup.empty:
@@ -1329,6 +1348,7 @@ def extract_place_from_query(query: str) -> str | None:
         if district_guess or state_guess:
             return candidate
     return None
+
 
 
 def _place_variants(place: str) -> list[str]:
@@ -1486,6 +1506,162 @@ def _extract_explicit_district_from_query(query: str, lookup: pd.DataFrame) -> t
     return best[2] or None, best[3] or None
 
 
+def _extract_location_search_hint(query: str) -> str | None:
+    q = str(query or "").strip()
+    if not q:
+        return None
+    stop = {
+        "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
+        "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
+        "me", "mein", "में", "kesa", "kaisa", "hai", "h",
+        "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
+        "lagta", "lagti", "lagte", "lata", "leti", "chahiye",
+        "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam",
+        "भाव", "कीमत", "मंडी", "मौसम", "weather", "district", "जिला",
+        "btaye", "bataye", "bataiye", "btao", "batao", "boliye", "bolo",
+        "do", "de", "dijiye", "dijie", "batayiye", "btaiye", "liye", "liyee",
+        "बताएं", "बताये", "बताइए", "बताओ", "दीजिए", "दो",
+    }
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
+    commodity_tokens = {
+        token
+        for alias_list in aliases.values()
+        for alias in alias_list
+        for token in re.findall(r"[a-z0-9]+", alias.lower())
+    }
+    filtered = []
+    for tok in q.split():
+        cleaned = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]+", "", tok).lower()
+        if not cleaned or cleaned in stop or cleaned in commodity_tokens:
+            continue
+        filtered.append(tok.strip())
+    if not filtered:
+        return None
+    return " ".join(filtered[-3:]).strip() or None
+
+
+def _suggest_locations_within_scope(hint: str, lookup: pd.DataFrame, limit: int = 3) -> list[str]:
+    if not hint or lookup.empty:
+        return []
+    hint_norm = _normalize_text(hint)
+    if not hint_norm:
+        return []
+    option_map: dict[str, str] = {}
+    for col in ["place", "sub_district"]:
+        if col not in lookup.columns:
+            continue
+        for raw in lookup[col].dropna().astype(str).unique().tolist():
+            raw = raw.strip()
+            if not raw or raw.lower() == "nan":
+                continue
+            variants = {_normalize_text(raw)}
+            token_variants = [token for token in re.findall(r"[a-z0-9]+", raw.lower()) if len(token) >= 4]
+            variants.update(token_variants)
+            for norm in variants:
+                if not norm:
+                    continue
+                if norm not in option_map or len(raw) < len(option_map[norm]):
+                    option_map[norm] = raw
+    if not option_map:
+        return []
+    suggestions: list[str] = []
+    for norm, raw in option_map.items():
+        if norm.startswith(hint_norm) or hint_norm.startswith(norm):
+            if raw not in suggestions:
+                suggestions.append(raw)
+        if len(suggestions) >= limit:
+            return suggestions[:limit]
+    close = difflib.get_close_matches(hint_norm, list(option_map.keys()), n=max(limit * 3, 5), cutoff=0.68)
+    for norm in close:
+        raw = option_map[norm]
+        if raw not in suggestions:
+            suggestions.append(raw)
+        if len(suggestions) >= limit:
+            break
+    return suggestions[:limit]
+
+
+def _resolve_query_location_with_selection(
+    query: str,
+    *,
+    selected_state: str | None,
+    selected_district: str | None,
+    allow_place_lookup: bool = True,
+) -> dict[str, object]:
+    lookup_path = Path("data/processed/location_lookup.csv")
+    lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+    lookup = load_location_lookup(lookup_mtime)
+    scoped_lookup = _filter_location_lookup_scope(lookup, selected_state, selected_district)
+    selected_district_norm = _normalize_district_name(selected_district or "")
+
+    explicit_district, explicit_state = _extract_explicit_district_from_query(query, lookup)
+    if explicit_district or explicit_state:
+        explicit_norm = _normalize_district_name(explicit_district or "")
+        if selected_district_norm and explicit_norm and explicit_norm != selected_district_norm:
+            return {
+                "status": "outside_scope",
+                "requested": explicit_district or query,
+                "actual_district": explicit_district or "",
+                "district": explicit_district or "",
+                "state": explicit_state or "",
+                "suggestions": _suggest_locations_within_scope(explicit_district or query, scoped_lookup),
+            }
+        return {
+            "status": "matched",
+            "place": explicit_district or None,
+            "district": explicit_district or selected_district or None,
+            "state": explicit_state or selected_state or None,
+        }
+
+    if not allow_place_lookup:
+        return {"status": "none"}
+
+    scoped_place = extract_place_from_query(query, scoped_lookup)
+    if scoped_place:
+        scoped_district, scoped_state = _lookup_district_from_location(scoped_place, scoped_lookup)
+        return {
+            "status": "matched",
+            "place": scoped_place,
+            "district": scoped_district or selected_district or None,
+            "state": scoped_state or selected_state or None,
+        }
+
+    global_place = extract_place_from_query(query, lookup)
+    if global_place:
+        global_district, global_state = _lookup_district_from_location(global_place, lookup)
+        global_norm = _normalize_district_name(global_district or "")
+        if selected_district_norm and global_norm and global_norm != selected_district_norm:
+            return {
+                "status": "outside_scope",
+                "requested": global_place,
+                "actual_district": global_district or "",
+                "district": global_district or "",
+                "state": global_state or "",
+                "suggestions": _suggest_locations_within_scope(global_place, scoped_lookup),
+            }
+        return {
+            "status": "matched",
+            "place": global_place,
+            "district": global_district or selected_district or None,
+            "state": global_state or selected_state or None,
+        }
+
+    hint = _extract_location_search_hint(query)
+    if hint:
+        suggestions = _suggest_locations_within_scope(hint, scoped_lookup)
+        if suggestions:
+            return {
+                "status": "suggest",
+                "requested": hint,
+                "district": selected_district or "",
+                "state": selected_state or "",
+                "suggestions": suggestions,
+            }
+    return {"status": "none"}
+
+
 def _resolve_query_location(query: str, *, allow_place_lookup: bool = True) -> tuple[str | None, str | None, str | None]:
     lookup_path = Path("data/processed/location_lookup.csv")
     lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
@@ -1496,11 +1672,12 @@ def _resolve_query_location(query: str, *, allow_place_lookup: bool = True) -> t
         return explicit_place, district, state
     if not allow_place_lookup:
         return None, None, None
-    place = extract_place_from_query(query)
+    place = extract_place_from_query(query, lookup)
     if not place:
         return None, None, None
     district, state = _lookup_district_from_location(place, lookup)
     return place, district, state
+
 
 
 def _coerce_selectbox_state(
@@ -1997,6 +2174,45 @@ def summarize_latest_available_commodity(df: pd.DataFrame, state: str, district:
         lines.extend(sample_lines)
     return "\n".join(lines), ["agmarknet_report.csv"]
 
+
+
+
+def latest_crop_prices_for_location(
+    df: pd.DataFrame,
+    state: str,
+    district: str,
+    limit: int = 20,
+) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    out = normalize_agmarknet_df(df)
+    out.columns = [c.strip() for c in out.columns]
+    required = {"State", "District", "Commodity", "Arrival_Date", "Modal_Price"}
+    if not required.issubset(out.columns):
+        return pd.DataFrame()
+    out = out[out["State"].astype(str).str.lower() == str(state).lower()]
+    out = out[out["District"].astype(str).str.lower() == str(district).lower()]
+    out["Arrival_Date_dt"] = pd.to_datetime(out["Arrival_Date"], errors="coerce", dayfirst=True)
+    out = out.dropna(subset=["Arrival_Date_dt", "Modal_Price", "Commodity"])
+    if out.empty:
+        return pd.DataFrame()
+    latest = (
+        out.sort_values(["Arrival_Date_dt", "Modal_Price"], ascending=[False, False])
+        .groupby("Commodity", as_index=False)
+        .head(1)
+        .sort_values(["Arrival_Date_dt", "Modal_Price"], ascending=[False, False])
+        .head(limit)
+        .copy()
+    )
+    latest["Commodity"] = latest["Commodity"].astype(str).map(commodity_display_name)
+    display = pd.DataFrame({
+        "फसल": latest["Commodity"],
+        "ताज़ा भाव": latest["Modal_Price"],
+        "इकाई": latest.get("Price_Unit", pd.Series(["Rs./Quintal"] * len(latest))).replace("", "Rs./Quintal"),
+        "तारीख": latest["Arrival_Date_dt"].dt.date.astype(str),
+        "मंडी": latest.get("Market", pd.Series([""] * len(latest))).fillna("").astype(str),
+    })
+    return display.reset_index(drop=True)
 
 def summarize_latest_market_for_market(df: pd.DataFrame, market: str) -> tuple[str, dict[str, str] | None]:
     if df.empty or "Market" not in df.columns:
@@ -2819,36 +3035,43 @@ with st.sidebar:
     if not current_user():
         st.info("Sign in to use chat, save history, and submit corrections that help improve future answers.")
         st.stop()
-    st.subheader("Commodity Forecast (15 Days)")
-    farmer_id = str((current_user() or {}).get("username") or "FARMER_DEMO")
-    season = st.selectbox("Planning Season", ["Rabi", "Kharif", "Annual"])
-    preferred_crop = ""
-    env_vals = load_local_env(Path(".env"))
-    api_key = get_setting("DATA_GOV_API_KEY", env_vals)
-    resource_id = get_setting("DATA_GOV_RESOURCE_ID", env_vals, "35985678-0d79-46b4-9ed6-6f13308a1d24")
-    session_location_defaults = st.session_state.get("last_location_context", {}) or {}
-    session_state_default = str(session_location_defaults.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
-    session_district_default = str(session_location_defaults.get("district") or "Meerut").strip() or "Meerut"
+st.subheader("Location & Market Lookup")
+farmer_id = str((current_user() or {}).get("username") or "FARMER_DEMO")
+preferred_crop = ""
+env_vals = load_local_env(Path(".env"))
+api_key = get_setting("DATA_GOV_API_KEY", env_vals)
+resource_id = get_setting("DATA_GOV_RESOURCE_ID", env_vals, "35985678-0d79-46b4-9ed6-6f13308a1d24")
+session_location_defaults = st.session_state.get("last_location_context", {}) or {}
+session_state_default = str(session_location_defaults.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
+session_district_default = str(session_location_defaults.get("district") or "Meerut").strip() or "Meerut"
 
-    _catalog_df = load_agmarknet_catalog()
-    if not _catalog_df.empty:
-        _init_df = _catalog_df.copy()
-    elif LIVE_MARKET_CSV.exists():
-        try:
-            _init_df = pd.read_csv(LIVE_MARKET_CSV)
-            _init_df.columns = [c.strip() for c in _init_df.columns]
-        except Exception:
-            _init_df = pd.DataFrame(columns=["State", "District", "Commodity"])
-    else:
+_catalog_df = load_agmarknet_catalog()
+if not _catalog_df.empty:
+    _init_df = _catalog_df.copy()
+elif LIVE_MARKET_CSV.exists():
+    try:
+        _init_df = pd.read_csv(LIVE_MARKET_CSV)
+        _init_df.columns = [c.strip() for c in _init_df.columns]
+    except Exception:
         _init_df = pd.DataFrame(columns=["State", "District", "Commodity"])
+else:
+    _init_df = pd.DataFrame(columns=["State", "District", "Commodity"])
 
-    state_options = (
-        sorted(_init_df["State"].dropna().astype(str).unique().tolist())
-        if "State" in _init_df.columns
-        else []
-    )
-    if not state_options:
-        state_options = ["Uttar Pradesh"]
+state_options = (
+    sorted(_init_df["State"].dropna().astype(str).unique().tolist())
+    if "State" in _init_df.columns
+    else []
+)
+if not state_options:
+    state_options = ["Uttar Pradesh"]
+
+if "show_local_prices_panel" not in st.session_state:
+    st.session_state["show_local_prices_panel"] = False
+if "fc_planning_season" not in st.session_state:
+    st.session_state["fc_planning_season"] = "Rabi"
+
+loc_col1, loc_col2, loc_col3 = st.columns([1.05, 1.05, 0.9])
+with loc_col1:
     state_default = _coerce_selectbox_state(
         "fc_state",
         state_options,
@@ -2856,20 +3079,21 @@ with st.sidebar:
         fallback="Uttar Pradesh",
     )
     selected_state = st.selectbox("State", state_options, index=state_default, key="fc_state")
-    state_override = st.text_input("State (type override, optional)", value="", key="fc_state_override")
 
-    if ("State" in _init_df.columns and "District" in _init_df.columns):
-        district_options = sorted(
-            _init_df[_init_df["State"].astype(str) == selected_state]["District"]
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist()
-        )
-    else:
-        district_options = []
-    if not district_options:
-        district_options = ["Meerut"]
+if ("State" in _init_df.columns and "District" in _init_df.columns):
+    district_options = sorted(
+        _init_df[_init_df["State"].astype(str) == selected_state]["District"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+else:
+    district_options = []
+if not district_options:
+    district_options = ["Meerut"]
+
+with loc_col2:
     district_default = _coerce_selectbox_state(
         "fc_district",
         district_options,
@@ -2877,51 +3101,69 @@ with st.sidebar:
         fallback="Meerut",
     )
     selected_district = st.selectbox("District", district_options, index=district_default, key="fc_district")
-    district_override = st.text_input(
-        "District (type override, optional)",
-        value="",
-        key="fc_district_override",
-    )
 
-    if (
-        "State" in _init_df.columns
-        and "District" in _init_df.columns
-        and "Commodity" in _init_df.columns
-    ):
-        temp = _init_df.copy()
-        temp = temp[temp["State"].astype(str) == selected_state]
-        temp = temp[temp["District"].astype(str) == selected_district]
-        commodity_options = sorted(temp["Commodity"].dropna().astype(str).unique().tolist())
+active_state = selected_state
+active_district = selected_district
+district = active_district
+
+with loc_col3:
+    st.markdown("<div style='height: 1.75rem'></div>", unsafe_allow_html=True)
+    if st.button("Show Local Crop Prices", key="show_local_crop_prices", use_container_width=True):
+        st.session_state["show_local_prices_panel"] = True
+
+st.caption(f"चयनित स्थान: {active_district}, {active_state}")
+
+if (
+    "State" in _init_df.columns
+    and "District" in _init_df.columns
+    and "Commodity" in _init_df.columns
+):
+    temp = _init_df.copy()
+    temp = temp[temp["State"].astype(str) == selected_state]
+    temp = temp[temp["District"].astype(str) == selected_district]
+    commodity_options = sorted(temp["Commodity"].dropna().astype(str).unique().tolist())
+else:
+    commodity_options = []
+if not commodity_options:
+    commodity_options = [preferred_crop or "Wheat"]
+commodity_fallback = preferred_crop or commodity_options[0]
+commodity_default = _coerce_selectbox_state(
+    "fc_commodity_dropdown",
+    commodity_options,
+    commodity_fallback,
+    fallback=commodity_fallback,
+)
+season = str(st.session_state.get("fc_planning_season") or "Rabi")
+active_commodity = st.session_state.get("fc_commodity_dropdown") or commodity_options[commodity_default]
+
+local_market_df = load_agmarknet_df()
+if local_market_df.empty and LIVE_MARKET_CSV.exists():
+    try:
+        live_mtime_ns = LIVE_MARKET_CSV.stat().st_mtime_ns
+        local_market_df = normalize_agmarknet_df(load_market_df(str(LIVE_MARKET_CSV), live_mtime_ns))
+    except Exception:
+        local_market_df = pd.DataFrame()
+
+if st.session_state.get("show_local_prices_panel"):
+    local_prices = latest_crop_prices_for_location(local_market_df, active_state, active_district, limit=20)
+    if local_prices.empty:
+        st.info(f"{active_district} के लिए अभी ताज़ा फसल-भाव सूची उपलब्ध नहीं मिली।")
     else:
-        commodity_options = []
-    if not commodity_options:
-        commodity_options = [preferred_crop or "Wheat"]
-    commodity_default = _coerce_selectbox_state(
-        "fc_commodity_dropdown",
-        commodity_options,
-        preferred_crop or "Wheat",
-        fallback="Wheat",
-    )
+        st.markdown(f"**{active_district} में फसलों के ताज़ा भाव**")
+        st.dataframe(local_prices, use_container_width=True, height=420)
+
+with st.expander("Advanced market tools", expanded=False):
+    season = st.selectbox("Planning Season", ["Rabi", "Kharif", "Annual"], key="fc_planning_season")
     selected_commodity_from_dropdown = st.selectbox(
-        "Commodity (from data)",
+        "Commodity (for forecast / refresh)",
         commodity_options,
         index=commodity_default,
         key="fc_commodity_dropdown",
     )
-    commodity_text_override = st.text_input(
-        "Commodity (type override, optional)",
-        value="",
-        key="fc_commodity_override",
-    )
-    selected_commodity = commodity_text_override.strip() or selected_commodity_from_dropdown
-    active_state = state_override.strip() or selected_state
-    active_district = district_override.strip() or selected_district
-    active_commodity = selected_commodity
-    district = active_district
-
+    active_commodity = selected_commodity_from_dropdown
     min_raw_points = 60
     max_stale_days = 30
-    fast_mode = st.checkbox("Fast Forecast (no download)", value=True)
+    fast_mode = st.checkbox("Fast Forecast (no download)", value=True, key="fc_fast_mode")
 
     def run_fetch(use_state_only: bool = False) -> tuple[int, int]:
         if not api_key:
@@ -2940,7 +3182,6 @@ with st.sidebar:
                 params["filters[District]"] = active_district.strip()
             if active_commodity.strip():
                 params["filters[Commodity]"] = active_commodity.strip()
-        # Favor recent data to reduce payload and timeouts.
         params["sort[Arrival_Date]"] = "desc"
         recs = client.fetch_records(
             resource_id=resource_id,
@@ -2961,66 +3202,68 @@ with st.sidebar:
             return len(new_df), len(merged)
         return 0, 0
 
-    if st.button("Refresh Selected Combination", use_container_width=True):
-        with st.spinner("Fetching selected combination..."):
-            try:
-                combo_key = f"{active_state}|{active_district}|{active_commodity}".lower()
-                last_ts = st.session_state.get(f"last_fetch_ts::{combo_key}", 0)
-                if time() - last_ts < FETCH_COOLDOWN_SEC:
-                    st.info("Using recent cached data; skip fetch to avoid timeout.")
-                else:
-                    fetched, stored = run_fetch(use_state_only=False)
-                    st.session_state[f"last_fetch_ts::{combo_key}"] = time()
-                    if fetched > 0:
-                        st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+    refresh_col1, refresh_col2, refresh_col3 = st.columns(3)
+    with refresh_col1:
+        if st.button("Refresh Selected Combination", key="refresh_selected_combo_btn", use_container_width=True):
+            with st.spinner("Fetching selected combination..."):
+                try:
+                    combo_key = f"{active_state}|{active_district}|{active_commodity}".lower()
+                    last_ts = st.session_state.get(f"last_fetch_ts::{combo_key}", 0)
+                    if time() - last_ts < FETCH_COOLDOWN_SEC:
+                        st.info("Using recent cached data; skip fetch to avoid timeout.")
                     else:
-                        st.warning("No records returned for selected combination.")
-            except Exception as e:
-                st.error(f"Fetch timed out/failed: {e}")
-                st.info("Retry once, or use 'Refresh State Catalog' first and then narrow the selection.")
+                        fetched, stored = run_fetch(use_state_only=False)
+                        st.session_state[f"last_fetch_ts::{combo_key}"] = time()
+                        if fetched > 0:
+                            st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                        else:
+                            st.warning("No records returned for selected combination.")
+                except Exception as e:
+                    st.error(f"Fetch timed out/failed: {e}")
+                    st.info("Retry once, or use 'Refresh State Catalog' first and then narrow the selection.")
 
-    if st.button("Refresh State Catalog", use_container_width=True):
-        with st.spinner("Fetching all districts/commodities for selected state..."):
-            try:
-                state_key = f"last_fetch_state::{active_state}".lower()
-                last_ts = st.session_state.get(state_key, 0)
-                if time() - last_ts < FETCH_COOLDOWN_SEC:
-                    st.info("Using recent cached data; skip fetch to avoid timeout.")
-                else:
-                    fetched, stored = run_fetch(use_state_only=True)
-                    st.session_state[state_key] = time()
-                    if fetched > 0:
-                        st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+    with refresh_col2:
+        if st.button("Refresh State Catalog", key="refresh_state_catalog_btn", use_container_width=True):
+            with st.spinner("Fetching all districts/commodities for selected state..."):
+                try:
+                    state_key = f"last_fetch_state::{active_state}".lower()
+                    last_ts = st.session_state.get(state_key, 0)
+                    if time() - last_ts < FETCH_COOLDOWN_SEC:
+                        st.info("Using recent cached data; skip fetch to avoid timeout.")
                     else:
-                        st.warning("No records returned for selected state.")
-            except Exception as e:
-                st.error(f"Fetch timed out/failed: {e}")
-                st.info("API is slow right now. Retry after 10-20 seconds.")
+                        fetched, stored = run_fetch(use_state_only=True)
+                        st.session_state[state_key] = time()
+                        if fetched > 0:
+                            st.success(f"Fetched {fetched} rows, stored {stored} unique rows.")
+                        else:
+                            st.warning("No records returned for selected state.")
+                except Exception as e:
+                    st.error(f"Fetch timed out/failed: {e}")
+                    st.info("API is slow right now. Retry after 10-20 seconds.")
 
-    if st.button("Refresh Agmarknet (Last 14 Days)", use_container_width=True):
-        with st.spinner("Refreshing Agmarknet data (last 14 days)..."):
-            try:
-                import subprocess
+    with refresh_col3:
+        if st.button("Refresh Agmarknet (Last 14 Days)", key="refresh_agmarknet_14d_btn", use_container_width=True):
+            with st.spinner("Refreshing Agmarknet data (last 14 days)..."):
+                try:
+                    cmd = [
+                        sys.executable,
+                        str(Path("scripts/agmarknet_daily_refresh.py")),
+                    ]
+                    env = os.environ.copy()
+                    env["AGMARKNET_LOOKBACK_DAYS"] = "14"
+                    result = subprocess.run(cmd, env=env, cwd=str(Path(".")), capture_output=True, text=True)
+                    if result.returncode != 0:
+                        st.error("Agmarknet refresh failed.")
+                        st.code(result.stderr or result.stdout)
+                    else:
+                        st.success("Agmarknet refresh completed.")
+                        if result.stdout.strip():
+                            st.code(result.stdout.strip())
+                        clear_local_caches()
+                except Exception as e:
+                    st.error(f"Agmarknet refresh failed: {e}")
 
-                cmd = [
-                    sys.executable,
-                    str(Path("scripts/agmarknet_daily_refresh.py")),
-                ]
-                env = os.environ.copy()
-                env["AGMARKNET_LOOKBACK_DAYS"] = "14"
-                result = subprocess.run(cmd, env=env, cwd=str(Path(".")), capture_output=True, text=True)
-                if result.returncode != 0:
-                    st.error("Agmarknet refresh failed.")
-                    st.code(result.stderr or result.stdout)
-                else:
-                    st.success("Agmarknet refresh completed.")
-                    if result.stdout.strip():
-                        st.code(result.stdout.strip())
-                    clear_local_caches()
-            except Exception as e:
-                st.error(f"Agmarknet refresh failed: {e}")
-
-    if st.button("Show 15-Day Forecast", use_container_width=True):
+    if st.button("Show 15-Day Forecast", key="show_15_day_forecast_btn", use_container_width=True):
         try:
             if AGMARKNET_CSV.exists():
                 mtime_ns = AGMARKNET_CSV.stat().st_mtime_ns
@@ -3301,11 +3544,63 @@ if user_query:
         session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
         session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or district or "Meerut").strip() or "Meerut"
         query_place = query_place_district = query_place_state = None
+        location_scope_result: dict[str, object] = {"status": "none"}
+        scope_state = active_state if "active_state" in locals() else session_state_hint
+        scope_district = active_district if "active_district" in locals() else session_district_hint
         if not crop_guide_followup_detected and not crop_protection_followup:
-            query_place, query_place_district, query_place_state = _resolve_query_location(
+            location_scope_result = _resolve_query_location_with_selection(
                 user_query,
+                selected_state=scope_state,
+                selected_district=scope_district,
                 allow_place_lookup=bool(weather_intent or intent_price or not detected_query_crop),
             )
+            if location_scope_result.get("status") == "matched":
+                query_place = location_scope_result.get("place") or None
+                query_place_district = location_scope_result.get("district") or None
+                query_place_state = location_scope_result.get("state") or None
+
+        location_scope_status = str(location_scope_result.get("status") or "none")
+        if location_scope_status in {"outside_scope", "suggest"}:
+            requested_location = str(location_scope_result.get("requested") or "यह स्थान").strip() or "यह स्थान"
+            suggestions = [
+                str(item).strip()
+                for item in (location_scope_result.get("suggestions") or [])
+                if str(item).strip()
+            ]
+            actual_district = str(location_scope_result.get("actual_district") or "").strip()
+            if location_scope_status == "outside_scope":
+                lines = [f"'{requested_location}' चयनित जिला {scope_district} में नहीं मिला।"]
+                if actual_district and _normalize_district_name(actual_district) != _normalize_district_name(scope_district):
+                    lines.append(f"यह स्थान {actual_district} जिले से जुड़ा दिख रहा है।")
+            else:
+                lines = [f"चयनित जिला {scope_district} में '{requested_location}' का exact match नहीं मिला।"]
+            if location_scope_status == "suggest" and suggestions:
+                lines.append(f"क्या आपका मतलब: {', '.join(suggestions[:3])}?")
+            lines.append(f"कृपया {scope_district} के गांव/कस्बे का नाम लिखें या ऊपर जिला बदलें।")
+            final_answer = "\n".join(lines)
+            query_log_id = log_query_answer(
+                user_query=user_query,
+                composed_query=user_query,
+                topic="location_scope",
+                answer_text=final_answer,
+                references=[],
+                district=scope_district,
+                season=season,
+                crop_name=detected_query_crop or preferred_crop or "unknown",
+            )
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "text": final_answer,
+                    "references": [],
+                    "query_log_id": query_log_id,
+                    "topic": "location_scope",
+                    "user_query": user_query,
+                }
+            )
+            with st.chat_message("assistant"):
+                st.write(final_answer)
+            st.stop()
         if query_place and (query_place_district or query_place_state):
             _set_session_location_context(
                 query_place,
@@ -3355,12 +3650,13 @@ if user_query:
         )
 
         question_for_advisor = user_query.strip()
-        if (
-            weather_intent
-            and not (query_place or query_place_district or query_place_state)
-            and last_location_ctx.get("place")
-        ):
-            question_for_advisor = f"{last_location_ctx['place']} में {question_for_advisor}"
+        fallback_weather_place = str(
+            last_location_ctx.get("place")
+            or (active_district if "active_district" in locals() else "")
+            or session_district_hint
+        ).strip()
+        if weather_intent and not (query_place or query_place_district or query_place_state) and fallback_weather_place:
+            question_for_advisor = f"{fallback_weather_place} में {question_for_advisor}"
 
         composed_query = (
             f"जिला: {resolved_district} | मौसम: {season_for_query} | पसंदीदा फसल: {preferred_crop_for_query or 'कोई नहीं'} | "
