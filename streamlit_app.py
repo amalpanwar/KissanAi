@@ -76,11 +76,67 @@ BRAND_IMAGE = Path(
     "data/raw/indian-agriculture-landscape-farmer-working-indian-rice-fields-rural-worker-vector-cartoon-backg_1396-599.avif"
 )
 PAGE_ICON = str(BRAND_IMAGE) if BRAND_IMAGE.exists() else "🌾"
-st.set_page_config(page_title="KisaanAI - Agriculture Assistant", page_icon=PAGE_ICON, layout="wide")
+st.set_page_config(
+    page_title="KisaanAI - Agriculture Assistant",
+    page_icon=PAGE_ICON,
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 if BRAND_IMAGE.exists():
     st.image(str(BRAND_IMAGE), use_container_width=True)
 
 st.title("KisaanAI - Agriculture Assistant")
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"],
+    [data-testid="collapsedControl"] {
+        display: none;
+    }
+    .block-container {
+        padding-top: 1.1rem;
+        padding-bottom: 2rem;
+        max-width: 96rem;
+    }
+    .kisaan-hero {
+        background:
+            radial-gradient(circle at top right, rgba(124, 169, 91, 0.20), transparent 28%),
+            linear-gradient(135deg, rgba(247, 250, 240, 0.98), rgba(234, 244, 223, 0.94));
+        border: 1px solid rgba(94, 129, 63, 0.18);
+        border-radius: 24px;
+        padding: 1rem 1.1rem 0.9rem 1.1rem;
+        margin: 0.2rem 0 1rem 0;
+        box-shadow: 0 14px 30px rgba(51, 77, 32, 0.08);
+    }
+    .kisaan-hero-eyebrow {
+        font-size: 0.78rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #5f7d3a;
+        margin-bottom: 0.35rem;
+        font-weight: 700;
+    }
+    .kisaan-hero-title {
+        font-size: 1.5rem;
+        line-height: 1.15;
+        color: #234018;
+        font-weight: 700;
+        margin: 0;
+    }
+    .kisaan-hero-copy {
+        color: #456233;
+        margin: 0.45rem 0 0 0;
+        font-size: 0.98rem;
+    }
+    .kisaan-toolbar-note {
+        color: #557145;
+        font-size: 0.9rem;
+        margin: 0.45rem 0 0.15rem 0;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 cfg = load_config()
 APP_BUILD_VERSION = "2026-06-21-white-grub-source-verify-v1"
@@ -2798,12 +2854,13 @@ def render_auth_sidebar(db_path: str) -> None:
     st.caption("Corrections are validated against local sources before they are reused for future tuning.")
 
 
-def render_admin_feedback_queue(db_path: str) -> None:
+def render_admin_feedback_queue(db_path: str, *, use_sidebar: bool = True) -> None:
     user = current_user() or {}
     if user.get("role") != "admin":
         return
     queue = get_feedback_queue(db_path, limit=12)
-    with st.sidebar.expander("Feedback Review Queue", expanded=False):
+    target = st.sidebar if use_sidebar else st
+    with target.expander("Feedback Review Queue", expanded=False):
         if not queue:
             st.write("No feedback waiting for review.")
             return
@@ -3017,25 +3074,23 @@ if isinstance(pending_sidebar_location, dict):
     if pending_district:
         st.session_state["fc_district"] = pending_district
 
-with st.sidebar:
-    if st.session_state.get("agmarknet_auto_refresh_notice"):
-        st.caption(str(st.session_state.get("agmarknet_auto_refresh_notice")))
-    agmarknet_status = _load_agmarknet_refresh_status()
-    latest_report_date = _latest_agmarknet_report_date(AGMARKNET_CSV)
-    with st.expander("Agmarknet Status", expanded=False):
-        st.caption(f"Latest report date: {latest_report_date.isoformat() if latest_report_date else 'Unavailable'}")
-        if agmarknet_status:
-            st.caption(f"Last refresh status: {agmarknet_status.get('status', 'unknown')}")
-            if agmarknet_status.get("updated_at"):
-                st.caption(f"Last refresh time: {agmarknet_status.get('updated_at')}")
-            if agmarknet_status.get("message"):
-                st.caption(str(agmarknet_status.get("message")))
-    render_auth_sidebar(cfg.paths["sqlite_db"])
-    render_admin_feedback_queue(cfg.paths["sqlite_db"])
-    if not current_user():
-        st.info("Sign in to use chat, save history, and submit corrections that help improve future answers.")
-        st.stop()
-st.subheader("Location & Market Lookup")
+agmarknet_status = _load_agmarknet_refresh_status()
+latest_report_date = _latest_agmarknet_report_date(AGMARKNET_CSV)
+_bootstrap_auth_session(cfg.paths["sqlite_db"])
+auth_user_snapshot = current_user()
+
+st.markdown(
+    """
+    <div class="kisaan-hero">
+        <div class="kisaan-hero-eyebrow">District-First Advisory</div>
+        <h2 class="kisaan-hero-title">Choose a district once, then ask village or town specific questions inside it.</h2>
+        <p class="kisaan-hero-copy">
+            Village and town names are now constrained to the selected district. Use the district price action for a clean crop-price view.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 farmer_id = str((current_user() or {}).get("username") or "FARMER_DEMO")
 preferred_crop = ""
 env_vals = load_local_env(Path(".env"))
@@ -3070,15 +3125,50 @@ if "show_local_prices_panel" not in st.session_state:
 if "fc_planning_season" not in st.session_state:
     st.session_state["fc_planning_season"] = "Rabi"
 
-loc_col1, loc_col2, loc_col3 = st.columns([1.05, 1.05, 0.9])
+toolbar_cols = st.columns([1.08, 1.08, 0.92, 0.9, 0.92])
+with toolbar_cols[3]:
+    st.caption("Data")
+    with st.popover("Agmarknet Status"):
+        if st.session_state.get("agmarknet_auto_refresh_notice"):
+            st.caption(str(st.session_state.get("agmarknet_auto_refresh_notice")))
+        st.caption(f"Latest report date: {latest_report_date.isoformat() if latest_report_date else 'Unavailable'}")
+        if agmarknet_status:
+            st.caption(f"Last refresh status: {agmarknet_status.get('status', 'unknown')}")
+            if agmarknet_status.get("updated_at"):
+                st.caption(f"Last refresh time: {agmarknet_status.get('updated_at')}")
+            if agmarknet_status.get("message"):
+                st.caption(str(agmarknet_status.get("message")))
+with toolbar_cols[4]:
+    st.caption("Account")
+    account_label = (
+        f"{str(auth_user_snapshot.get('display_name') or auth_user_snapshot.get('username') or 'Account').strip()}"
+        if auth_user_snapshot
+        else "Sign in"
+    )
+    with st.popover(account_label):
+        render_auth_sidebar(cfg.paths["sqlite_db"])
+        render_admin_feedback_queue(cfg.paths["sqlite_db"], use_sidebar=False)
+
+if not current_user():
+    st.info("Use the Account menu in the top bar to sign in and start using the assistant.")
+    st.stop()
+
+loc_col1, loc_col2, loc_col3 = toolbar_cols[:3]
 with loc_col1:
+    st.caption("State")
     state_default = _coerce_selectbox_state(
         "fc_state",
         state_options,
         session_state_default,
         fallback="Uttar Pradesh",
     )
-    selected_state = st.selectbox("State", state_options, index=state_default, key="fc_state")
+    selected_state = st.selectbox(
+        "State",
+        state_options,
+        index=state_default,
+        key="fc_state",
+        label_visibility="collapsed",
+    )
 
 if ("State" in _init_df.columns and "District" in _init_df.columns):
     district_options = sorted(
@@ -3094,24 +3184,35 @@ if not district_options:
     district_options = ["Meerut"]
 
 with loc_col2:
+    st.caption("District")
     district_default = _coerce_selectbox_state(
         "fc_district",
         district_options,
         session_district_default,
         fallback="Meerut",
     )
-    selected_district = st.selectbox("District", district_options, index=district_default, key="fc_district")
+    selected_district = st.selectbox(
+        "District",
+        district_options,
+        index=district_default,
+        key="fc_district",
+        label_visibility="collapsed",
+    )
 
 active_state = selected_state
 active_district = selected_district
 district = active_district
 
 with loc_col3:
-    st.markdown("<div style='height: 1.75rem'></div>", unsafe_allow_html=True)
-    if st.button("Show Local Crop Prices", key="show_local_crop_prices", use_container_width=True):
+    st.caption("District Prices")
+    if st.button("Show Crop Prices", key="show_local_crop_prices", use_container_width=True):
         st.session_state["show_local_prices_panel"] = True
 
-st.caption(f"चयनित स्थान: {active_district}, {active_state}")
+st.markdown(
+    f"<div class='kisaan-toolbar-note'>Selected district: <strong>{active_district}</strong>, {active_state}. "
+    "Only villages and towns from this district will be accepted in location-specific queries.</div>",
+    unsafe_allow_html=True,
+)
 
 if (
     "State" in _init_df.columns
