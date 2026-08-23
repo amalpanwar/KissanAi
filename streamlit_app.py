@@ -1303,6 +1303,120 @@ def _filter_location_lookup_scope(
     return out
 
 
+def _build_location_alias_map(lookup: pd.DataFrame) -> dict[str, str]:
+    if lookup.empty:
+        return {}
+    alias_map: dict[str, str] = {}
+    suffixes = {"rural", "bangar", "khadar", "khurd", "kalan"}
+
+    def add_alias(alias: str, raw: str) -> None:
+        alias_norm = _normalize_text(alias)
+        if len(alias_norm) < 3:
+            return
+        current = alias_map.get(alias_norm)
+        if current is None or len(raw) < len(current):
+            alias_map[alias_norm] = raw
+
+    def expand_aliases(tokens: list[str]) -> set[str]:
+        aliases: set[str] = set()
+        if not tokens:
+            return aliases
+        aliases.add(" ".join(tokens))
+        aliases.add(tokens[0])
+        if len(tokens) >= 2:
+            aliases.add(" ".join(tokens[:2]))
+        if len(tokens) >= 2 and tokens[-1] in suffixes:
+            aliases.add(" ".join(tokens[:-1]))
+        expanded: set[str] = set()
+        for alias in aliases:
+            alias_norm = _normalize_text(alias)
+            if not alias_norm:
+                continue
+            expanded.add(alias_norm)
+            if alias_norm.endswith("ban"):
+                expanded.add(alias_norm[:-3] + "van")
+            if alias_norm.endswith("van"):
+                expanded.add(alias_norm[:-3] + "ban")
+            if "w" in alias_norm:
+                expanded.add(alias_norm.replace("w", "v"))
+            if "v" in alias_norm:
+                expanded.add(alias_norm.replace("v", "w"))
+        return expanded
+
+    for col in ["place", "sub_district"]:
+        if col not in lookup.columns:
+            continue
+        for raw in lookup[col].dropna().astype(str).unique().tolist():
+            raw = raw.strip()
+            if not raw or raw.lower() == "nan":
+                continue
+            tokens = [t for t in re.findall(r"[a-z0-9]+", raw.lower()) if t]
+            for alias in expand_aliases(tokens):
+                add_alias(alias, raw)
+    return alias_map
+
+
+def _match_place_from_lookup(
+    text: str,
+    lookup: pd.DataFrame,
+    stop: set[str] | None = None,
+    commodity_tokens: set[str] | None = None,
+) -> str | None:
+    if not text or lookup.empty:
+        return None
+    alias_map = _build_location_alias_map(lookup)
+    if not alias_map:
+        return None
+    stop = stop or set()
+    commodity_tokens = commodity_tokens or set()
+    raw_tokens = re.findall(r"[a-z0-9]+", str(text).lower())
+    if not raw_tokens:
+        return None
+
+    candidate_norms: list[str] = []
+    seen: set[str] = set()
+
+    def add_candidate(candidate: str) -> None:
+        norm = _normalize_text(candidate)
+        if not norm or norm in seen:
+            return
+        seen.add(norm)
+        candidate_norms.append(norm)
+
+    filtered_tokens = [
+        token for token in raw_tokens
+        if token not in stop and token not in commodity_tokens and len(token) >= 3
+    ]
+    for size in range(min(4, len(filtered_tokens)), 0, -1):
+        for idx in range(0, len(filtered_tokens) - size + 1):
+            add_candidate(" ".join(filtered_tokens[idx : idx + size]))
+    for token in filtered_tokens:
+        add_candidate(token)
+    if filtered_tokens:
+        add_candidate(" ".join(filtered_tokens[-2:]))
+        add_candidate(" ".join(filtered_tokens[-3:]))
+
+    for norm in candidate_norms:
+        if norm in alias_map:
+            return alias_map[norm]
+
+    alias_keys = list(alias_map.keys())
+    for norm in candidate_norms:
+        if len(norm) < 4:
+            continue
+        prefix_matches = [key for key in alias_keys if key.startswith(norm) or norm.startswith(key)]
+        if prefix_matches:
+            best_key = min(prefix_matches, key=len)
+            return alias_map[best_key]
+
+    for norm in candidate_norms:
+        cutoff = 0.78 if len(norm) >= 6 else 0.9
+        close = difflib.get_close_matches(norm, alias_keys, n=1, cutoff=cutoff)
+        if close:
+            return alias_map[close[0]]
+    return None
+
+
 def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> str | None:
     # Prefer a direct lookup match from the known location table before falling
     # back to token filtering. This keeps place parsing stable even when the
@@ -1318,7 +1432,7 @@ def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> 
         "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
         "lagta", "lagti", "lagte", "lata", "leti", "chahiye",
         "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam",
-        "भाव", "कीमत", "मंडी", "मौसम", "weather",
+        "भाव", "कीमत", "मंडी", "मौसम", "mausam", "mosam", "weather",
         "btaye", "bataye", "bataiye", "btao", "batao", "boliye", "bolo",
         "do", "de", "dijiye", "dijie", "batayiye", "btaiye", "liye", "liyee",
         "बताएं", "बताये", "बताइए", "बताओ", "दीजिए", "दो",
@@ -1379,19 +1493,23 @@ def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> 
             candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
             return candidates[0][2]
 
+    lookup_match = _match_place_from_lookup(q, lookup, stop, commodity_tokens)
+    if lookup_match:
+        return lookup_match
+
     tokens = [t.strip(" ?!.,") for t in q.split() if t.strip()]
     if not tokens:
         return None
 
     filtered = []
     for tok in tokens:
-        t = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]+", "", tok).lower()
+        t = re.sub(r"[^a-zA-Z0-9ऀ-ॿ]+", "", tok).lower()
         if not t or t in stop or t in commodity_tokens:
             continue
         filtered.append(tok)
 
     while filtered:
-        last = re.sub(r"[^a-zA-Z0-9\u0900-\u097F]+", "", filtered[-1]).lower()
+        last = re.sub(r"[^a-zA-Z0-9ऀ-ॿ]+", "", filtered[-1]).lower()
         if not last or last in stop or last in commodity_tokens or len(re.sub(r"[^a-z0-9]+", "", last)) <= 1:
             filtered.pop()
         else:
@@ -1400,6 +1518,9 @@ def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> 
         return None
     candidate = " ".join(filtered)
     if not lookup.empty:
+        matched_candidate = _match_place_from_lookup(candidate, lookup, stop, commodity_tokens)
+        if matched_candidate:
+            return matched_candidate
         district_guess, state_guess = _lookup_district_from_location(candidate, lookup)
         if district_guess or state_guess:
             return candidate
@@ -1466,8 +1587,6 @@ def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[st
             return (district or None), (state or None)
     # Fallback: fuzzy match (handles minor spelling errors like Kurava->Kurawa)
     try:
-        import difflib
-
         pool = lookup
         if "state" in lookup.columns:
             up = lookup[lookup["state"].str.lower() == "uttar pradesh"]
@@ -1502,7 +1621,11 @@ def _lookup_district_from_location(place: str, lookup: pd.DataFrame) -> tuple[st
                     return (district or None), (state or None)
     except Exception:
         pass
+    canonical_place = _match_place_from_lookup(place, lookup)
+    if canonical_place and canonical_place.strip().lower() != place.strip().lower():
+        return _lookup_district_from_location(canonical_place, lookup)
     return None, None
+
 
 
 def _set_session_location_context(place: str | None, district: str | None, state: str | None = None) -> None:
@@ -1514,6 +1637,7 @@ def _set_session_location_context(place: str | None, district: str | None, state
         "district": clean_district,
         "state": clean_state,
     }
+
 
 
 def _extract_explicit_district_from_query(query: str, lookup: pd.DataFrame) -> tuple[str | None, str | None]:
@@ -1569,7 +1693,7 @@ def _extract_location_search_hint(query: str) -> str | None:
         "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
         "lagta", "lagti", "lagte", "lata", "leti", "chahiye",
         "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam",
-        "भाव", "कीमत", "मंडी", "मौसम", "weather", "district", "जिला",
+        "भाव", "कीमत", "मंडी", "मौसम", "mausam", "mosam", "weather", "district", "जिला",
         "btaye", "bataye", "bataiye", "btao", "batao", "boliye", "bolo",
         "do", "de", "dijiye", "dijie", "batayiye", "btaiye", "liye", "liyee",
         "बताएं", "बताये", "बताइए", "बताओ", "दीजिए", "दो",
@@ -1641,6 +1765,7 @@ def _resolve_query_location_with_selection(
     selected_state: str | None,
     selected_district: str | None,
     allow_place_lookup: bool = True,
+    strict_on_hint: bool = False,
 ) -> dict[str, object]:
     lookup_path = Path("data/processed/location_lookup.csv")
     lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
@@ -1703,7 +1828,7 @@ def _resolve_query_location_with_selection(
     hint = _extract_location_search_hint(query)
     if hint:
         suggestions = _suggest_locations_within_scope(hint, scoped_lookup)
-        if suggestions:
+        if suggestions or strict_on_hint:
             return {
                 "status": "suggest",
                 "requested": hint,
@@ -3061,8 +3186,6 @@ if isinstance(pending, dict):
     if "fc_commodity_override" not in st.session_state:
         st.session_state["fc_commodity_override"] = pending.get("commodity", "")
 
-st.session_state.pop("pending_sidebar_location", None)
-
 agmarknet_status = _load_agmarknet_refresh_status()
 latest_report_date = _latest_agmarknet_report_date(AGMARKNET_CSV)
 _bootstrap_auth_session(cfg.paths["sqlite_db"])
@@ -3643,6 +3766,7 @@ if user_query:
                 selected_state=scope_state,
                 selected_district=scope_district,
                 allow_place_lookup=bool(weather_intent or intent_price or not detected_query_crop),
+                strict_on_hint=bool(weather_intent),
             )
             if location_scope_result.get("status") == "matched":
                 query_place = location_scope_result.get("place") or None
