@@ -301,3 +301,6 @@ Notes:
 - This scaffold is production-oriented but intentionally lightweight.
 - Replace sample datasets with verified district-level data for deployment.
 - Validate recommendations with agriculture experts/KVK before field rollout.
+
+
+See [Agent workflow and market refresh](docs/agentic-system.md) for coordinator behavior, refresh scheduling, model assessment and validation.

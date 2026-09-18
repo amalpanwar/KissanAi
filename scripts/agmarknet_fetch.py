@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import tempfile
 import re
 import sys
 import time
@@ -288,6 +290,8 @@ def main() -> None:
                         effective_page_size = items_per_page or args.limit
                         if len(rows) < effective_page_size:
                             break
+                    if page == args.max_pages:
+                        failed_rows.append({"error": "Pagination limit reached", "page": page})
                     page += 1
                     time.sleep(args.sleep_sec)
     else:
@@ -376,8 +380,18 @@ def main() -> None:
                             effective_page_size = items_per_page or args.limit
                             if len(rows) < effective_page_size:
                                 break
+                        if page == args.max_pages:
+                            failed_rows.append({"error": "Pagination limit reached", "page": page})
                         page += 1
                         time.sleep(args.sleep_sec)
+
+    # A complete refresh must never publish a partial snapshot.
+    if failed_rows and args.require_complete:
+        fail_path = Path(args.fail_log)
+        fail_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(failed_rows).to_csv(fail_path, index=False)
+        write_summary("failed", message="Incomplete fetch; existing CSV preserved.")
+        return 5
 
     if not all_rows:
         print("No records returned.")
@@ -406,7 +420,7 @@ def main() -> None:
     inferred_arrival_unit = fetched_arrival_units[0] if fetched_arrival_units else None
     if args.merge_existing and out_path.exists():
         try:
-            old = pd.read_csv(out_path)
+            old = pd.read_csv(out_path, low_memory=False)
             df = pd.concat([old, df], ignore_index=True)
         except Exception:
             pass
@@ -436,17 +450,25 @@ def main() -> None:
                 "market_name",
                 "cmdt_name",
                 "rep_date",
-                "model_price_wt",
+                "variety_name",
+                "grade_name",
             ]
             if c in df.columns
         ]
         if key_cols:
             df = df.drop_duplicates(subset=key_cols, keep="last")
     if args.trim_years and not df.empty and "rep_date" in df.columns:
-        df["_rep_dt"] = pd.to_datetime(df["rep_date"], errors="coerce", dayfirst=True)
+        df["_rep_dt"] = pd.to_datetime(df["rep_date"], format="mixed", errors="coerce", dayfirst=True)
         cutoff = pd.Timestamp(today) - pd.Timedelta(days=int(args.trim_years) * 365)
         df = df[df["_rep_dt"] >= cutoff].drop(columns=["_rep_dt"])
-    df.to_csv(out_path, index=False)
+    # Publish atomically so readers never observe a truncated CSV.
+    fd, temporary = tempfile.mkstemp(dir=out_path.parent, suffix=".csv")
+    os.close(fd)
+    try:
+        df.to_csv(temporary, index=False)
+        os.replace(temporary, out_path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
     print(f"Saved {len(df)} rows to {out_path}")
     if failed_rows:
         fail_path = Path(args.fail_log)

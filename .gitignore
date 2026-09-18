@@ -40,3 +40,5 @@ data/raw/official_sources/*
 !data/raw/official_sources/cacp_kharif_latest_en.pdf
 data/raw/all_sources/*
 !data/raw/all_sources/*.pdf
+data/raw/live/*.lock
+data/raw/live/agmarknet_fetch_summary.json

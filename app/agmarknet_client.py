@@ -148,6 +148,9 @@ def _fetch_dashboard_page(
                 return {"status": False, "message": message, "pagination": {}, "data": {"records": []}}
             if attempt == retries:
                 raise
+            if exc.code == 429:
+                retry_after = str(exc.headers.get("Retry-After", "")) if exc.headers else ""
+                time.sleep(min(60, int(retry_after)) if retry_after.isdigit() else min(60, 10 * attempt))
         except Exception as exc:
             last_error = exc
             if attempt == retries:
@@ -184,10 +187,13 @@ def _fetch_report_page(
                 err_payload = json.loads(exc.read().decode("utf-8"))
             except Exception:
                 err_payload = {}
-            if exc.code in {400, 404}:
+            if exc.code == 404 and "no data" in str(err_payload.get("message", "")).lower():
                 return {"data": [], "records": [], "message": err_payload.get("message") or ""}
             if attempt == retries:
                 raise
+            if exc.code == 429:
+                retry_after = str(exc.headers.get("Retry-After", "")) if exc.headers else ""
+                time.sleep(min(60, int(retry_after)) if retry_after.isdigit() else min(60, 10 * attempt))
         except Exception as exc:
             last_error = exc
             if attempt == retries:

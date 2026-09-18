@@ -20,8 +20,8 @@ def main() -> None:
     csv_path = Path("data/raw/live/agmarknet_report.csv")
     if not csv_path.exists():
         print("agmarknet_report.csv not found.")
-        return
-    df = pd.read_csv(csv_path)
+        raise SystemExit(2)
+    df = pd.read_csv(csv_path, low_memory=False)
     # Support both cleaned and raw agmarknet schemas
     if {"District", "Commodity", "Modal_Price", "Arrival_Date"}.issubset(df.columns):
         df = df.rename(
@@ -33,28 +33,17 @@ def main() -> None:
                 "Price_Unit": "price_unit",
             }
         )
-    elif {"district_name", "cmdt_name", "as_on", "reported_date"}.issubset(df.columns):
-        df = df.rename(
-            columns={
-                "district_name": "district",
-                "cmdt_name": "commodity",
-                "as_on": "modal_price",
-                "reported_date": "arrival_date",
-            }
-        )
-    elif {"district_name", "cmdt_name", "model_price_wt", "rep_date"}.issubset(df.columns):
-        df = df.rename(
-            columns={
-                "district_name": "district",
-                "cmdt_name": "commodity",
-                "model_price_wt": "modal_price",
-                "rep_date": "arrival_date",
-                "unit_name_price": "price_unit",
-            }
-        )
+    elif {"district_name", "cmdt_name"}.issubset(df.columns):
+        df = df.rename(columns={"district_name": "district", "cmdt_name": "commodity", "unit_name_price": "price_unit"})
+        df["modal_price"] = pd.to_numeric(df.get("model_price_wt", pd.Series(index=df.index, dtype=float)), errors="coerce")
+        df["modal_price"] = df["modal_price"].fillna(pd.to_numeric(df.get("as_on", pd.Series(index=df.index, dtype=float)), errors="coerce"))
+        df["arrival_date"] = df.get("rep_date", pd.Series(index=df.index, dtype=object))
+        df["arrival_date"] = df["arrival_date"].fillna(df.get("reported_date", pd.Series(index=df.index, dtype=object)))
     else:
         print("agmarknet_report.csv missing required columns.")
-        return
+        raise SystemExit(2)
+    if "price_unit" not in df:
+        df["price_unit"] = "Rs./Quintal"
     df["source"] = "agmarknet_report.csv"
     keep = ["district", "commodity", "modal_price", "arrival_date", "price_unit", "source"]
     df = df[keep].dropna(subset=["district", "commodity", "modal_price"])
@@ -62,9 +51,12 @@ def main() -> None:
     conn = sqlite3.connect(cfg.paths["sqlite_db"])
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM market_prices")
-        conn.commit()
-        df.to_sql("market_prices", conn, if_exists="append", index=False)
+        with conn:
+            cur.execute("DELETE FROM market_prices")
+            cur.executemany(
+                "INSERT INTO market_prices (district, commodity, modal_price, arrival_date, price_unit, source) VALUES (?, ?, ?, ?, ?, ?)",
+                df.where(pd.notna(df), None).itertuples(index=False, name=None),
+            )
         print(f"Loaded {len(df)} rows into market_prices.")
     finally:
         conn.close()
