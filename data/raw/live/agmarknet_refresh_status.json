@@ -1,11 +1,8 @@
 {
   "status": "success",
-  "message": "Agmarknet refresh advanced report date from 2026-06-17 to 2026-06-19 using lookback_days=14, limit=100",
-  "before_latest": "2026-06-17",
-  "after_latest": "2026-06-19",
-  "mode": "report",
-  "lookback_days_requested": 14,
-  "updated_at": "2026-06-19T14:38:33.968593",
-  "lookback_days_used": 14,
-  "limit_used": 100
+  "message": "Imported validated official snapshot and synchronized SQLite.",
+  "after_latest": "2026-09-18",
+  "new_rows": 1032,
+  "updated_at": "2026-09-18T20:17:06.538197+05:30",
+  "mode": "snapshot_import"
 }
