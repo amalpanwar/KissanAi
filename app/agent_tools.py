@@ -13,6 +13,7 @@ import pandas as pd
 
 from app.agent_system import AgentResult
 from app.location_lookup import lookup_place_in_text
+from app.location_selection import location_from_context, qualified_place, scope_market_rows, market_scope_caption
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKET_CSV = ROOT / "data/raw/live/agmarknet_report.csv"
@@ -23,31 +24,53 @@ class AdvisorTools:
         self.advisor = advisor
 
     def location(self, payload):
-        loc = lookup_place_in_text(payload["question"])
-        if loc:
-            return loc
-        match = re.search(r"(?:District|जिला):\s*([^|]+)", payload.get("context", ""), re.I)
-        if match:
-            value = match.group(1).strip()
-            return lookup_place_in_text(value) or {"district": value, "place": value}
-        return {}
+        selected = location_from_context(payload.get("context", ""))
+        if selected.get("invalid_selection"):
+            return selected
+        # The full UI hierarchy is authoritative. Explicit query locations have
+        # already been resolved within that district before context is composed.
+        if selected.get("place"):
+            return selected
+        loc = lookup_place_in_text(payload["question"], state=selected.get("state", ""), district=selected.get("district", ""))
+        return loc or selected
 
     def weather(self, goal, payload):
-        from app.advisor import WeatherRequest
         question = payload["question"]
         normalized = self.advisor._normalize_hinglish(question)
-        request = self.advisor._parse_weather_request(question, normalized) or WeatherRequest()
+        request = self.advisor._parse_weather_request(question, normalized)
+        if request is None:
+            from app.advisor import WeatherRequest
+            request = WeatherRequest()
         loc = self.location(payload)
+        if loc.get("invalid_selection"):
+            return AgentResult("स्थान चयन अब उपलब्ध नहीं है। कृपया गांव/कस्बा फिर चुनें।", "needs_input")
         if not request.place and not loc:
             return AgentResult("मौसम के लिए अपना गांव/शहर या जिला बताएं।", "needs_input")
-        result = self.advisor._answer_weather_request(request, question, normalized,
-                       place_override=request.place or loc.get("place") or loc.get("district"))
+        if loc:
+            from app.weather import (get_current_weather_hindi, get_daily_weather_forecast_hindi,
+                                     get_weekly_weather_forecast_hindi, get_rain_day_forecast_hindi)
+            place = qualified_place(loc)
+            if request.action == "rain_day":
+                answer = get_rain_day_forecast_hindi(place, days=7)
+            elif request.action == "weekly":
+                answer = get_weekly_weather_forecast_hindi(place, days=7)
+            elif request.action in {"daily", "daily_rain"} and request.day_offset is not None:
+                answer = get_daily_weather_forecast_hindi(place, day_offset=request.day_offset,
+                                                         label=request.label, rain_focus=request.action == "daily_rain")
+            else:
+                answer = get_current_weather_hindi(place)
+            result = {"answer": answer, "references": ["Open-Meteo API"], "weather_action": request.action}
+        else:
+            result = self.advisor._answer_weather_request(request, question, normalized, place_override=request.place)
         answer = result["answer"]
         status = "ok" if result.get("references") else "unavailable"
+        if "नहीं मिल पाया" in answer:
+            status = "unavailable"
+            result["references"] = []
         if "पिछले उपलब्ध अपडेट" in answer:
             status = "stale"
         return AgentResult(answer, status, result.get("references", []),
-                           {"checked_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat()},
+                           {"checked_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(), "location": loc},
                            {"weather_action": result.get("weather_action")})
 
     def refresh_market(self, goal, payload):
@@ -74,7 +97,10 @@ class AdvisorTools:
         msp = self.advisor._answer_msp_query(question)
         if msp:
             return AgentResult(msp, references=["PIB MSP notification"])
-        district = self.location(payload).get("district")
+        location = self.location(payload)
+        if location.get("invalid_selection"):
+            return AgentResult("स्थान चयन अब उपलब्ध नहीं है। कृपया गांव/कस्बा फिर चुनें।", "needs_input")
+        district = location.get("district")
         if not district:
             return AgentResult("मंडी भाव के लिए अपना जिला बताएं।", "needs_input")
         if not MARKET_CSV.exists():
@@ -83,7 +109,7 @@ class AdvisorTools:
         needed = {"district_name", "cmdt_name", "rep_date", "model_price_wt"}
         if not needed.issubset(df.columns):
             return AgentResult("Agmarknet डेटा का प्रारूप पढ़ा नहीं जा सका।", "unavailable")
-        df = df[df["district_name"].astype(str).str.casefold() == str(district).casefold()].copy()
+
         normalized = self.advisor._normalize_hinglish(question)
         crop = self.advisor._extract_crop_from_query(normalized)
         from app.advisor import WESTERN_UP_CROP_BASELINES
@@ -97,6 +123,7 @@ class AdvisorTools:
             df = df[mask].copy()
         elif not re.search(r"latest|all|सभी|ताजा|ताज़ा|आज.*भाव", question, re.I):
             return AgentResult("किस फसल/कमोडिटी का मंडी भाव चाहिए?", "needs_input")
+        df, market_scope = scope_market_rows(df, location)
         df["date"] = pd.to_datetime(df["rep_date"], format="mixed", dayfirst=True, errors="coerce")
         df["price"] = pd.to_numeric(df["model_price_wt"], errors="coerce")
         today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
@@ -110,7 +137,7 @@ class AdvisorTools:
         stale = recent.empty
         if not recent.empty:
             rows = recent
-        lines = [f"{district} — Agmarknet में उपलब्ध मंडी भाव:"]
+        lines = [market_scope_caption(location, market_scope), f"{district} — Agmarknet में उपलब्ध मंडी भाव:"]
         evidence = []
         for _, row in rows.iterrows():
             date = row["date"].date().isoformat()
@@ -120,7 +147,7 @@ class AdvisorTools:
             evidence.append({"commodity": row["cmdt_name"], "market": row.get("market_name", ""), "date": date, "price": float(row["price"]), "unit": unit})
         if stale:
             lines.append("पुराने रिकॉर्ड दिखाए गए हैं; इन्हें आज का भाव न मानें।")
-        return AgentResult("\n".join(lines), "stale" if stale else "ok", ["https://agmarknet.gov.in/"], {"records": evidence})
+        return AgentResult("\n".join(lines), "stale" if stale else "ok", ["https://agmarknet.gov.in/"], {"records": evidence, "location": location, "market_scope": market_scope})
 
     def pesticides(self, goal, payload):
         q = self.advisor._normalize_hinglish(payload["question"])

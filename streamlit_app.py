@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.location_controls import render_place_selector
+from app.location_selection import location_context, place_options, qualified_place, scope_market_rows, market_scope_caption
+
 import os
 import re
 import sys
@@ -1427,6 +1430,7 @@ def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> 
 
     stop = {
         "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
+        "and", "or", "also", "please", "tell", "my", "for", "in", "at", "of", "to", "a", "an", "on", "with", "और", "होगा", "the", "is", "are", "will", "it", "be", "how", "today", "tomorrow", "tonight", "forecast", "next", "week", "day", "days", "rain", "rainfall", "temperature", "kal", "parso", "आज", "कल", "बारिश", "तापमान", "रहेगा", "कैसा", "है",
         "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
         "me", "mein", "में", "kesa", "kaisa", "hai", "h",
         "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
@@ -1688,6 +1692,7 @@ def _extract_location_search_hint(query: str) -> str | None:
         return None
     stop = {
         "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
+        "and", "or", "also", "please", "tell", "my", "for", "in", "at", "of", "to", "a", "an", "on", "with", "और", "होगा", "the", "is", "are", "will", "it", "be", "how", "today", "tomorrow", "tonight", "forecast", "next", "week", "day", "days", "rain", "rainfall", "temperature", "kal", "parso", "आज", "कल", "बारिश", "तापमान", "रहेगा", "कैसा", "है",
         "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
         "me", "mein", "में", "kesa", "kaisa", "hai", "h",
         "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
@@ -3229,6 +3234,10 @@ state_options = (
     if "State" in _init_df.columns
     else []
 )
+lookup_path = Path("data/processed/location_lookup.csv")
+hierarchy = load_location_lookup(lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0)
+if not hierarchy.empty and "state" in hierarchy:
+    state_options = sorted(set(state_options) | set(hierarchy["state"].dropna().astype(str)))
 if not state_options:
     state_options = ["Uttar Pradesh"]
 
@@ -3237,8 +3246,8 @@ if "show_local_prices_panel" not in st.session_state:
 if "fc_planning_season" not in st.session_state:
     st.session_state["fc_planning_season"] = "Rabi"
 
-toolbar_cols = st.columns([1.08, 1.08, 0.92, 0.9, 0.92])
-with toolbar_cols[3]:
+toolbar_cols = st.columns([1.05, 1.05, 1.8, 0.9, 0.9, 0.9])
+with toolbar_cols[4]:
     st.caption("Data")
     with st.popover("Agmarknet Status"):
         if st.session_state.get("agmarknet_auto_refresh_notice"):
@@ -3250,7 +3259,7 @@ with toolbar_cols[3]:
                 st.caption(f"Last refresh time: {agmarknet_status.get('updated_at')}")
             if agmarknet_status.get("message"):
                 st.caption(str(agmarknet_status.get("message")))
-with toolbar_cols[4]:
+with toolbar_cols[5]:
     st.caption("Account")
     account_label = (
         f"{str(auth_user_snapshot.get('display_name') or auth_user_snapshot.get('username') or 'Account').strip()}"
@@ -3265,7 +3274,7 @@ if not current_user():
     st.info("Use the Account menu in the top bar to sign in and start using the assistant.")
     st.stop()
 
-loc_col1, loc_col2, loc_col3 = toolbar_cols[:3]
+loc_col1, loc_col2, town_col, loc_col3 = toolbar_cols[:4]
 with loc_col1:
     st.caption("State")
     state_default = _coerce_selectbox_state(
@@ -3292,6 +3301,9 @@ if ("State" in _init_df.columns and "District" in _init_df.columns):
     )
 else:
     district_options = []
+if not hierarchy.empty and {"state", "district"}.issubset(hierarchy.columns):
+    hierarchy_districts = hierarchy[hierarchy["state"].astype(str).str.casefold() == selected_state.casefold()]["district"].dropna().astype(str)
+    district_options = sorted(set(district_options) | set(hierarchy_districts))
 if not district_options:
     district_options = ["Meerut"]
 
@@ -3314,17 +3326,24 @@ with loc_col2:
 active_state = selected_state
 active_district = selected_district
 district = active_district
+with town_col:
+    active_location = render_place_selector(active_state, active_district)
+active_place = str(active_location.get("place") or "")
+selection_signature = (active_state, active_district, active_location.get("sub_district", ""), active_place)
+if st.session_state.get("location_selection_signature") != selection_signature:
+    st.session_state["last_location_context"] = dict(active_location)
+    st.session_state["location_selection_signature"] = selection_signature
+    st.session_state.pop("pending_weather_location", None)
+
 
 with loc_col3:
-    st.caption("District Prices")
+    st.caption("Local Prices")
     if st.button("Show Crop Prices", key="show_local_crop_prices", use_container_width=True):
         st.session_state["show_local_prices_panel"] = True
 
-st.markdown(
-    f"<div class='kisaan-toolbar-note'>Selected district: <strong>{active_district}</strong>, {active_state}. "
-    "Only villages and towns from this district will be accepted in location-specific queries.</div>",
-    unsafe_allow_html=True,
-)
+st.caption(f"Selected location: {qualified_place(active_location)}")
+if active_place:
+    st.caption("Weather uses the selected place or a labelled regional fallback. Prices are reported by mandi; district markets are shown if no matching town market exists.")
 
 if (
     "State" in _init_df.columns
@@ -3358,7 +3377,9 @@ if local_market_df.empty and LIVE_MARKET_CSV.exists():
         local_market_df = pd.DataFrame()
 
 if st.session_state.get("show_local_prices_panel"):
-    local_prices = latest_crop_prices_for_location(local_market_df, active_state, active_district, limit=20)
+    scoped_market_df, price_scope = scope_market_rows(local_market_df, active_location)
+    st.caption(market_scope_caption(active_location, price_scope))
+    local_prices = latest_crop_prices_for_location(scoped_market_df, active_state, active_district, limit=20)
     if local_prices.empty:
         st.info(f"{active_district} के लिए अभी ताज़ा फसल-भाव सूची उपलब्ध नहीं मिली।")
     else:
@@ -3516,6 +3537,8 @@ with st.expander("Advanced market tools", expanded=False):
 
             mdf.columns = [c.strip() for c in mdf.columns]
             filtered = filter_market_rows(mdf, active_commodity, active_state, active_district)
+            filtered, forecast_scope = scope_market_rows(filtered, active_location)
+            st.caption(market_scope_caption(active_location, forecast_scope))
             raw_points = int(filtered["Arrival_Date_dt"].dt.date.nunique()) if not filtered.empty else 0
             latest_dt = filtered["Arrival_Date_dt"].max().date() if raw_points > 0 else None
             st.caption(
@@ -3877,8 +3900,18 @@ if user_query:
         if weather_intent and not (query_place or query_place_district or query_place_state) and fallback_weather_place:
             question_for_advisor = f"{fallback_weather_place} में {question_for_advisor}"
 
+        query_location = dict(active_location)
+        if query_place:
+            if str(query_place).casefold() == str(active_district).casefold():
+                query_location.update(place="", sub_district="")
+            elif str(query_place).casefold() != str(active_place).casefold():
+                matches = [loc for loc in place_options(active_state, active_district).values()
+                           if str(loc["place"]).casefold() == str(query_place).casefold()]
+                query_location = matches[0] if len(matches) == 1 else dict(active_location, place=query_place, sub_district="")
+        resolved_district = active_district
         composed_query = (
-            f"जिला: {resolved_district} | मौसम: {season_for_query} | पसंदीदा फसल: {preferred_crop_for_query or 'कोई नहीं'} | "
+            location_context(query_location)
+            + f"जिला: {resolved_district} | मौसम: {season_for_query} | पसंदीदा फसल: {preferred_crop_for_query or 'कोई नहीं'} | "
             f"किसान का प्रश्न: {question_for_advisor}"
         )
 
