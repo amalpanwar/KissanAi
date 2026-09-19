@@ -34,7 +34,7 @@ def _get_lookup() -> pd.DataFrame:
 
 
 def _safe_str(value: Any) -> str:
-    return "" if value is None else str(value).strip()
+    return "" if value is None or pd.isna(value) else str(value).strip()
 
 
 def _match_qualifiers(row: pd.Series | dict, qualifiers: list[str]) -> bool:
@@ -123,6 +123,8 @@ def resolve_location_hierarchy(name: str) -> dict[str, Any] | None:
 
 def _row_to_result(row: dict | pd.Series, place_fallback: str) -> dict[str, Any]:
     return {
+        "match_level": row.get("match_level", "place"),
+        "place_geocode_source": _safe_str(row.get("place_geocode_source")),
         "place": row.get("place", place_fallback),
         "sub_district": row.get("sub_district", ""),
         "district": row.get("district", ""),
@@ -156,10 +158,13 @@ def _iter_norm_candidates(df: pd.DataFrame, cols: Iterable[str]) -> list[tuple[s
     return candidates
 
 
-def lookup_place_in_text(text: str) -> dict[str, Any] | None:
+def lookup_place_in_text(text: str, *, state: str = "", district: str = "", sub_district: str = "") -> dict[str, Any] | None:
     if not text:
         return None
     df = _get_lookup()
+    for column, value in (("state", state), ("district", district), ("sub_district", sub_district)):
+        if value and column in df:
+            df = df[df[column].fillna("").map(_normalize_place) == _normalize_place(value)]
     if df.empty:
         return None
     norm_text = _normalize_place(text)
@@ -197,7 +202,7 @@ def lookup_place_in_text(text: str) -> dict[str, Any] | None:
                 phrase_norms.add(norm_phrase)
         if "place_norm" in df.columns:
             place_map = {str(v): row for v, row in zip(df["place_norm"], df.to_dict(orient="records")) if v}
-            for norm in phrase_norms:
+            for norm in sorted(phrase_norms, key=lambda v: (-len(v), v)):
                 if norm in place_map:
                     return _row_to_result(place_map[norm], norm)
         # Prefer exact sub-district/district matches before village-prefix matches.

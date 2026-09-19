@@ -304,3 +304,5 @@ Notes:
 
 
 See [Agent workflow and market refresh](docs/agentic-system.md) for coordinator behavior, refresh scheduling, model assessment and validation.
+
+See [Town and village selection](docs/location-selection.md) for location coverage and weather/market fallback behavior.

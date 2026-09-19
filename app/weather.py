@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -105,31 +106,57 @@ def _mark_weather_response_as_cached(text: str) -> str:
     return "\n".join(lines)
 
 
+def _lookup_weather_coordinates(loc: dict) -> tuple[float, float, str] | None:
+    """Reject mismatched geocodes and disclose inherited regional coordinates."""
+    def clean(value):
+        return "" if value is None or str(value).lower() == "nan" else str(value).strip()
+
+    def point(lat, lon):
+        try:
+            lat, lon = float(lat), float(lon)
+            if math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180 and lat and lon:
+                return lat, lon
+        except (TypeError, ValueError):
+            pass
+        return None
+
+    place, district, state = (clean(loc.get(k)) for k in ("place", "district", "state"))
+    village = point(loc.get("lat"), loc.get("lon"))
+    sub = point(loc.get("sub_district_lat"), loc.get("sub_district_lon"))
+    centre = point(loc.get("district_lat"), loc.get("district_lon"))
+    address = clean(loc.get("place_formatted_address"))
+    normalize = lambda value: re.sub(r"[^a-z0-9]+", "", value.casefold())
+    valid_address = not address or all(normalize(v) in normalize(address) for v in (district, state) if v)
+    label = ", ".join(dict.fromkeys(v for v in (place, district, state) if v))
+    level = loc.get("match_level", "place")
+    if level == "district" and centre:
+        return *centre, label
+    if level == "sub_district" and sub:
+        return *sub, label
+    if village and valid_address and village not in (sub, centre):
+        return *village, label
+    if sub:
+        return *sub, f"{label} — {clean(loc.get('sub_district'))} क्षेत्र का मौसम (गांव के अलग निर्देशांक उपलब्ध नहीं)"
+    if centre:
+        return *centre, f"{label} — जिला क्षेत्र का मौसम (गांव के अलग निर्देशांक उपलब्ध नहीं)"
+    if village and valid_address:
+        return *village, label
+    return None
+
+
 def _geocode_free(place: str) -> tuple[float, float, str] | None:
     if not place:
         return None
-    loc = resolve_location_hierarchy(place) or lookup_place(place) or lookup_place_in_text(place)
+    loc = resolve_location_hierarchy(place)
+    if not loc and "," not in place:
+        loc = lookup_place(place) or lookup_place_in_text(place)
     base_place = place
     if loc and loc.get("place"):
         base_place = loc["place"]
-    # If lookup has coordinates, use them directly.
     if loc:
-        try:
-            coord_candidates = [
-                (loc.get("lat"), loc.get("lon"), loc.get("place")),
-                (loc.get("sub_district_lat"), loc.get("sub_district_lon"), loc.get("sub_district")),
-                (loc.get("district_lat"), loc.get("district_lon"), loc.get("district")),
-            ]
-            for lat_raw, lon_raw, label in coord_candidates:
-                lat = float(lat_raw or 0)
-                lon = float(lon_raw or 0)
-                if lat and lon and not (math.isnan(lat) or math.isnan(lon)):
-                    display = ", ".join(
-                        [p for p in [label or loc.get("place"), loc.get("district"), loc.get("state"), "India"] if p]
-                    )
-                    return lat, lon, display
-        except Exception:
-            pass
+        coordinates = _lookup_weather_coordinates(loc)
+        if coordinates:
+            return coordinates
 
     candidates = [
         base_place,
