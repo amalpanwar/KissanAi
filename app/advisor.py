@@ -451,6 +451,14 @@ class RAGAdvisor:
         )
 
     def answer(self, user_query: str) -> dict:
+        import os
+        if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"}:
+            return self._answer_legacy(user_query)
+        from app.agent_system import build_coordinator
+        context, question = self._split_context_and_question(user_query)
+        return build_coordinator(self).answer(question, context)
+
+    def _answer_legacy(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)
         if self._is_greeting(farmer_question) and not self._has_agri_intent(farmer_question):
             return {"answer": self._time_based_greeting(), "references": [], "retrieved": [], "topic": "greeting"}

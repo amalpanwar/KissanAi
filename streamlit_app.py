@@ -291,7 +291,7 @@ def _start_agmarknet_auto_refresh() -> tuple[bool, str]:
     ]
     env = os.environ.copy()
     env.setdefault("AGMARKNET_LOOKBACK_DAYS", "14")
-    env.setdefault("AGMARKNET_MODE", "report")
+    env.setdefault("AGMARKNET_MODE", "auto")
     AGMARKNET_AUTO_REFRESH_LOG.parent.mkdir(parents=True, exist_ok=True)
     log_handle = AGMARKNET_AUTO_REFRESH_LOG.open("ab")
     proc = subprocess.Popen(
@@ -305,7 +305,7 @@ def _start_agmarknet_auto_refresh() -> tuple[bool, str]:
         {
             "last_started_at": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
             "pid": proc.pid,
-            "mode": env.get("AGMARKNET_MODE", "report"),
+            "mode": env.get("AGMARKNET_MODE", "auto"),
             "lookback_days": env.get("AGMARKNET_LOOKBACK_DAYS", "14"),
             "log_file": str(AGMARKNET_AUTO_REFRESH_LOG),
         }
@@ -3609,6 +3609,11 @@ except Exception as exc:
 
 for item in st.session_state.chat_history:
     with st.chat_message(item["role"]):
+        if item.get("agent_trace"):
+            with st.expander("Plan and agent activity"):
+                st.write(item["agent_trace"]["goal"])
+                st.write(" → ".join(item["agent_trace"]["plan"]))
+                st.json(item["agent_trace"]["decisions"])
         if item.get("type") == "market_panel":
             render_market_panel(
                 meta=item.get("market_meta") or {},
@@ -3920,6 +3925,11 @@ if user_query:
             selected_district = fallback_district_for_price
             if fallback_state_for_price:
                 selected_state = fallback_state_for_price
+
+        agentic_enabled = os.getenv("KISAANAI_AGENTIC", "1").lower() not in {"0", "false", "no"}
+        if agentic_enabled:
+            # Every query, including prices and mixed intents, uses the coordinator.
+            intent_price = False
 
         if intent_price:
             # Ensure commodity is explicitly detected for price queries.
@@ -4300,7 +4310,8 @@ if user_query:
             direct_crop_followup = None
             direct_crop_protection_followup = None
             if (
-                (
+                not agentic_enabled
+                and (
                     crop_guide_followup_detected
                     or _looks_like_crop_water_followup(user_query, advisor)
                 )
@@ -4321,7 +4332,8 @@ if user_query:
                         "topic": "crop_guide_followup",
                     }
             if (
-                direct_crop_followup is None
+                not agentic_enabled
+                and direct_crop_followup is None
                 and can_use_pesticide_followup_context
                 and not advisor._is_weather_intent(normalized_user_query)
             ):
@@ -4336,7 +4348,10 @@ if user_query:
                         "retrieved": pesticide_result.get("retrieved", []),
                         "topic": "pesticide",
                     }
-            if direct_crop_followup is not None:
+            if agentic_enabled:
+                with st.spinner("Checking sources and coordinating specialists..."):
+                    result = advisor.answer(composed_query)
+            elif direct_crop_followup is not None:
                 result = direct_crop_followup
             elif direct_crop_protection_followup is not None:
                 result = direct_crop_protection_followup
@@ -4359,7 +4374,8 @@ if user_query:
                             "topic": "clarification",
                         }
             if (
-                str(result.get("topic") or "").strip().lower() == "weather"
+                not agentic_enabled
+                and str(result.get("topic") or "").strip().lower() == "weather"
                 and (crop_guide_followup_detected or _looks_like_crop_water_followup(user_query, advisor))
                 and advisor._has_agri_intent(normalized_user_query)
             ):
@@ -4377,7 +4393,8 @@ if user_query:
                         "topic": "crop_guide_followup",
                     }
             if (
-                str(result.get("topic") or "").strip().lower() == "weather"
+                not agentic_enabled
+                and str(result.get("topic") or "").strip().lower() == "weather"
                 and can_use_pesticide_followup_context
                 and not advisor._is_weather_intent(normalized_user_query)
             ):
@@ -4440,6 +4457,7 @@ if user_query:
                 "topic": (None if intent_price else topic),
                 "user_query": user_query,
                 "weather_action": (None if intent_price else result.get("weather_action")),
+                "agent_trace": (None if intent_price else result.get("agent_trace")),
             }
         )
 
@@ -4449,6 +4467,12 @@ if user_query:
             else:
                 st.write(final_answer)
             if not intent_price:
+                if result.get("agent_trace"):
+                    with st.expander("Plan and agent activity"):
+                        trace = result["agent_trace"]
+                        st.write(trace["goal"])
+                        st.write(" → ".join(trace["plan"]))
+                        st.json(trace["decisions"])
                 with st.expander("Sources Used"):
                     for src in result.get("references", []):
                         st.write(f"- {src}")
