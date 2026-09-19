@@ -119,7 +119,10 @@ class Coordinator:
             "prices": r"\b(price|prices|rate|mandi|bhav|bhaav|daam|msp)\b|भाव|कीमत|दाम|मंडी|समर्थन मूल्य",
             "pesticides": r"\b(pesticide|pesticides|insecticide|fungicide|herbicide|spray|dawai|keet|rog|disease|pest)\b|दवा|दवाई|कीट|रोग|छिड़क|फफूंद|लक्षण",
         }
-        return [name for name, pattern in patterns.items() if re.search(pattern, question, re.I)]
+        selected = [name for name, pattern in patterns.items() if re.search(pattern, question, re.I)]
+        if not selected and re.search(r"\b(kheti|cultivation)\b|खेती|how to (grow|cultivate)", question, re.I):
+            selected.append("agronomy")
+        return selected
 
     def plan(self, question: str) -> tuple[list[str], str]:
         required = self.domains(question)

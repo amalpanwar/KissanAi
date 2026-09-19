@@ -542,7 +542,19 @@ class RAGAdvisor:
                     "topic": "crop_guide_followup",
                 }
         if parsed_intent.subject == "crop_guide":
-            guide_answer, guide_sources = build_crop_production_guide(normalized_question)
+            try:
+                guide_answer, guide_sources = build_crop_production_guide(normalized_question)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Failed to read crop production guide")
+                guide_answer, guide_sources = None, []
+            if not guide_answer:
+                return {
+                    "answer": "इस फसल की खेती की स्रोत-आधारित गाइड अभी उपलब्ध नहीं है। "
+                              "कृपया बाद में फिर प्रयास करें।",
+                    "references": [], "retrieved": [], "topic": "crop_guide",
+                    "status": "unavailable",
+                }
             if guide_answer:
                 return {
                     "answer": guide_answer,
@@ -787,6 +799,7 @@ class RAGAdvisor:
                 return web_result
             return {
                 "answer": "मॉडल अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।",
+                "status": "unavailable",
                 "references": [],
                 "retrieved": [],
                 "topic": "rag",
@@ -4322,6 +4335,7 @@ class RAGAdvisor:
 
     def _normalize_hinglish(self, text: str) -> str:
         phrase_mapping = [
+            (r"\bhow to (?:grow|cultivate)\b", "कैसे उगाएं"),
             (r"\bpatt?iyo?n?\s+(?:ka|k)\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
             (r"\bpattion?\s+(?:ka|k)\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
             (r"\bpatt?iyo?n?\s+pe\s+peelapan(?:\s+aa\s+r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
@@ -5347,6 +5361,12 @@ class RAGAdvisor:
             parsed.scope = "within_crop"
             parsed.objective = "cultivation"
             parsed.confidence = 0.68
+
+        # Explicit crop-guide questions already have a reliable rule match.
+        # Do not load embedding/model weights to answer from the bundled guide.
+        if parsed.subject == "crop_guide":
+            self._intent_parse_cache[cache_key] = parsed
+            return parsed
 
         self._ensure_agri_intent_semantic_index()
         if self.embedder is not None and self._intent_phrase_embeddings is not None and self._intent_phrase_rows:
