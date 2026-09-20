@@ -1086,6 +1086,12 @@ def _build_guide_points_for_crop(crop: str) -> tuple[dict[str, list[str]] | None
         if _should_skip_heading(crop, heading):
             continue
         phase = _assign_phase(heading)
+        # Wheat's basal fertilizer paragraph describes sowing-time inputs.
+        if (crop.lower() == "wheat" and
+                any(term in _heading_key(heading) for term in
+                    ["FERTILIZER APPLICATION", "APPLICATION OF FERTILIZERS"]) and
+                re.search(r"\bbasal(?:ly)?\b", body, re.I)):
+            phase = "sowing"
         if not phase:
             continue
         point = _summarize_block(crop, heading, body)
@@ -1418,7 +1424,21 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
             npk_value = re.sub(r"\s*NPK\s*kg/ha", "", npk.strip(), flags=re.IGNORECASE)
             parts.append(f"यदि मिट्टी जांच उपलब्ध न हो तो लगभग {npk_value} NPK किग्रा/हेक्टेयर दें।")
         if zns:
-            parts.append(f"जिंक/सल्फर की कमी वाली मिट्टी में {_translate_terms(zns.strip())} दें।")
+            # Translate this source pattern completely, without depending on an API.
+            # Capture quantities rather than hard-coding a dose or assuming an area basis.
+            basal_zns = re.fullmatch(
+                r"([0-9.]+)\s*kg\s*ZnSO\s*4\s*,\s*([0-9.]+)\s*kg\s*S\s+"
+                r"basally\s+for\s+soils\s+having\s+Zn\s+and\s+S\s+deficiencies",
+                zns.strip(), re.I,
+            )
+            if basal_zns:
+                zinc, sulphur = basal_zns.groups()
+                parts.append(
+                    f"जिंक और गंधक की कमी वाली मिट्टी में {zinc} किग्रा जिंक सल्फेट "
+                    f"और {sulphur} किग्रा गंधक बुवाई के समय मिट्टी में मिलाएँ।"
+                )
+            else:
+                parts.append(f"जिंक/सल्फर की कमी वाली मिट्टी में {_translate_terms(zns.strip())} दें।")
         parts.append("आधा नाइट्रोजन और पूरा फॉस्फोरस-पोटाश बुवाई से पहले दें।")
         return f"{label}: {' '.join(parts)}"
 

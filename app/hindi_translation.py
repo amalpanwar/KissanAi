@@ -9,9 +9,16 @@ import re
 import sys
 import time
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
+TRANSLATION_VERSION = 'sarvam-hindi-v2'
+
+
+class TranslationValidationError(ValueError):
+    pass
+
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
 FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
 UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C)(?:\s*/\s*(?:ha|hectare|acre|L|litre|liter))?'
@@ -82,15 +89,15 @@ def _translate(text: str, api_key: str, timeout: float) -> str:
     with urlopen(request, timeout=timeout) as response:
         output = json.loads(response.read().decode('utf-8')).get('translated_text')
     if not isinstance(output, str) or not output.strip():
-        raise ValueError('Empty translation')
+        raise TranslationValidationError('empty_response')
     # Each protected item must occur exactly once and stay in source order.
     if TOKEN.findall(output) != TOKEN.findall(text):
-        raise ValueError('Protected values changed')
+        raise TranslationValidationError('protected_values_changed')
     residual = TOKEN.sub('', output)
     if re.search(r'\d', residual) or re.search(r'[A-Za-z]', residual):
-        raise ValueError('Translation contains new numbers or untranslated English')
+        raise TranslationValidationError('untranslated_text_or_new_numbers')
     if not re.search(r'[\u0900-\u097f]', residual):
-        raise ValueError('Hindi translation missing')
+        raise TranslationValidationError('hindi_missing')
     return output.strip()
 
 
@@ -104,7 +111,8 @@ def translate_answer(result: dict) -> dict:
     if 'translation' in result:
         return result
     original = str(result.get('answer', ''))
-    info = {'provider': 'sarvam', 'model': MODEL, 'target_language': 'hi-IN'}
+    info = {'provider': 'sarvam', 'model': MODEL, 'target_language': 'hi-IN',
+            'version': TRANSLATION_VERSION}
     def finish(answer, status, reason=None):
         metadata = {**info, 'status': status}
         if reason:
@@ -145,10 +153,12 @@ def translate_answer(result: dict) -> dict:
         for start, end, replacement in reversed(replacements):
             output = output[:start] + replacement + output[end:]
         if Counter(TOKEN.findall(output)) != Counter(values.keys()):
-            raise ValueError('Protected values lost')
+            raise TranslationValidationError('protected_values_lost')
         for token, value in values.items():
             output = output.replace(token, value)
         return finish(output, 'translated')
     except Exception as exc:
         # Never expose provider bodies, API keys, or farmer text in diagnostics.
-        return finish(original, 'fallback', type(exc).__name__)
+        reason = (f'http_{exc.code}' if isinstance(exc, HTTPError) else
+                  str(exc) if isinstance(exc, TranslationValidationError) else type(exc).__name__)
+        return finish(original, 'fallback', reason)
