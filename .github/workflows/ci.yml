@@ -29,7 +29,7 @@ jobs:
           test -f requirements.txt
 
       - name: Install test dependencies
-        run: pip install pandas==2.2.3 PyYAML==6.0.2 streamlit==1.45.1
+        run: pip install pandas==2.2.3 PyYAML==6.0.2 streamlit==1.45.1 scikit-learn==1.5.2 pypdf==4.3.1
 
       - name: Agent and refresh regression tests
         run: python -m unittest discover -s tests -v
