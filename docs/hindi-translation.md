@@ -49,3 +49,8 @@ For each newly generated answer, expand **हिंदी अनुवाद क
 - `not_needed`: there was no remaining English prose requiring Sarvam.
 
 The known wheat zinc/sulphur basal-fertilizer sentence is now rendered completely in Hindi from its extracted source quantities, even without an API key. It is placed in the sowing section. This correction does not prove that the external Sarvam service is configured or functioning.
+
+## Preserve names
+
+Selected village/town, tehsil, district, and state names, resolved weather-header locations, and explicit `protected_names` are masked before translation and restored with their exact source spelling. For example, `Doghat Rural, Baghpat, Uttar Pradesh` stays unchanged while weather descriptions remain Hindi. Recognized names are not submitted in plaintext to Sarvam. Other agents can supply person or organization names through `protected_names`; this is not general named-entity recognition for arbitrary prose. Existing chat replies are unchanged; ask again after deployment. Version: `sarvam-hindi-v3`.
+

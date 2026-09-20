@@ -13,7 +13,7 @@ from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v2'
+TRANSLATION_VERSION = 'sarvam-hindi-v3'
 
 
 class TranslationValidationError(ValueError):
@@ -55,13 +55,44 @@ def _token(index: int) -> str:
             return 'ZXQ' + label + 'QXZ'
 
 
-def _protect(text: str) -> tuple[str, dict[str, str]]:
+def _protected_names(result: dict) -> list[str]:
+    """Use explicit entity metadata, never guess names from capitalized prose."""
+    names = list(result.get('protected_names') or [])
+    keys = ('place', 'sub_district', 'district', 'state', 'city', 'name', 'person_name')
+    def add_location(location):
+        if isinstance(location, dict):
+            names.extend(location.get(k) for k in keys)
+    add_location(result.get('location'))
+    for message in (result.get('agent_trace') or {}).get('messages', []):
+        payload = message.get('payload', {})
+        add_location((payload.get('evidence') or {}).get('location'))
+        # Context is supplied by the app's location controls. It is not sent.
+        context = payload.get('context', '')
+        names.extend(re.findall(
+            r'(?:^|\|)\s*(?:State|District|Subdistrict|Place|City|Name|नाम|जिला|स्थान)\s*:\s*([^|]+)',
+            context, re.I,
+        ))
+    # Preserve the complete resolved weather location, including geocoder names
+    # absent from the local lookup table and legacy weather responses.
+    names.extend(re.findall(
+        r'(?:मौसम|पूर्वानुमान|बारिश)[^\n()]*\(([^()\n]+)\)',
+        str(result.get('answer', '')),
+    ))
+    return sorted({n.strip() for n in names if isinstance(n, str) and n.strip()},
+                  key=len, reverse=True)
+
+
+def _protect(text: str, names: list[str] | None = None) -> tuple[str, dict[str, str]]:
     values = {}
     def replace(match):
         token = _token(len(values))
         values[token] = match.group()
         return token
-    return PROTECTED.sub(replace, text), values
+    # Names are matched before numbers/formulae; longest names win. Restore the
+    # exact matched spelling after translation, including case and spaces.
+    entity_pattern = '|'.join(r'(?<!\w)' + re.escape(n) + r'(?!\w)' for n in (names or []))
+    pattern = re.compile(entity_pattern + '|' + PROTECTED.pattern) if entity_pattern else PROTECTED
+    return pattern.sub(replace, text), values
 
 
 def _chunks(text: str, limit: int = 1800) -> list[str]:
@@ -122,7 +153,7 @@ def translate_answer(result: dict) -> dict:
         return finish(original, 'disabled')
     if TOKEN.search(original):
         return finish(original, 'fallback', 'reserved_token_in_source')
-    protected, values = _protect(original)
+    protected, values = _protect(original, _protected_names(result))
     segments = list(NON_HINDI.finditer(protected))
     # Formula-only passages need no model; keep approved scientific notation.
     pending = [m for m in segments if re.search(r'[A-Za-z]', TOKEN.sub('', m.group()))]
