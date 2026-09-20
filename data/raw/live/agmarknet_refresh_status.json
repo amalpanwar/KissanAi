@@ -1,8 +1,62 @@
 {
   "status": "success",
-  "message": "Imported validated official snapshot and synchronized SQLite.",
-  "after_latest": "2026-09-18",
-  "new_rows": 1032,
-  "updated_at": "2026-09-18T20:17:06.538197+05:30",
-  "mode": "snapshot_import"
+  "message": "Updated Agmarknet CSV, catalog and SQLite through 2026-09-20.",
+  "before_latest": "2026-09-18",
+  "after_latest": "2026-09-20",
+  "mode": "auto",
+  "lookback_days_requested": 3,
+  "attempts": [
+    {
+      "mode": "dashboard",
+      "return_code": 0,
+      "summary": {
+        "status": "success",
+        "message": "Saved rows successfully.",
+        "mode": "dashboard",
+        "from_date": "2026-09-17",
+        "to_date": "2026-09-20",
+        "started_at": "2026-09-20T05:56:50.273247",
+        "completed_at": "2026-09-20T05:57:52.134716",
+        "rows_saved": 192637,
+        "raw_rows": 1900,
+        "failure_count": 0,
+        "out": "/home/runner/work/KissanAi/KissanAi/data/raw/live/agmarknet_report.csv",
+        "fail_log": "data/raw/live/agmarknet_failures.csv",
+        "state_ids": [
+          "34"
+        ],
+        "district_ids": [
+          "586",
+          "595",
+          "604",
+          "614",
+          "615",
+          "640",
+          "642",
+          "649",
+          "653",
+          "638"
+        ],
+        "group_ids": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+          "13",
+          "14",
+          "15"
+        ]
+      }
+    }
+  ],
+  "updated_at": "2026-09-20T11:27:54.480531+05:30",
+  "return_code": 0
 }
