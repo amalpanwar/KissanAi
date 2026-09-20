@@ -4442,6 +4442,10 @@ if user_query:
                         "retrieved": pesticide_result.get("retrieved", []),
                         "topic": "pesticide",
                     }
+            from app.hindi_translation import translate_answer
+            result = translate_answer(result)
+            if result.get("translation", {}).get("status") in {"not_configured", "fallback"}:
+                st.caption("हिंदी अनुवाद अभी उपलब्ध नहीं है; मूल उत्तर दिखाया गया है।")
             final_answer = result["answer"]
             topic = result.get("topic") or "rag"
             query_log_id = log_query_answer(
