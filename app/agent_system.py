@@ -120,7 +120,12 @@ class Coordinator:
             "pesticides": r"\b(pesticide|pesticides|insecticide|fungicide|herbicide|spray|dawai|keet|rog|disease|pest)\b|दवा|दवाई|कीट|रोग|छिड़क|फफूंद|लक्षण",
         }
         selected = [name for name, pattern in patterns.items() if re.search(pattern, question, re.I)]
-        if not selected and re.search(r"\b(kheti|cultivation)\b|खेती|how to (grow|cultivate)", question, re.I):
+        profitability = re.search(
+            r"\b(profit(?:able|ability)?|la?bhdayak|laabhdayak|munafa)\b|लाभ|मुनाफा|लाभदायक",
+            question, re.I,
+        )
+        if profitability or (not selected and re.search(
+                r"\b(kheti|cultivation)\b|खेती|how to (grow|cultivate)", question, re.I)):
             selected.append("agronomy")
         return selected
 
