@@ -4338,6 +4338,8 @@ class RAGAdvisor:
 
     def _normalize_hinglish(self, text: str) -> str:
         phrase_mapping = [
+            (r"\b(?:labhdayak|laabhdayak)\b", "लाभदायक"),
+            (r"\b(?:jyada|zyada)\b", "ज्यादा"),
             (r"\bhow to (?:grow|cultivate)\b", "कैसे उगाएं"),
             (r"\bpatt?iyo?n?\s+(?:ka|k)\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
             (r"\bpattion?\s+(?:ka|k)\s+rang\s+badal(?:\s*r[hae]+\s*hai)?\b", "पत्तियों का रंग बदलना"),
@@ -5365,9 +5367,13 @@ class RAGAdvisor:
             parsed.objective = "cultivation"
             parsed.confidence = 0.68
 
-        # Explicit crop-guide questions already have a reliable rule match.
-        # Do not load embedding/model weights to answer from the bundled guide.
-        if parsed.subject == "crop_guide":
+        # Clear cultivation and crop-profit comparisons use structured data;
+        # model downloads/inference must not precede these deterministic routes.
+        clear_profit_comparison = (
+            parsed.subject == "crop_choice" and has_list and
+            bool(re.search(r"profit|laabh|labh|munafa|लाभ|मुनाफा|कमाई", normalized, re.I))
+        )
+        if parsed.subject == "crop_guide" or clear_profit_comparison:
             self._intent_parse_cache[cache_key] = parsed
             return parsed
 
