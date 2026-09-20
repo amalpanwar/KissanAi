@@ -3632,6 +3632,9 @@ except Exception as exc:
 
 for item in st.session_state.chat_history:
     with st.chat_message(item["role"]):
+        if item["role"] == "assistant" and item.get("type") != "market_panel":
+            from app.translation_status import render_translation_status
+            render_translation_status(st, item.get("translation"))
         if item.get("agent_trace"):
             with st.expander("Plan and agent activity"):
                 st.write(item["agent_trace"]["goal"])
@@ -4444,8 +4447,6 @@ if user_query:
                     }
             from app.hindi_translation import translate_answer
             result = translate_answer(result)
-            if result.get("translation", {}).get("status") in {"not_configured", "fallback"}:
-                st.caption("हिंदी अनुवाद अभी उपलब्ध नहीं है; मूल उत्तर दिखाया गया है।")
             final_answer = result["answer"]
             topic = result.get("topic") or "rag"
             query_log_id = log_query_answer(
@@ -4495,6 +4496,7 @@ if user_query:
                 "user_query": user_query,
                 "weather_action": (None if intent_price else result.get("weather_action")),
                 "agent_trace": (None if intent_price else result.get("agent_trace")),
+                "translation": (None if intent_price else result.get("translation")),
             }
         )
 
@@ -4504,6 +4506,8 @@ if user_query:
             else:
                 st.write(final_answer)
             if not intent_price:
+                from app.translation_status import render_translation_status
+                render_translation_status(st, result.get("translation"))
                 if result.get("agent_trace"):
                     with st.expander("Plan and agent activity"):
                         trace = result["agent_trace"]

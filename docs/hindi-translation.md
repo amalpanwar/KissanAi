@@ -34,3 +34,18 @@ Run `python -m unittest discover -s tests -v`. Tests use mocked API responses; t
 API contract: https://docs.sarvam.ai/api-reference/text/translate-text
 
 Streamlit secret setup: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management
+
+## Troubleshooting a mixed-language answer
+
+For each newly generated answer, expand **हिंदी अनुवाद की स्थिति**. This diagnostic is stored with chat history, so it survives Streamlit reruns. `version: sarvam-hindi-v2` identifies this implementation. Existing chat replies are not rewritten; ask the question again after deployment.
+
+- `not_configured`: the running app cannot read SARVAM_API_KEY. Put it at the top level of Streamlit Secrets, then restart. A GitHub Actions secret does not configure the app.
+- `disabled`: KISAANAI_HINDI_TRANSLATION disables translation.
+- `http_401` / `http_403`: check provider credentials/access.
+- `http_429`: check the provider's rate limits and account quota.
+- `protected_values_changed`: the provider changed or reordered protected placeholders; the translation was rejected.
+- `untranslated_text_or_new_numbers`: the response retained English or introduced a number; it was rejected.
+- `TimeoutError`: the service timeout or total translation budget was exceeded.
+- `not_needed`: there was no remaining English prose requiring Sarvam.
+
+The known wheat zinc/sulphur basal-fertilizer sentence is now rendered completely in Hindi from its extracted source quantities, even without an API key. It is placed in the sowing section. This correction does not prove that the external Sarvam service is configured or functioning.

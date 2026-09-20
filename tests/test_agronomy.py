@@ -56,6 +56,8 @@ class AgronomyTests(unittest.TestCase):
         self.assertEqual(result['topic'], 'crop_guide')
         self.assertIn('गेहूं', result['answer'])
         self.assertGreater(len(result['answer']), 200)
+        self.assertNotIn('basally for soils', result['answer'])
+        self.assertIn('जिंक सल्फेट', result['answer'])
         self.assertTrue(result['references'])
         self.model_mock.assert_not_called()
         self.semantic_mock.assert_not_called()
