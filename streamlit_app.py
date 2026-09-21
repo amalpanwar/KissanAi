@@ -3359,14 +3359,11 @@ else:
 if not commodity_options:
     commodity_options = [preferred_crop or "Wheat"]
 commodity_fallback = preferred_crop or commodity_options[0]
-commodity_default = _coerce_selectbox_state(
-    "fc_commodity_dropdown",
-    commodity_options,
-    commodity_fallback,
-    fallback=commodity_fallback,
-)
+# Crop choice comes from the question/conversation, not an advanced filter.
+st.session_state.pop("fc_commodity_dropdown", None)
 season = str(st.session_state.get("fc_planning_season") or "Rabi")
-active_commodity = st.session_state.get("fc_commodity_dropdown") or commodity_options[commodity_default]
+remembered_commodity = (st.session_state.get("last_structured_context") or {}).get("preferred_crop", "")
+active_commodity = remembered_commodity if remembered_commodity in commodity_options else commodity_fallback
 
 local_market_df = load_agmarknet_df()
 if local_market_df.empty and LIVE_MARKET_CSV.exists():
@@ -3388,13 +3385,6 @@ if st.session_state.get("show_local_prices_panel"):
 
 with st.expander("Advanced market tools", expanded=False):
     season = st.selectbox("Planning Season", ["Rabi", "Kharif", "Annual"], key="fc_planning_season")
-    selected_commodity_from_dropdown = st.selectbox(
-        "Commodity (for forecast / refresh)",
-        commodity_options,
-        index=commodity_default,
-        key="fc_commodity_dropdown",
-    )
-    active_commodity = selected_commodity_from_dropdown
     min_raw_points = 60
     max_stale_days = 30
     fast_mode = st.checkbox("Fast Forecast (no download)", value=True, key="fc_fast_mode")
