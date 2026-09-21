@@ -5477,7 +5477,9 @@ class RAGAdvisor:
             return None, []
 
         district = district_override or self._extract_district(context_part) or "Meerut"
-        season = self._extract_season(context_part) or self._extract_query_season(question)
+        explicit_season = self._extract_query_season(question)
+        season = explicit_season or self._extract_season(context_part)
+        include_annual = not explicit_season
         budget = self._extract_budget(question)
         area_acres = self._extract_area_acres(question)
         area_scale = area_acres or 1.0
@@ -5494,17 +5496,18 @@ class RAGAdvisor:
                 rows = conn.execute(
                     """
                     SELECT crop_name, cost_min_inr_per_acre, cost_max_inr_per_acre,
-                           market_price_inr_per_qtl, avg_yield_qtl_per_acre
+                           market_price_inr_per_qtl, avg_yield_qtl_per_acre, season
                     FROM crop_economics
-                    WHERE lower(district) = lower(?) AND lower(season) = lower(?)
+                    WHERE lower(district) = lower(?)
+                      AND (lower(season) = lower(?) OR (? AND lower(season) = 'annual'))
                     """,
-                    (district, season),
+                    (district, season, include_annual),
                 ).fetchall()
-            if not rows:
+            if not rows and not explicit_season:
                 rows = conn.execute(
                     """
                     SELECT crop_name, cost_min_inr_per_acre, cost_max_inr_per_acre,
-                           market_price_inr_per_qtl, avg_yield_qtl_per_acre
+                           market_price_inr_per_qtl, avg_yield_qtl_per_acre, season
                     FROM crop_economics
                     WHERE lower(district) = lower(?)
                     """,
@@ -5543,6 +5546,7 @@ class RAGAdvisor:
             scored.append(
                 {
                     "crop": crop,
+                    "season": r["season"],
                     "cost_min": total_cost_min,
                     "cost_max": total_cost_max,
                     "revenue": rev,
@@ -5560,7 +5564,7 @@ class RAGAdvisor:
                 "कृपया बजट बढ़ाएँ या फसल विकल्प बताकर फिर पूछें।"
             ), sources
 
-        scored = sorted(scored, key=lambda x: x["profit_min"], reverse=True)[:3]
+        scored = sorted(scored, key=lambda x: x["profit_min"], reverse=True)
         lines = []
         lines.append("मानदंड: मंडी MSP/भाव (Agmarknet) + उपलब्ध लागत/उपज डेटा + PPQS/MUP रोग/कीट दबाव संकेत।")
         lines.append("कीमत स्रोत: Agmarknet (district market prices)")
@@ -5571,6 +5575,8 @@ class RAGAdvisor:
                 f"अनुमानित आय ₹{int(s['revenue'])}, "
                 f"संभावित लाभ ₹{int(s['profit_min'])}-₹{int(s['profit_max'])}"
                 f"{s['price_note']} | रोग/कीट दबाव संकेत: {s['pressure']}"
+                + (" | वार्षिक/लंबी अवधि की फसल; लाभ पूरे फसल चक्र का है।"
+                   if str(s["season"]).lower() == "annual" else "")
             )
 
         if budget is not None:
@@ -5596,17 +5602,22 @@ class RAGAdvisor:
         question: str,
         market_prices: dict[str, dict[str, str | float]],
     ) -> str | None:
+        explicit_season = self._extract_query_season(question)
+        season = explicit_season or season
+        include_annual = not explicit_season
         budget = self._extract_budget(question)
         area_acres = self._extract_area_acres(question)
         area_scale = area_acres or 1.0
         scored: list[dict] = []
         for crop, base in WESTERN_UP_CROP_BASELINES.items():
-            if not self._season_matches(season, str(base["season"])):
+            if not (self._season_matches(season, str(base["season"])) or
+                    (include_annual and str(base["season"]).lower() == "annual")):
                 continue
             market = self._market_price_for_crop(crop, base, market_prices)
             price = float(market["price"])
             price_source = str(market["source"])
-            yield_info = load_latest_up_yield_qtl_per_acre(crop, season=season)
+            yield_season = "Annual" if str(base["season"]).lower() == "annual" else season
+            yield_info = load_latest_up_yield_qtl_per_acre(crop, season=yield_season)
             yield_qtl_per_acre = (
                 float(yield_info["yield_qtl_per_acre"])
                 if yield_info and yield_info.get("yield_qtl_per_acre")
@@ -5659,8 +5670,10 @@ class RAGAdvisor:
             )
         if not scored:
             return None
-        scored = sorted(scored, key=lambda x: (x["profit_min"], x["profit_max"]), reverse=True)[:5]
+        scored = sorted(scored, key=lambda x: (x["profit_min"], x["profit_max"]), reverse=True)
         header_parts = [f"जिला: {district}"]
+        if season:
+            header_parts.append(f"मौसम: {season}" + (" + वार्षिक फसलें" if include_annual and season.lower() != "annual" else ""))
         if area_acres:
             header_parts.append(f"क्षेत्र: {self._format_area_acres(area_acres)}")
         if budget is not None:
@@ -5669,14 +5682,17 @@ class RAGAdvisor:
         lines = [
             header,
             "लाभ रैंकिंग उपज × भाव − लागत के आधार पर निकाली गई है।",
+            "ये अनुमान प्रति फसल चक्र के हैं; वार्षिक फसल और एक मौसम की फसल का लाभ समान समयावधि की तुलना नहीं है।",
             "लागत में जहाँ उपलब्ध हो वहाँ CACP के अनुसार paid-out cost + family labour से लेकर पूरी लागत तक का band लिया गया है; नहीं मिलने पर baseline indicative range रखा गया है।",
             "",
-            "सबसे बेहतर विकल्प:",
+            "उपलब्ध फसल विकल्प (अनुमानित लाभ के क्रम में):",
         ]
         scope_label = f"{self._format_area_acres(area_acres)} के लिए" if area_acres else "प्रति एकड़"
         for i, s in enumerate(scored, start=1):
             date_part = f", {s['price_date']}" if s["price_date"] else ""
             crop_label = self._crop_display_label(str(s["crop"]))
+            if str(s["season"]).lower() == "annual":
+                crop_label += " — वार्षिक/लंबी अवधि की फसल"
             lines.append(
                 f"{i}) {crop_label}: उपज ~{s['yield']:.1f} qtl/acre"
                 f"{(' (UPAG ' + str(s['yield_year']) + (', 2nd AE' if s.get('yield_note') else '') + ')') if s['yield_source']=='UPAG' and s['yield_year'] else ''}, "
