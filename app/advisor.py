@@ -5524,6 +5524,23 @@ class RAGAdvisor:
             return self._rank_from_agmarknet_only(district, question), sources
         sources.insert(0, "crop_economics (SQLite)")
 
+        # A partially populated district table must not hide annual crops that
+        # have an existing, separately labelled source-based estimate.
+        present = {self._normalize_crop_for_pesticide(str(r["crop_name"])).casefold() for r in rows}
+        missing_annual = {
+            crop for crop, base in WESTERN_UP_CROP_BASELINES.items()
+            if str(base["season"]).lower() == "annual"
+            and self._normalize_crop_for_pesticide(crop).casefold() not in present
+        } if include_annual else set()
+        annual_comparison = None
+        if missing_annual:
+            annual_comparison = self._rank_from_profit_baselines(
+                district, "Annual", question, market_prices,
+                crop_names=missing_annual, compact=True,
+            )
+            if annual_comparison:
+                sources.append("crop_profit_baselines")
+
         scored: list[dict] = []
         for r in rows:
             price = float(r["market_price_inr_per_qtl"])
@@ -5557,6 +5574,8 @@ class RAGAdvisor:
                 }
             )
 
+        if not scored and annual_comparison:
+            return annual_comparison, sources
         if not scored:
             return (
                 f"समझा गया सवाल (हिंदी): {question}\n\n"
@@ -5592,6 +5611,7 @@ class RAGAdvisor:
             + " | ".join(header_parts) + "\n"
             "उपलब्ध अर्थशास्त्रीय डेटा के आधार पर सर्वोत्तम फसल विकल्प:\n"
             + "\n".join(lines)
+            + ("\n\nअतिरिक्त वार्षिक फसल तुलना (स्रोत-आधारित अनुमान):\n" + annual_comparison if annual_comparison else "")
             + "\n\nनोट: कीटनाशक की रुपये लागत उपलब्ध नहीं है, इसलिए उसे लाभ में जोड़ा/घटाया नहीं गया। अंतिम निर्णय से पहले स्थानीय मंडी भाव, पानी उपलब्धता और मिट्टी की स्थिति जरूर देखें।"
         ), sources
 
@@ -5601,6 +5621,9 @@ class RAGAdvisor:
         season: str,
         question: str,
         market_prices: dict[str, dict[str, str | float]],
+        *,
+        crop_names: set[str] | None = None,
+        compact: bool = False,
     ) -> str | None:
         explicit_season = self._extract_query_season(question)
         season = explicit_season or season
@@ -5610,6 +5633,8 @@ class RAGAdvisor:
         area_scale = area_acres or 1.0
         scored: list[dict] = []
         for crop, base in WESTERN_UP_CROP_BASELINES.items():
+            if crop_names is not None and crop not in crop_names:
+                continue
             if not (self._season_matches(season, str(base["season"])) or
                     (include_annual and str(base["season"]).lower() == "annual")):
                 continue
@@ -5700,6 +5725,8 @@ class RAGAdvisor:
                 f"{scope_label} आय ~₹{int(s['revenue'])}, लागत ~₹{int(s['cost_min'])}-₹{int(s['cost_max'])} ({s['cost_source']}, {s['cost_basis']}), "
                 f"लाभ ~₹{int(s['profit_min'])}-₹{int(s['profit_max'])}; पानी: {s['water_need']}, रोग/कीट दबाव: {s['pest_pressure']}"
             )
+        if compact:
+            return "\n".join(lines)
         heavy_risk_crops = [
             self._crop_display_label(str(s["crop"])).split(" (")[0]
             for s in scored
