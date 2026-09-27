@@ -53,6 +53,7 @@ def validate_feedback_with_local_sources(
     correction: str,
     topic: str | None,
     references: list[str] | None = None,
+    rating: str = "helpful",
 ) -> dict[str, Any]:
     references = references or []
     correction = (correction or "").strip()
@@ -103,14 +104,15 @@ def validate_feedback_with_local_sources(
     training_eligible = False
     if score >= 0.18 and "high_risk_agri_override" not in flags:
         status = "source_matched"
-        training_eligible = True
+        # Retrieval overlap is evidence for a reviewer, not factual approval.
+        training_eligible = False
     elif score >= 0.12:
         status = "needs_review"
     if topic in HIGH_RISK_TOPICS:
         training_eligible = False if status != "source_matched" else training_eligible
 
     if not correction:
-        status = "helpful" if answer else "needs_review"
+        status = "helpful" if rating == "helpful" and answer else "needs_review"
         method = "rating_only"
         notes = "User marked the answer without a correction."
         evidence = [{"references": references}]

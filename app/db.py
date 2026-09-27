@@ -778,20 +778,37 @@ def review_feedback(
     reviewer_user_id: int,
     status: str,
     training_eligible: bool,
+    *,
+    correction_text: str | None = None,
 ) -> None:
     conn = get_conn(db_path)
     try:
         cur = conn.cursor()
+        reviewer = cur.execute("SELECT role FROM users WHERE id = ?", (reviewer_user_id,)).fetchone()
+        if not reviewer or reviewer["role"] != "admin":
+            raise ValueError("Only an administrator can review feedback.")
+        if status not in {"accepted", "rejected"}:
+            raise ValueError("Review must accept or reject feedback.")
+        item = cur.execute("SELECT * FROM answer_feedback WHERE id = ?", (feedback_id,)).fetchone()
+        if not item:
+            raise ValueError("Feedback no longer exists.")
+        correction = (correction_text if correction_text is not None else item["correction_text"] or "").strip()
+        if status == "accepted":
+            from app.feedback import guardrail_flags
+            if not correction or any(flag in guardrail_flags("", correction) for flag in
+                                     ("possible_aadhaar", "possible_phone", "possible_email", "contains_url", "too_long")):
+                raise ValueError("Provide a complete corrected answer without personal/contact data (maximum 2500 characters).")
         cur.execute(
             """
             UPDATE answer_feedback
             SET validation_status = ?,
                 is_training_eligible = ?,
                 reviewed_by_user_id = ?,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = CURRENT_TIMESTAMP,
+                correction_text = ?
             WHERE id = ?
             """,
-            (status, int(training_eligible), reviewer_user_id, feedback_id),
+            (status, int(training_eligible and status == "accepted"), reviewer_user_id, correction, feedback_id),
         )
         conn.commit()
     finally:
@@ -816,7 +833,8 @@ def export_training_feedback(db_path: str | Path, output_path: str | Path) -> in
                 f.validation_notes
             FROM answer_feedback f
             JOIN query_logs q ON q.id = f.query_log_id
-            WHERE f.is_training_eligible = 1
+            WHERE f.is_training_eligible = 1 AND f.validation_status = 'accepted'
+              AND f.reviewed_by_user_id IS NOT NULL
             ORDER BY f.created_at DESC
             """
         )
@@ -856,8 +874,9 @@ def get_training_feedback_examples(db_path: str | Path, limit: int = 200) -> lis
                 f.is_training_eligible
             FROM answer_feedback f
             JOIN query_logs q ON q.id = f.query_log_id
-            WHERE f.validation_status = 'accepted' OR f.is_training_eligible = 1
-            ORDER BY f.updated_at DESC, f.created_at DESC
+            WHERE f.validation_status = 'accepted' AND f.is_training_eligible = 1
+              AND f.reviewed_by_user_id IS NOT NULL
+            ORDER BY f.updated_at DESC, f.created_at DESC, f.id DESC
             LIMIT ?
             """,
             (limit,),

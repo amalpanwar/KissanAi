@@ -42,3 +42,4 @@ data/raw/all_sources/*
 !data/raw/all_sources/*.pdf
 data/raw/live/*.lock
 data/raw/live/agmarknet_fetch_summary.json
+data/processed/feedback_learning/

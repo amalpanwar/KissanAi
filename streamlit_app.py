@@ -1934,18 +1934,7 @@ def load_training_feedback_memory(
         rows.extend(get_training_feedback_examples(db_path, limit=200))
     except Exception:
         pass
-    fp = Path(feedback_path)
-    if fp.exists():
-        try:
-            for line in fp.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                item = json.loads(line)
-                if isinstance(item, dict):
-                    rows.append(item)
-        except Exception:
-            pass
+    # Exported datasets are offline snapshots; the reviewed database is authoritative.
     deduped: list[dict[str, object]] = []
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
@@ -2994,8 +2983,15 @@ def render_admin_feedback_queue(db_path: str, *, use_sidebar: bool = True) -> No
             st.markdown(f"**#{item['id']} · {item.get('username') or 'user'} · {item.get('validation_status')}**")
             st.caption(str(item.get("topic") or ""))
             st.write(f"Q: {item.get('user_query') or ''}")
-            if item.get("correction_text"):
-                st.write(f"Correction: {item['correction_text']}")
+            st.write("Original answer:")
+            st.write(item.get("answer_text") or "")
+            corrected_answer = st.text_area(
+                "Reviewed replacement answer (complete answer, not an instruction)",
+                value=item.get("correction_text") or "",
+                key=f"reviewed_answer_{item['id']}",
+                max_chars=2500,
+            )
+            st.caption("Verify facts and sources before accepting. Pesticide advice requires agricultural expertise.")
             notes = item.get("validation_notes")
             if notes:
                 st.caption(notes)
@@ -3004,7 +3000,12 @@ def render_admin_feedback_queue(db_path: str, *, use_sidebar: bool = True) -> No
                 st.code(evidence_text)
             c1, c2 = st.columns(2)
             if c1.button("Accept", key=f"fb_accept_{item['id']}", use_container_width=True):
-                review_feedback(db_path, int(item["id"]), int(user["id"]), "accepted", True)
+                try:
+                    review_feedback(db_path, int(item["id"]), int(user["id"]), "accepted", True,
+                                    correction_text=corrected_answer)
+                except ValueError as exc:
+                    st.error(str(exc))
+                    continue
                 export_training_feedback(db_path, TRAINING_FEEDBACK_PATH)
                 st.rerun()
             if c2.button("Reject", key=f"fb_reject_{item['id']}", use_container_width=True):
@@ -3067,8 +3068,6 @@ def render_feedback_widget(item: dict, advisor: RAGAdvisor) -> None:
     if item.get("role") != "assistant" or not item.get("query_log_id"):
         return
     topic = str(item.get("topic") or "").strip().lower()
-    if topic in {"weather", "weather_impact"}:
-        return
     user = current_user()
     if not user:
         return
@@ -3076,7 +3075,7 @@ def render_feedback_widget(item: dict, advisor: RAGAdvisor) -> None:
     if feedback_exists(cfg.paths["sqlite_db"], query_log_id, int(user["id"])):
         st.caption("Feedback saved for this answer.")
         return
-    with st.expander("Give feedback on this answer", expanded=False):
+    with st.expander("इस उत्तर पर प्रतिक्रिया दें / Give feedback", expanded=False):
         rating = st.radio(
             "Was this answer helpful?",
             ["Helpful", "Not helpful", "Provide correction"],
@@ -3084,6 +3083,11 @@ def render_feedback_widget(item: dict, advisor: RAGAdvisor) -> None:
             horizontal=True,
         )
         correction = ""
+        improvement = st.selectbox(
+            "किस बात पर प्रतिक्रिया है?",
+            ["सामान्य उपयोगिता", "हिंदी और अनुवाद", "जानकारी की शुद्धता", "छूटी हुई जानकारी", "उत्तर की लंबाई / प्रस्तुति"],
+            key=f"feedback_area_{query_log_id}",
+        )
         if rating in {"Not helpful", "Provide correction"}:
             correction = st.text_area(
                 "What should the answer say instead?",
@@ -3094,7 +3098,7 @@ def render_feedback_widget(item: dict, advisor: RAGAdvisor) -> None:
             st.caption("Please write the corrected version or the missing source-backed detail.")
         submitted = st.button("Submit feedback", key=f"submit_feedback_{query_log_id}", use_container_width=True)
         if submitted:
-            if rating in {"Not helpful", "Provide correction"} and not correction.strip():
+            if rating == "Provide correction" and not correction.strip():
                 st.warning("Please add the correction before submitting feedback.")
                 return
             payload = validate_feedback_with_local_sources(
@@ -3104,7 +3108,9 @@ def render_feedback_widget(item: dict, advisor: RAGAdvisor) -> None:
                 correction=correction,
                 topic=topic,
                 references=item.get("references", []),
+                rating=rating.lower().replace(" ", "_"),
             )
+            payload["notes"] = f"Feedback area: {improvement}. " + payload["notes"]
             feedback_id = save_feedback(
                 cfg.paths["sqlite_db"],
                 {
@@ -3124,7 +3130,7 @@ def render_feedback_widget(item: dict, advisor: RAGAdvisor) -> None:
             if feedback_id is None:
                 st.error("Could not save feedback.")
             elif payload["status"] == "source_matched":
-                st.success("Feedback saved and matched to local source evidence. It is ready for future tuning.")
+                st.success("Feedback saved with source evidence. Human review is required before learning from it.")
             elif payload["status"] == "rejected_guardrail":
                 st.warning("Feedback was stored but blocked from training because it contains unsafe or sensitive content.")
             else:
@@ -3436,9 +3442,10 @@ for item in st.session_state.chat_history:
                 with st.expander("Sources Used"):
                     for src in refs:
                         st.write(f"- {src}")
-            render_feedback_widget(item, advisor)
+        render_feedback_widget(item, advisor)
 
-user_query = st.chat_input("अपना सवाल लिखें... (e.g., 2 एकड़, ₹50,000 बजट, रबी में कौन सी फसल बेहतर है?)")
+from app.chat_controls import render_chat_composer
+user_query = render_chat_composer(st)
 
 if user_query:
     try:
@@ -3557,6 +3564,7 @@ if user_query:
                 )
                 with st.chat_message("assistant"):
                     render_weather_chat_card(final_answer, action=weather_action)
+                    render_feedback_widget(st.session_state.chat_history[-1], advisor)
                 st.stop()
 
         last_ctx = st.session_state.get("last_structured_context", {}) or {}
