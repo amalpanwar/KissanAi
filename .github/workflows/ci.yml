@@ -33,3 +33,16 @@ jobs:
 
       - name: Agent and refresh regression tests
         run: python -m unittest discover -s tests -v
+
+      - name: Set up Node for chat browser tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install browser test dependencies
+        run: |
+          npm install --no-save --package-lock=false playwright@1.51.1
+          npx playwright install --with-deps chromium
+
+      - name: In-chat autocomplete browser tests
+        run: node tests/chat_composer_browser.cjs

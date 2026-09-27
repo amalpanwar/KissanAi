@@ -1,40 +1,32 @@
-"""Native Streamlit composer with editable suggested questions."""
+"""Autocomplete chat composer; sends one value only when a question is submitted."""
 from __future__ import annotations
 
-SUGGESTIONS = (
-    ("🌤️ मौसम", "आज मेरे क्षेत्र में मौसम कैसा रहेगा?"),
-    ("💰 मंडी भाव", "आज गेहूं का मंडी भाव क्या है?"),
-    ("🌱 फसल उगाना", "गेहूं की खेती कैसे करें?"),
-    ("🐛 कीटनाशक", "गेहूं में दीमक की रोकथाम के लिए कौन सा कीटनाशक उपयोग करें?"),
-)
-CHAT_KEY = "farmer_chat_input"
-DRAFT_KEY = "suggested_question_draft"
+from pathlib import Path
+import streamlit.components.v1 as components
+
+_composer = components.declare_component("kisaan_chat_composer", path=str(Path(__file__).with_name("chat_component")))
+
+SUGGESTIONS = [
+    {"question": "आज मेरे क्षेत्र में मौसम कैसा रहेगा?", "keywords": "weather rain forecast temperature mausam mosam barish baarish pani मौसम बारिश वर्षा तापमान"},
+    {"question": "आज गेहूं का मंडी भाव क्या है?", "keywords": "price prices mandi rate bhav bhaav daam market भाव कीमत मंडी दाम"},
+    {"question": "गेहूं की खेती कैसे करें?", "keywords": "grow growing cultivation kheti kaise kese gehu wheat खेती उगाना बुवाई कैसे"},
+    {"question": "गेहूं में दीमक की रोकथाम के लिए कौन सा कीटनाशक उपयोग करें?", "keywords": "pesticide pesticides pest disease spray insecticide keet dimak keetnashak dawa कीटनाशक कीट रोग दवा दीमक"},
+]
+
+
+def consume_submission(value, state):
+    if not isinstance(value, dict):
+        return None
+    text = value.get("text")
+    submission_id = value.get("id")
+    if not isinstance(text, str) or not text.strip() or len(text) > 4000 or not isinstance(submission_id, str):
+        return None
+    if not submission_id or state.get("last_chat_submission") == submission_id:
+        return None
+    state["last_chat_submission"] = submission_id
+    return text.strip()
 
 
 def render_chat_composer(st):
-    """Select/edit a draft; submit through the same return path as typed chat."""
-    st.caption("सुझाया सवाल चुनें, जरूरत हो तो फसल बदलें, फिर भेजें। मौसम और भाव के लिए चुना हुआ स्थान इस्तेमाल होगा।")
-
-    def choose(question):
-        st.session_state[DRAFT_KEY] = question
-
-    def discard():
-        st.session_state.pop(DRAFT_KEY, None)
-
-    def submit():
-        draft = st.session_state.get(DRAFT_KEY, "").strip()
-        if draft:
-            st.session_state["submitted_suggestion"] = draft
-            discard()
-
-    for column, (label, question) in zip(st.columns(4), SUGGESTIONS):
-        column.button(label, key=f"suggest_{label}", help=question,
-                      on_click=choose, args=(question,), use_container_width=True)
-    if st.session_state.get(DRAFT_KEY):
-        with st.form("suggested_question_form"):
-            st.text_input("सवाल बदलें या भेजें", key=DRAFT_KEY)
-            st.form_submit_button("सवाल भेजें", on_click=submit)
-            st.form_submit_button("रद्द करें", on_click=discard)
-    typed = st.chat_input("अपना सवाल लिखें...", key=CHAT_KEY, on_submit=discard)
-    selected = st.session_state.pop("submitted_suggestion", None)
-    return typed or selected
+    value = _composer(suggestions=SUGGESTIONS, key="farmer_autocomplete_chat", default=None)
+    return consume_submission(value, st.session_state)

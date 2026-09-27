@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.location_query import strip_relative_location
 
 from app.location_controls import render_place_selector
 from app.location_selection import location_context, place_options, qualified_place, scope_market_rows, market_scope_caption
@@ -1424,12 +1425,12 @@ def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> 
     # Prefer a direct lookup match from the known location table before falling
     # back to token filtering. This keeps place parsing stable even when the
     # query contains extra words like commodity names or question words.
-    q = str(query).strip()
+    q = strip_relative_location(query)
     if not q:
         return None
 
     stop = {
-        "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
+        "like", "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
         "and", "or", "also", "please", "tell", "my", "for", "in", "at", "of", "to", "a", "an", "on", "with", "और", "होगा", "the", "is", "are", "will", "it", "be", "how", "today", "tomorrow", "tonight", "forecast", "next", "week", "day", "days", "rain", "rainfall", "temperature", "kal", "parso", "आज", "कल", "बारिश", "तापमान", "रहेगा", "कैसा", "है",
         "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
         "me", "mein", "में", "kesa", "kaisa", "hai", "h",
@@ -1687,11 +1688,11 @@ def _extract_explicit_district_from_query(query: str, lookup: pd.DataFrame) -> t
 
 
 def _extract_location_search_hint(query: str) -> str | None:
-    q = str(query or "").strip()
+    q = strip_relative_location(query)
     if not q:
         return None
     stop = {
-        "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
+        "like", "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
         "and", "or", "also", "please", "tell", "my", "for", "in", "at", "of", "to", "a", "an", "on", "with", "और", "होगा", "the", "is", "are", "will", "it", "be", "how", "today", "tomorrow", "tonight", "forecast", "next", "week", "day", "days", "rain", "rainfall", "temperature", "kal", "parso", "आज", "कल", "बारिश", "तापमान", "रहेगा", "कैसा", "है",
         "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
         "me", "mein", "में", "kesa", "kaisa", "hai", "h",
@@ -1772,6 +1773,7 @@ def _resolve_query_location_with_selection(
     allow_place_lookup: bool = True,
     strict_on_hint: bool = False,
 ) -> dict[str, object]:
+    query = strip_relative_location(query)
     lookup_path = Path("data/processed/location_lookup.csv")
     lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
     lookup = load_location_lookup(lookup_mtime)
@@ -1845,6 +1847,7 @@ def _resolve_query_location_with_selection(
 
 
 def _resolve_query_location(query: str, *, allow_place_lookup: bool = True) -> tuple[str | None, str | None, str | None]:
+    query = strip_relative_location(query)
     lookup_path = Path("data/processed/location_lookup.csv")
     lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
     lookup = load_location_lookup(lookup_mtime)

@@ -1,11 +1,17 @@
 # Suggested questions and human feedback
 
-Four Hindi suggestions are visible above the chat input: weather, mandi prices,
-crop cultivation, and pests/diseases. Selecting one opens an editable draft;
-**सवाल भेजें** submits through the normal chat/agent pipeline. Suggestions remain
-visible without requiring a focus event, including on touch devices. Weather and
-price queries use the existing selected-location context. Change the sample wheat
-crop in the draft when asking about another crop. Cancel discards the draft.
+The chat composer shows a dropdown of Hindi question suggestions on focus and
+filters them as users type (Hindi, English, or Hinglish keywords). It covers weather,
+mandi prices, cultivation and pesticides. There are no separate suggestion tabs,
+shortcut buttons or draft form. Click a suggestion or use arrow keys and Enter to
+fill the same input, edit it if needed, then send. Enter sends; Shift+Enter inserts
+a newline; Escape closes suggestions. Only sending triggers the agent pipeline.
+
+“My area”, “मेरे क्षेत्र”, “here” and similar phrases inherit the selected location.
+A Doghat Rural selection keeps the full village/Baraut/Baghpat hierarchy and uses
+its available coordinates. With only Baghpat selected, the district is used. Named
+places still go through the existing scoped validation. Missing granular weather
+coordinates continue to use a labelled regional fallback.
 
 Signed-in users can rate any logged answer, including weather, and flag Hindi,
 accuracy, missing information, or length/presentation. A negative rating does not
