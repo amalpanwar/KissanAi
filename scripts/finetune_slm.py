@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -21,11 +22,22 @@ def format_row(row: dict) -> dict:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Tune the local model with optional held-out feedback evaluation.")
+    parser.add_argument("--train-file")
+    parser.add_argument("--eval-file")
+    cli = parser.parse_args()
     cfg = load_config()
     model_name = cfg.generator_model
 
-    ds = load_dataset("json", data_files=cfg.paths["finetune_data"], split="train")
+    ds = load_dataset("json", data_files=cli.train_file or cfg.paths["finetune_data"], split="train")
     ds = ds.map(format_row)
+    eval_ds = None
+    if cli.eval_file:
+        eval_ds = load_dataset("json", data_files=cli.eval_file, split="train").map(format_row)
+        if not len(eval_ds):
+            raise ValueError("Evaluation dataset is empty; collect more reviewed feedback.")
+        if set(ds["prompt"]) & set(eval_ds["prompt"]):
+            raise ValueError("Training and evaluation questions overlap.")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name)
@@ -52,11 +64,14 @@ def main() -> None:
         model=model,
         args=args,
         train_dataset=ds,
+        eval_dataset=eval_ds,
         peft_config=peft_config,
         dataset_text_field="text",
         tokenizer=tokenizer,
     )
     trainer.train()
+    if eval_ds is not None:
+        print("Held-out evaluation:", trainer.evaluate())
     trainer.save_model("models/western-up-lora")
     print("Saved LoRA adapter at models/western-up-lora")
 

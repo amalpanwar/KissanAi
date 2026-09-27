@@ -91,8 +91,9 @@ def load_feedback_rows(
                     f.is_training_eligible
                 FROM answer_feedback f
                 JOIN query_logs q ON q.id = f.query_log_id
-                WHERE f.validation_status = 'accepted' OR f.is_training_eligible = 1
-                ORDER BY f.updated_at DESC, f.created_at DESC
+                WHERE f.validation_status = 'accepted' AND f.is_training_eligible = 1
+                  AND f.reviewed_by_user_id IS NOT NULL
+                ORDER BY f.updated_at DESC, f.created_at DESC, f.id DESC
                 LIMIT 300
                 """
             ).fetchall()
@@ -101,19 +102,7 @@ def load_feedback_rows(
         except Exception:
             pass
 
-    fp = Path(feedback_path)
-    if fp.exists():
-        try:
-            for line in fp.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                item = json.loads(line)
-                if isinstance(item, dict):
-                    rows.append(item)
-        except Exception:
-            pass
-
+    # Offline exports must not reintroduce feedback that was rejected later.
     deduped: list[dict[str, object]] = []
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
