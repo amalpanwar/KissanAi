@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KisaanAI chat composer</title>
+  <style>
+    :root { --background: #fff; --foreground: #202124; --secondary: #f4f6f5; --accent: #287b43; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 4px 2px; font: 15px/1.5 system-ui, sans-serif; color: var(--foreground); background: var(--background); }
+    #suggestions { margin: 0 0 6px; padding: 4px; list-style: none; border: 1px solid #89958c66; border-radius: 12px; background: var(--background); max-height: 216px; overflow-y: auto; }
+    #suggestions[hidden] { display: none; }
+    [role=option] { padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+    [role=option]:hover, [aria-selected=true] { background: var(--secondary); }
+    .composer { display: flex; align-items: flex-end; gap: 8px; border: 1px solid #89958c88; border-radius: 14px; padding: 8px 10px; background: var(--secondary); }
+    .composer:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
+    textarea { flex: 1; width: 100%; min-width: 0; min-height: 44px; max-height: 140px; resize: none; border: 0; outline: 0; padding: 9px 2px; background: transparent; color: inherit; font: inherit; }
+    button { flex: 0 0 40px; height: 40px; border: 0; border-radius: 10px; background: var(--accent); color: white; cursor: pointer; font-size: 22px; }
+    button:disabled { opacity: .4; cursor: default; }
+    button:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  </style>
+</head>
+<body>
+  <ul id="suggestions" role="listbox" aria-label="सुझाए गए सवाल" hidden></ul>
+  <form id="chat-form" class="composer">
+    <label class="sr-only" for="question">अपना सवाल लिखें</label>
+    <textarea id="question" role="combobox" aria-autocomplete="list" aria-controls="suggestions" aria-expanded="false" aria-describedby="help" placeholder="अपना सवाल लिखें..." rows="1" maxlength="4000"></textarea>
+    <button id="send" type="submit" aria-label="सवाल भेजें" title="सवाल भेजें" disabled>↑</button>
+  </form>
+  <span id="help" class="sr-only">टाइप करते समय सवालों के सुझाव मिलेंगे। ऊपर और नीचे तीर से सुझाव चुनें। Enter से भेजें; Shift और Enter से नई पंक्ति लिखें।</span>
+  <span id="status" class="sr-only" role="status" aria-live="polite"></span>
+  <script src="composer.js"></script>
+</body>
+</html>

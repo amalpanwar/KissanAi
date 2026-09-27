@@ -78,33 +78,16 @@ class FeedbackLearningTests(unittest.TestCase):
 
 
 class ChatSuggestionsTests(unittest.TestCase):
-    def test_suggestions_fill_editable_composer_without_submitting(self):
-        from streamlit.testing.v1 import AppTest
-        from app.chat_controls import SUGGESTIONS
-        at = AppTest.from_string('''
-import streamlit as st
-from app.chat_controls import render_chat_composer
-question = render_chat_composer(st)
-if question:
-    st.session_state.setdefault('submitted', []).append(question)
-''').run()
-        self.assertFalse(at.exception)
-        self.assertEqual(len(at.button), 4)
-        for index, (_, prompt) in enumerate(SUGGESTIONS):
-            at.button[index].click().run()
-            self.assertFalse(at.exception)
-            self.assertEqual(at.text_input[0].value, prompt)
-            self.assertNotIn('submitted', at.session_state)
-        at.text_input[0].set_value('गन्ने की खेती कैसे करें?')
-        at.button[4].click().run()
-        self.assertEqual(at.session_state['submitted'], ['गन्ने की खेती कैसे करें?'])
-        at.button[0].click().run()
-        self.assertEqual(at.text_input[0].value, SUGGESTIONS[0][1])
-        at.button[5].click().run()
-        self.assertEqual(len(at.text_input), 0)
-        self.assertEqual(len(at.session_state['submitted']), 1)
-        at.chat_input[0].set_value('आज बारिश होगी?').run()
-        self.assertEqual(at.session_state['submitted'][-1], 'आज बारिश होगी?')
+    def test_component_submits_once_across_streamlit_reruns(self):
+        from app.chat_controls import consume_submission
+        state = {}
+        value = {"id": "session-1", "text": " आज मौसम? "}
+        self.assertEqual(consume_submission(value, state), "आज मौसम?")
+        self.assertIsNone(consume_submission(value, state))
+        self.assertEqual(consume_submission(dict(value, id="session-2"), state), "आज मौसम?")
+        for bad in [None, "question", {}, {"id": "x", "text": " "}, {"id": "y", "text": "x" * 4001}]:
+            self.assertIsNone(consume_submission(bad, state))
+
 
 class FeedbackWidgetTests(unittest.TestCase):
     def test_weather_negative_rating_is_saved_without_requiring_correction(self):
