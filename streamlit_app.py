@@ -3448,910 +3448,913 @@ for item in st.session_state.chat_history:
         render_feedback_widget(item, advisor)
 
 from app.chat_controls import render_chat_composer
+# Reserve output above the composer, including replies generated on this rerun.
+response_area = st.container()
 user_query = render_chat_composer(st)
 
 if user_query:
-    try:
-        st.session_state.chat_history.append({"role": "user", "text": user_query})
-        with st.chat_message("user"):
-            st.write(user_query)
+    with response_area:
+        try:
+            st.session_state.chat_history.append({"role": "user", "text": user_query})
+            with st.chat_message("user"):
+                st.write(user_query)
 
-        # Fast path: user says answer is incorrect -> ask for correction details, no greeting/LLM.
-        if user_query.strip().lower() in {"this is incorrect", "incorrect", "गलत", "गलत है", "sahi nahi"}:
-            msg = "कृपया सही जिला/फसल/बजट लिखें ताकि मैं सही उत्तर दे सकूँ।"
-            query_log_id = log_query_answer(
-                user_query=user_query,
-                composed_query=user_query,
-                topic="clarification",
-                answer_text=msg,
-                references=[],
-                district=district,
-                season=season,
-                crop_name=preferred_crop or "unknown",
-            )
-            st.session_state.chat_history.append({"role": "assistant", "text": msg, "references": []})
-            with st.chat_message("assistant"):
-                st.write(msg)
-            st.stop()
-
-        normalized_user_query = advisor._normalize_hinglish(user_query)
-        weather_intent = advisor._is_weather_intent(normalized_user_query)
-        detected_query_crop = advisor._extract_crop_from_query(normalized_user_query) or ""
-        intent_msp = is_msp_query(user_query)
-        intent_price = is_price_query(user_query) or intent_msp
-        crop_protect_followup_checker = getattr(advisor, "_is_crop_protection_followup_intent", None)
-        crop_guide_followup_checker = getattr(advisor, "_is_crop_guide_followup_intent", None)
-        if callable(crop_protect_followup_checker):
-            crop_protection_followup = bool(crop_protect_followup_checker(normalized_user_query))
-        else:
-            fallback_pesticide_intent = getattr(advisor, "_is_pesticide_intent", None)
-            crop_protection_followup = bool(callable(fallback_pesticide_intent) and fallback_pesticide_intent(normalized_user_query))
-        if callable(crop_guide_followup_checker):
-            crop_guide_followup_detected = bool(crop_guide_followup_checker(normalized_user_query))
-        else:
-            crop_guide_followup_detected = False
-
-        # If the previous response asked only for a weather location, consume this input
-        # only when it plausibly looks like a location reply. Otherwise continue with
-        # normal routing so agri follow-up questions are not hijacked into weather.
-        pending_weather_request = st.session_state.pop("pending_weather_location", None)
-        if pending_weather_request:
-            place_guess = extract_place_from_query(user_query)
-            looks_like_location_reply = bool(
-                place_guess
-                or advisor._looks_like_location_only(user_query)
-                or (
-                    weather_intent
-                    and not crop_guide_followup_detected
-                    and not crop_protection_followup
-                )
-            )
-            if not looks_like_location_reply and (crop_guide_followup_detected or crop_protection_followup or advisor._has_agri_intent(normalized_user_query)):
-                pending_weather_request = None
-            else:
-                place = place_guess or user_query.strip()
-                lookup_path = Path("data/processed/location_lookup.csv")
-                lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
-                lookup = load_location_lookup(lookup_mtime)
-                district, _state = _lookup_district_from_location(place, lookup)
-                composed_weather_query = place if not district else f"{place}, {district}, Uttar Pradesh"
-                original_weather_query = (
-                    pending_weather_request.get("original_query", "")
-                    if isinstance(pending_weather_request, dict)
-                    else ""
-                )
-                normalized_weather_query = advisor._normalize_hinglish(original_weather_query or user_query)
-                weather_request = advisor._parse_weather_request(original_weather_query or user_query, normalized_weather_query)
-                if weather_request:
-                    weather_result = advisor._answer_weather_request(
-                        weather_request,
-                        original_weather_query or user_query,
-                        normalized_weather_query,
-                        place_override=place,
-                    )
-                    weather = weather_result.get("answer", "")
-                    weather_references = weather_result.get("references", ["Open-Meteo API"])
-                    weather_action = weather_result.get("weather_action", weather_request.action)
-                else:
-                    weather = get_current_weather_hindi(composed_weather_query)
-                    if not weather:
-                        weather = get_current_weather_hindi(composed_weather_query)
-                    weather_references = ["Open-Meteo API"]
-                    weather_action = "current"
-                final_answer = (
-                    weather
-                    if weather
-                    else "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
-                )
+            # Fast path: user says answer is incorrect -> ask for correction details, no greeting/LLM.
+            if user_query.strip().lower() in {"this is incorrect", "incorrect", "गलत", "गलत है", "sahi nahi"}:
+                msg = "कृपया सही जिला/फसल/बजट लिखें ताकि मैं सही उत्तर दे सकूँ।"
                 query_log_id = log_query_answer(
                     user_query=user_query,
-                    composed_query=composed_weather_query,
-                    topic="weather",
-                    answer_text=final_answer,
-                    references=weather_references,
-                    district=district or "",
+                    composed_query=user_query,
+                    topic="clarification",
+                    answer_text=msg,
+                    references=[],
+                    district=district,
                     season=season,
                     crop_name=preferred_crop or "unknown",
                 )
-                _set_session_location_context(place, district or "", "Uttar Pradesh")
+                st.session_state.chat_history.append({"role": "assistant", "text": msg, "references": []})
+                with st.chat_message("assistant"):
+                    st.write(msg)
+                st.stop()
+
+            normalized_user_query = advisor._normalize_hinglish(user_query)
+            weather_intent = advisor._is_weather_intent(normalized_user_query)
+            detected_query_crop = advisor._extract_crop_from_query(normalized_user_query) or ""
+            intent_msp = is_msp_query(user_query)
+            intent_price = is_price_query(user_query) or intent_msp
+            crop_protect_followup_checker = getattr(advisor, "_is_crop_protection_followup_intent", None)
+            crop_guide_followup_checker = getattr(advisor, "_is_crop_guide_followup_intent", None)
+            if callable(crop_protect_followup_checker):
+                crop_protection_followup = bool(crop_protect_followup_checker(normalized_user_query))
+            else:
+                fallback_pesticide_intent = getattr(advisor, "_is_pesticide_intent", None)
+                crop_protection_followup = bool(callable(fallback_pesticide_intent) and fallback_pesticide_intent(normalized_user_query))
+            if callable(crop_guide_followup_checker):
+                crop_guide_followup_detected = bool(crop_guide_followup_checker(normalized_user_query))
+            else:
+                crop_guide_followup_detected = False
+
+            # If the previous response asked only for a weather location, consume this input
+            # only when it plausibly looks like a location reply. Otherwise continue with
+            # normal routing so agri follow-up questions are not hijacked into weather.
+            pending_weather_request = st.session_state.pop("pending_weather_location", None)
+            if pending_weather_request:
+                place_guess = extract_place_from_query(user_query)
+                looks_like_location_reply = bool(
+                    place_guess
+                    or advisor._looks_like_location_only(user_query)
+                    or (
+                        weather_intent
+                        and not crop_guide_followup_detected
+                        and not crop_protection_followup
+                    )
+                )
+                if not looks_like_location_reply and (crop_guide_followup_detected or crop_protection_followup or advisor._has_agri_intent(normalized_user_query)):
+                    pending_weather_request = None
+                else:
+                    place = place_guess or user_query.strip()
+                    lookup_path = Path("data/processed/location_lookup.csv")
+                    lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+                    lookup = load_location_lookup(lookup_mtime)
+                    district, _state = _lookup_district_from_location(place, lookup)
+                    composed_weather_query = place if not district else f"{place}, {district}, Uttar Pradesh"
+                    original_weather_query = (
+                        pending_weather_request.get("original_query", "")
+                        if isinstance(pending_weather_request, dict)
+                        else ""
+                    )
+                    normalized_weather_query = advisor._normalize_hinglish(original_weather_query or user_query)
+                    weather_request = advisor._parse_weather_request(original_weather_query or user_query, normalized_weather_query)
+                    if weather_request:
+                        weather_result = advisor._answer_weather_request(
+                            weather_request,
+                            original_weather_query or user_query,
+                            normalized_weather_query,
+                            place_override=place,
+                        )
+                        weather = weather_result.get("answer", "")
+                        weather_references = weather_result.get("references", ["Open-Meteo API"])
+                        weather_action = weather_result.get("weather_action", weather_request.action)
+                    else:
+                        weather = get_current_weather_hindi(composed_weather_query)
+                        if not weather:
+                            weather = get_current_weather_hindi(composed_weather_query)
+                        weather_references = ["Open-Meteo API"]
+                        weather_action = "current"
+                    final_answer = (
+                        weather
+                        if weather
+                        else "अभी लाइव मौसम डेटा नहीं मिल पाया। कृपया कुछ देर बाद फिर प्रयास करें।"
+                    )
+                    query_log_id = log_query_answer(
+                        user_query=user_query,
+                        composed_query=composed_weather_query,
+                        topic="weather",
+                        answer_text=final_answer,
+                        references=weather_references,
+                        district=district or "",
+                        season=season,
+                        crop_name=preferred_crop or "unknown",
+                    )
+                    _set_session_location_context(place, district or "", "Uttar Pradesh")
+                    st.session_state.chat_history.append(
+                        {
+                            "role": "assistant",
+                            "text": final_answer,
+                            "references": weather_references,
+                            "query_log_id": query_log_id,
+                            "topic": "weather",
+                            "user_query": user_query,
+                            "weather_action": weather_action,
+                        }
+                    )
+                    with st.chat_message("assistant"):
+                        render_weather_chat_card(final_answer, action=weather_action)
+                        render_feedback_widget(st.session_state.chat_history[-1], advisor)
+                    st.stop()
+
+            last_ctx = st.session_state.get("last_structured_context", {}) or {}
+            last_location_ctx = st.session_state.get("last_location_context", {}) or {}
+            session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
+            session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or district or "Meerut").strip() or "Meerut"
+            query_place = query_place_district = query_place_state = None
+            location_scope_result: dict[str, object] = {"status": "none"}
+            scope_state = active_state if "active_state" in locals() else session_state_hint
+            scope_district = active_district if "active_district" in locals() else session_district_hint
+            if not crop_guide_followup_detected and not crop_protection_followup:
+                location_scope_result = _resolve_query_location_with_selection(
+                    user_query,
+                    selected_state=scope_state,
+                    selected_district=scope_district,
+                    allow_place_lookup=bool(weather_intent or intent_price or not detected_query_crop),
+                    strict_on_hint=bool(weather_intent),
+                )
+                if location_scope_result.get("status") == "matched":
+                    query_place = location_scope_result.get("place") or None
+                    query_place_district = location_scope_result.get("district") or None
+                    query_place_state = location_scope_result.get("state") or None
+
+            location_scope_status = str(location_scope_result.get("status") or "none")
+            if location_scope_status in {"outside_scope", "suggest"}:
+                requested_location = str(location_scope_result.get("requested") or "यह स्थान").strip() or "यह स्थान"
+                suggestions = [
+                    str(item).strip()
+                    for item in (location_scope_result.get("suggestions") or [])
+                    if str(item).strip()
+                ]
+                actual_district = str(location_scope_result.get("actual_district") or "").strip()
+                if location_scope_status == "outside_scope":
+                    lines = [f"'{requested_location}' चयनित जिला {scope_district} में नहीं मिला।"]
+                    if actual_district and _normalize_district_name(actual_district) != _normalize_district_name(scope_district):
+                        lines.append(f"यह स्थान {actual_district} जिले से जुड़ा दिख रहा है।")
+                else:
+                    lines = [f"चयनित जिला {scope_district} में '{requested_location}' का exact match नहीं मिला।"]
+                if location_scope_status == "suggest" and suggestions:
+                    lines.append(f"क्या आपका मतलब: {', '.join(suggestions[:3])}?")
+                lines.append(f"कृपया {scope_district} के गांव/कस्बे का नाम लिखें या ऊपर जिला बदलें।")
+                final_answer = "\n".join(lines)
+                query_log_id = log_query_answer(
+                    user_query=user_query,
+                    composed_query=user_query,
+                    topic="location_scope",
+                    answer_text=final_answer,
+                    references=[],
+                    district=scope_district,
+                    season=season,
+                    crop_name=detected_query_crop or preferred_crop or "unknown",
+                )
                 st.session_state.chat_history.append(
                     {
                         "role": "assistant",
                         "text": final_answer,
-                        "references": weather_references,
+                        "references": [],
                         "query_log_id": query_log_id,
-                        "topic": "weather",
+                        "topic": "location_scope",
                         "user_query": user_query,
-                        "weather_action": weather_action,
                     }
                 )
                 with st.chat_message("assistant"):
-                    render_weather_chat_card(final_answer, action=weather_action)
-                    render_feedback_widget(st.session_state.chat_history[-1], advisor)
+                    st.write(final_answer)
                 st.stop()
+            if query_place and (query_place_district or query_place_state):
+                _set_session_location_context(
+                    query_place,
+                    query_place_district or session_district_hint,
+                    query_place_state or session_state_hint,
+                )
+                last_location_ctx = st.session_state.get("last_location_context", {}) or {}
+                session_state_hint = (last_location_ctx.get("state") or session_state_hint).strip() or "Uttar Pradesh"
+                session_district_hint = (last_location_ctx.get("district") or session_district_hint).strip() or "Meerut"
 
-        last_ctx = st.session_state.get("last_structured_context", {}) or {}
-        last_location_ctx = st.session_state.get("last_location_context", {}) or {}
-        session_state_hint = (last_location_ctx.get("state") or "Uttar Pradesh").strip() or "Uttar Pradesh"
-        session_district_hint = (last_location_ctx.get("district") or last_ctx.get("district") or district or "Meerut").strip() or "Meerut"
-        query_place = query_place_district = query_place_state = None
-        location_scope_result: dict[str, object] = {"status": "none"}
-        scope_state = active_state if "active_state" in locals() else session_state_hint
-        scope_district = active_district if "active_district" in locals() else session_district_hint
-        if not crop_guide_followup_detected and not crop_protection_followup:
-            location_scope_result = _resolve_query_location_with_selection(
-                user_query,
-                selected_state=scope_state,
-                selected_district=scope_district,
-                allow_place_lookup=bool(weather_intent or intent_price or not detected_query_crop),
-                strict_on_hint=bool(weather_intent),
+            followup_profit = (
+                is_profitability_followup_query(user_query)
+                and st.session_state.get("last_structured_topic") in {"crop_profitability", "crop_profitability_followup"}
             )
-            if location_scope_result.get("status") == "matched":
-                query_place = location_scope_result.get("place") or None
-                query_place_district = location_scope_result.get("district") or None
-                query_place_state = location_scope_result.get("state") or None
+            followup_crop_care = (
+                crop_protection_followup
+                and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+            )
+            followup_crop_guide = (
+                crop_guide_followup_detected
+                and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+            )
+            remembered_crop_context = bool((last_ctx.get("preferred_crop") or "").strip())
+            can_use_pesticide_followup_context = (
+                crop_protection_followup
+                and (
+                    st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
+                    or remembered_crop_context
+                )
+            )
+            explicit_query_season = _extract_season_from_query_text(user_query, advisor)
 
-        location_scope_status = str(location_scope_result.get("status") or "none")
-        if location_scope_status in {"outside_scope", "suggest"}:
-            requested_location = str(location_scope_result.get("requested") or "यह स्थान").strip() or "यह स्थान"
-            suggestions = [
-                str(item).strip()
-                for item in (location_scope_result.get("suggestions") or [])
-                if str(item).strip()
-            ]
-            actual_district = str(location_scope_result.get("actual_district") or "").strip()
-            if location_scope_status == "outside_scope":
-                lines = [f"'{requested_location}' चयनित जिला {scope_district} में नहीं मिला।"]
-                if actual_district and _normalize_district_name(actual_district) != _normalize_district_name(scope_district):
-                    lines.append(f"यह स्थान {actual_district} जिले से जुड़ा दिख रहा है।")
+            # Resolve place->district for crop intent (so profit uses correct district)
+            resolved_district = session_district_hint
+            if is_crop_query(user_query):
+                if query_place_district:
+                    resolved_district = query_place_district
+            elif followup_profit and last_ctx.get("district"):
+                resolved_district = last_ctx["district"]
+
+            season_for_query = (
+                explicit_query_season
+                or (last_ctx.get("season", season) if (followup_profit or followup_crop_care or followup_crop_guide) else season)
+            )
+            preferred_crop_for_query = (
+                last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else preferred_crop
+            )
+
+            question_for_advisor = user_query.strip()
+            fallback_weather_place = str(
+                last_location_ctx.get("place")
+                or (active_district if "active_district" in locals() else "")
+                or session_district_hint
+            ).strip()
+            if weather_intent and not (query_place or query_place_district or query_place_state) and fallback_weather_place:
+                question_for_advisor = f"{fallback_weather_place} में {question_for_advisor}"
+
+            query_location = dict(active_location)
+            if query_place:
+                if str(query_place).casefold() == str(active_district).casefold():
+                    query_location.update(place="", sub_district="")
+                elif str(query_place).casefold() != str(active_place).casefold():
+                    matches = [loc for loc in place_options(active_state, active_district).values()
+                               if str(loc["place"]).casefold() == str(query_place).casefold()]
+                    query_location = matches[0] if len(matches) == 1 else dict(active_location, place=query_place, sub_district="")
+            resolved_district = active_district
+            composed_query = (
+                location_context(query_location)
+                + f"जिला: {resolved_district} | मौसम: {season_for_query} | पसंदीदा फसल: {preferred_crop_for_query or 'कोई नहीं'} | "
+                f"किसान का प्रश्न: {question_for_advisor}"
+            )
+
+            explicit_place = bool(extract_place_from_query(user_query))
+            explicit_district = False
+            query_crop_hint = detected_query_crop or preferred_crop_for_query or ""
+            feedback_hint = None
+            market_df = pd.DataFrame()
+            if intent_price:
+                market_df = load_agmarknet_df()
+                feedback_hint = find_feedback_memory_hint(
+                    user_query,
+                    topic_hint="price",
+                    crop_hint=query_crop_hint,
+                    db_path=cfg.paths["sqlite_db"],
+                    advisor=advisor,
+                )
+                if not market_df.empty and "District" in market_df.columns:
+                    known_districts = sorted(market_df["District"].dropna().astype(str).unique().tolist())
+                    explicit_district = bool(extract_entities_ner(user_query, known_districts, [])[0])
+            feedback_district_hint = ""
+            feedback_prefers_omit_district = False
+            if feedback_hint:
+                feedback_prefers_omit_district = _feedback_prefers_omit_district(str(feedback_hint.get("correction_text") or ""))
+                if not market_df.empty and "District" in market_df.columns:
+                    feedback_district_hint = _extract_district_from_feedback_text(
+                        str(feedback_hint.get("correction_text") or ""),
+                        sorted(market_df["District"].dropna().astype(str).unique().tolist()),
+                    ) or ""
+            fallback_state_for_price = session_state_hint or (active_state if "active_state" in locals() else "Uttar Pradesh")
+            fallback_district_for_price = (
+                session_district_hint
+                or feedback_district_hint
+                or (active_district if "active_district" in locals() else district)
+            )
+            selected_state, selected_district, selected_commodity = extract_selection_from_query(
+                user_query,
+                market_df,
+                fallback_state=fallback_state_for_price,
+                fallback_district=fallback_district_for_price,
+                fallback_commodity=active_commodity if "active_commodity" in locals() else (preferred_crop or "Wheat"),
+            )
+            if intent_price and not explicit_place and not explicit_district and fallback_district_for_price:
+                selected_district = fallback_district_for_price
+                if fallback_state_for_price:
+                    selected_state = fallback_state_for_price
+
+            agentic_enabled = os.getenv("KISAANAI_AGENTIC", "1").lower() not in {"0", "false", "no"}
+            if agentic_enabled:
+                # Every query, including prices and mixed intents, uses the coordinator.
+                intent_price = False
+
+            if intent_price:
+                # Ensure commodity is explicitly detected for price queries.
+                comm_from_query = resolve_commodity_from_query(
+                    user_query, load_commodity_catalog()
+                )
+                if not comm_from_query and is_latest_commodity_price_query(user_query):
+                    final_answer, price_references = summarize_latest_available_commodity(
+                        market_df,
+                        selected_state,
+                        selected_district,
+                    )
+                    query_log_id = log_query_answer(
+                        user_query=user_query,
+                        composed_query=composed_query,
+                        topic="price",
+                        answer_text=final_answer,
+                        references=price_references,
+                        district=selected_district,
+                        season=season,
+                        crop_name="latest_available_commodity",
+                    )
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "text": final_answer, "references": price_references, "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+                    )
+                    with st.chat_message("assistant"):
+                        st.write(final_answer)
+                    st.stop()
+                if not comm_from_query:
+                    final_answer = (
+                        "कृपया फसल/कमोडिटी का नाम बताएं (जैसे: गेहूं, गन्ना, धान)।"
+                        if not intent_msp
+                        else "कृपया जिस फसल का MSP चाहिए उसका नाम बताएं (जैसे: गेहूं, धान, चना)।"
+                    )
+                    query_log_id = log_query_answer(
+                        user_query=user_query,
+                        composed_query=composed_query,
+                        topic="price",
+                        answer_text=final_answer,
+                        references=[],
+                        district=selected_district,
+                        season=season,
+                        crop_name="unknown",
+                    )
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+                    )
+                    with st.chat_message("assistant"):
+                        st.write(final_answer)
+                    st.stop()
+                if intent_msp:
+                    selected_commodity = comm_from_query or selected_commodity
+                    commodity_label = commodity_display_name(selected_commodity)
+                    msp = get_msp_for_crop(selected_commodity)
+                    if msp:
+                        final_answer = (
+                            f"{commodity_label} के लिए MSP (राष्ट्रीय): ₹{int(msp['msp'])}/क्विंटल.\n"
+                            f"स्रोत: {msp['source_url']}"
+                        )
+                    else:
+                        final_answer = (
+                            f"{commodity_label} के लिए अभी MSP रिकॉर्ड उपलब्ध नहीं मिला। "
+                            "कृपया फसल का नाम दोबारा लिखें या दूसरी फसल पूछें।"
+                        )
+                    query_log_id = log_query_answer(
+                        user_query=user_query,
+                        composed_query=composed_query,
+                        topic="price",
+                        answer_text=final_answer,
+                        references=[],
+                        district=selected_district,
+                        season=season,
+                        crop_name=selected_commodity or "unknown",
+                    )
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+                    )
+                    with st.chat_message("assistant"):
+                        st.write(final_answer)
+                    st.stop()
+                if market_df.empty:
+                    selected_commodity = comm_from_query or selected_commodity
+                    commodity_label = commodity_display_name(selected_commodity)
+                    msp = get_msp_for_crop(selected_commodity)
+                    if msp:
+                        final_answer = (
+                            f"{commodity_label} के लिए MSP (राष्ट्रीय): ₹{int(msp['msp'])}/क्विंटल.\n"
+                            f"स्रोत: {msp['source_url']}"
+                        )
+                    else:
+                        final_answer = (
+                            f"{commodity_label} के लिए अभी मंडी/MSP डेटा उपलब्ध नहीं मिला। "
+                            "कृपया थोड़ी देर बाद फिर प्रयास करें।"
+                        )
+                    query_log_id = log_query_answer(
+                        user_query=user_query,
+                        composed_query=composed_query,
+                        topic="price",
+                        answer_text=final_answer,
+                        references=[],
+                        district=selected_district,
+                        season=season,
+                        crop_name=selected_commodity or "unknown",
+                    )
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+                    )
+                    with st.chat_message("assistant"):
+                        st.write(final_answer)
+                    st.stop()
+                if selected_district and (query_place or explicit_place or explicit_district):
+                    _set_session_location_context(
+                        query_place,
+                        selected_district,
+                        selected_state or session_state_hint,
+                    )
+                if not selected_district:
+                    st.session_state.pop("auto_chart", None)
+                    st.session_state.pop("auto_forecast_table", None)
+                    st.session_state.pop("auto_forecast_caption", None)
+                    final_answer = (
+                        "स्थान का जिला ऑटो‑मैप नहीं हो पाया। "
+                        "कृपया सही जिला बताएं, ताकि अगली बार अपने‑आप सही जिला चुना जा सके।"
+                    )
+                    query_log_id = log_query_answer(
+                        user_query=user_query,
+                        composed_query=composed_query,
+                        topic="price",
+                        answer_text=final_answer,
+                        references=[],
+                        district="",
+                        season=season,
+                        crop_name=selected_commodity or "unknown",
+                    )
+                    st.session_state.chat_history.append(
+                        {
+                            "role": "assistant",
+                            "text": final_answer,
+                            "references": [],
+                            "query_log_id": query_log_id,
+                            "topic": "price",
+                            "user_query": user_query,
+                        }
+                    )
+                    with st.chat_message("assistant"):
+                        st.write(final_answer)
+                    st.session_state["need_location_correction"] = True
+                    st.stop()
+                # Use the commodity resolved from query (avoid fallback to unrelated commodity)
+                selected_commodity = comm_from_query or selected_commodity
+                commodity_label = commodity_display_name(selected_commodity)
+                filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
+                mention_district_in_price_answer = bool(selected_district and (explicit_place or explicit_district))
+                price_references: list[str] = []
+                if filtered.empty:
+                    if selected_commodity.lower() in {"sugarcane", "गन्ना"}:
+                        sugarcane_price = get_sugarcane_price_fallback()
+                        price = sugarcane_price.get("price")
+                        season = sugarcane_price.get("season", "")
+                        source_name = sugarcane_price.get("source", "")
+                        src = sugarcane_price.get("source_url", "")
+                        if price:
+                            intro = (
+                                f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है।\n"
+                                if mention_district_in_price_answer
+                                else ""
+                            )
+                            final_answer = (
+                                f"{intro}"
+                                f"गन्ना के लिए {source_name} {season}: ₹{int(float(price))}/क्विंटल."
+                            )
+                            if src:
+                                final_answer += f"\nस्रोत: {src}"
+                        else:
+                            intro = (
+                                f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है। "
+                                if mention_district_in_price_answer
+                                else ""
+                            )
+                            final_answer = f"{intro}CACP से FRP निकालने में समस्या आई।"
+                    else:
+                        msp = get_msp_for_crop(selected_commodity)
+                        if msp:
+                            intro = (
+                                f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा नहीं मिला।\n"
+                                if mention_district_in_price_answer
+                                else ""
+                            )
+                            final_answer = f"{intro}MSP (राष्ट्रीय) {msp['crop']}: ₹{int(msp['msp'])}/क्विंटल.\nस्रोत: {msp['source_url']}"
+                        else:
+                            web_answer, price_references = _try_price_web_fallback(
+                                advisor,
+                                user_query=user_query,
+                                commodity_label=commodity_label,
+                                commodity_key=selected_commodity,
+                                selected_state=selected_state,
+                                selected_district=selected_district,
+                                mention_district=mention_district_in_price_answer,
+                            )
+                            if web_answer:
+                                final_answer = web_answer
+                            else:
+                                commodity_key = re.sub(r"[^a-z0-9]+", "", str(selected_commodity).lower())
+                                final_answer = _format_specialty_crop_price_unavailable(
+                                    commodity_label,
+                                    commodity_key,
+                                    selected_district,
+                                    mention_district_in_price_answer,
+                                )
+                    query_log_id = log_query_answer(
+                        user_query=user_query,
+                        composed_query=composed_query,
+                        topic="price",
+                        answer_text=final_answer,
+                        references=price_references,
+                        district=selected_district,
+                        season=season,
+                        crop_name=selected_commodity or "unknown",
+                    )
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "text": final_answer, "references": price_references, "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
+                    )
+                    with st.chat_message("assistant"):
+                        st.write(final_answer)
+                    st.stop()
+                nearest_market = None
+                if not filtered.empty and "Market" in filtered.columns and filtered["Market"].notna().any():
+                    place = extract_place_from_query(user_query)
+                    if place:
+                        place_geo = _geocode_cached(place, f"{selected_district}, Uttar Pradesh")
+                        if place_geo:
+                            plat, plon, _ = place_geo
+                            markets = (
+                                filtered["Market"].dropna().astype(str).unique().tolist()
+                                if "Market" in filtered.columns
+                                else []
+                            )
+                            best = None
+                            for m in markets[:30]:
+                                geo = _geocode_cached(m, f"{selected_district}, Uttar Pradesh")
+                                if not geo:
+                                    continue
+                                lat, lon, label = geo
+                                dist = haversine_km(plat, plon, lat, lon)
+                                if best is None or dist < best[0]:
+                                    best = (dist, label, m)
+                            if best:
+                                nearest_market = best
+
+                forecast_df = filtered
+                if nearest_market:
+                    latest_line, _latest = summarize_latest_market_for_market(filtered, nearest_market[2])
+                    forecast_df = filtered[
+                        filtered["Market"].astype(str).str.lower() == nearest_market[2].lower()
+                    ]
+                else:
+                    latest_line, _latest = summarize_latest_market(filtered)
+                auto_caption = f"{selected_state} / {selected_district} / {commodity_label}"
+                detailed_forecast_requested = wants_detailed_price_forecast(user_query)
+                auto_chart = None
+                auto_table = None
+                try:
+                    if detailed_forecast_requested:
+                        hist, fc = build_forecast_from_df(
+                            df=forecast_df,
+                            commodity=selected_commodity,
+                            state=selected_state,
+                            district=selected_district,
+                            horizon=15,
+                        )
+                        history_tail = hist.tail(90).copy()
+                        history_tail = history_tail.rename(columns={"value": "History"})
+                        fc2 = fc.rename(columns={"predicted_value": "Forecast"})
+
+                        chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
+                        chart_df["History"] = history_tail["History"].values
+                        chart_df = chart_df.set_index("date")
+
+                        fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
+                        fc_chart["Forecast"] = fc2["Forecast"].values
+                        fc_chart = fc_chart.set_index("date")
+                        auto_chart = chart_df.join(fc_chart, how="outer")
+                        auto_table = fc2
+                except Exception:
+                    auto_chart = None
+                    auto_table = None
+
+                market_list = []
+                if "Market" in filtered.columns:
+                    market_list = (
+                        filtered["Market"].dropna().astype(str).unique().tolist()
+                    )
+                market_answer = (
+                    f"बाजार जानकारी ({selected_state} / {selected_district} / {commodity_label}):\n"
+                    f"- {latest_line}\n"
+                )
+                if market_list:
+                    sample_markets = ", ".join(sorted(market_list)[:8])
+                    market_answer += f"- उपलब्ध मंडियाँ (नमूना): {sample_markets}\n"
+                if detailed_forecast_requested and auto_table is not None and not auto_table.empty:
+                    next_vals = auto_table["Forecast"].head(7).tolist()
+                    vals_str = ", ".join([f"{v:.0f}" for v in next_vals])
+                    market_answer += f"- अगले 7 दिन के अनुमानित भाव: {vals_str} Rs./Quintal\n"
+
+                if nearest_market:
+                    market_answer += (
+                        f"- निकटतम मंडी (लगभग): {nearest_market[1]} ({nearest_market[0]:.1f} km)\n"
+                    )
+
+                query_log_id = log_query_answer(
+                    user_query=user_query,
+                    composed_query=composed_query,
+                    topic="price",
+                    answer_text=market_answer,
+                    references=[],
+                    district=selected_district,
+                    season=season,
+                    crop_name=selected_commodity or "unknown",
+                )
+                if detailed_forecast_requested and auto_table is not None:
+                    market_meta = {
+                        "caption": auto_caption,
+                        "commodity_label": commodity_label,
+                        "latest": _latest or {},
+                        "market_list": market_list,
+                        "nearest_market": nearest_market,
+                    }
+                    st.session_state["auto_chart"] = auto_chart
+                    st.session_state["auto_forecast_table"] = auto_table
+                    st.session_state["auto_forecast_caption"] = auto_caption
+                    st.session_state["auto_market_meta"] = market_meta
+                    st.session_state["pending_selection"] = {
+                        "state": selected_state,
+                        "district": selected_district,
+                        "commodity": selected_commodity,
+                    }
+                    pending_chat_items = [
+                        {"role": "assistant", "text": market_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query},
+                    ]
+                    if detailed_forecast_requested and auto_chart is not None:
+                        pending_chat_items.append(
+                            {
+                                "role": "assistant",
+                                "type": "market_panel",
+                                "text": "",
+                                "references": [],
+                                "market_meta": market_meta,
+                                "market_chart": auto_chart,
+                                "market_table": auto_table,
+                            }
+                        )
+                    st.session_state["pending_chat_items"] = pending_chat_items
+                else:
+                    st.session_state.pop("auto_chart", None)
+                    st.session_state.pop("auto_forecast_table", None)
+                    st.session_state.pop("auto_forecast_caption", None)
+                    st.session_state.pop("auto_market_meta", None)
+                    st.session_state.chat_history.append(
+                        {
+                            "role": "assistant",
+                            "text": market_answer,
+                            "references": [],
+                            "query_log_id": query_log_id,
+                            "topic": "price",
+                            "user_query": user_query,
+                        }
+                    )
+                    with st.chat_message("assistant"):
+                        st.write(market_answer)
+                        render_feedback_widget(st.session_state.chat_history[-1], advisor)
+                    st.stop()
+
+                # Re-render so the market answer and panel appear inline at this chat turn.
+                st.rerun()
+                final_answer = market_answer
             else:
-                lines = [f"चयनित जिला {scope_district} में '{requested_location}' का exact match नहीं मिला।"]
-            if location_scope_status == "suggest" and suggestions:
-                lines.append(f"क्या आपका मतलब: {', '.join(suggestions[:3])}?")
-            lines.append(f"कृपया {scope_district} के गांव/कस्बे का नाम लिखें या ऊपर जिला बदलें।")
-            final_answer = "\n".join(lines)
-            query_log_id = log_query_answer(
-                user_query=user_query,
-                composed_query=user_query,
-                topic="location_scope",
-                answer_text=final_answer,
-                references=[],
-                district=scope_district,
+                query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
+                direct_crop_followup = None
+                direct_crop_protection_followup = None
+                if (
+                    not agentic_enabled
+                    and (
+                        crop_guide_followup_detected
+                        or _looks_like_crop_water_followup(user_query, advisor)
+                    )
+                    and advisor._has_agri_intent(normalized_user_query)
+                    and not advisor._is_weather_intent(normalized_user_query)
+                ):
+                    advisor._ensure_rag_components(load_generator=False)
+                    guide_answer, guide_sources = build_crop_production_followup(
+                        normalized_user_query,
+                        crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+                        reasoning_generator=advisor.generator,
+                    )
+                    if guide_answer:
+                        direct_crop_followup = {
+                            "answer": guide_answer,
+                            "references": guide_sources,
+                            "retrieved": [],
+                            "topic": "crop_guide_followup",
+                        }
+                if (
+                    not agentic_enabled
+                    and direct_crop_followup is None
+                    and can_use_pesticide_followup_context
+                    and not advisor._is_weather_intent(normalized_user_query)
+                ):
+                    pesticide_result = advisor._structured_pesticide_advice(
+                        normalized_user_query,
+                        crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+                    )
+                    if pesticide_result and pesticide_result.get("answer"):
+                        direct_crop_protection_followup = {
+                            "answer": pesticide_result["answer"],
+                            "references": pesticide_result.get("references", []),
+                            "retrieved": pesticide_result.get("retrieved", []),
+                            "topic": "pesticide",
+                        }
+                if agentic_enabled:
+                    with st.spinner("Checking sources and coordinating specialists..."):
+                        result = advisor.answer(composed_query)
+                elif direct_crop_followup is not None:
+                    result = direct_crop_followup
+                elif direct_crop_protection_followup is not None:
+                    result = direct_crop_protection_followup
+                else:
+                    with st.spinner("Generating recommendation..."):
+                        try:
+                            result = advisor.answer(composed_query)
+                        except Exception as exc:
+                            import traceback as _traceback
+
+                            print(f"[KisaanAI] advisor.answer failed: {exc}")
+                            _traceback.print_exc()
+                            result = {
+                                "answer": (
+                                    "अभी उत्तर तैयार करते समय तकनीकी समस्या आई। "
+                                    "कृपया सवाल थोड़ा छोटा लिखें या कुछ देर बाद फिर प्रयास करें।"
+                                ),
+                                "references": [],
+                                "retrieved": [],
+                                "topic": "clarification",
+                            }
+                if (
+                    not agentic_enabled
+                    and str(result.get("topic") or "").strip().lower() == "weather"
+                    and (crop_guide_followup_detected or _looks_like_crop_water_followup(user_query, advisor))
+                    and advisor._has_agri_intent(normalized_user_query)
+                ):
+                    advisor._ensure_rag_components(load_generator=False)
+                    guide_answer, guide_sources = build_crop_production_followup(
+                        normalized_user_query,
+                        crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+                        reasoning_generator=advisor.generator,
+                    )
+                    if guide_answer:
+                        result = {
+                            "answer": guide_answer,
+                            "references": guide_sources,
+                            "retrieved": [],
+                            "topic": "crop_guide_followup",
+                        }
+                if (
+                    not agentic_enabled
+                    and str(result.get("topic") or "").strip().lower() == "weather"
+                    and can_use_pesticide_followup_context
+                    and not advisor._is_weather_intent(normalized_user_query)
+                ):
+                    pesticide_result = advisor._structured_pesticide_advice(
+                        normalized_user_query,
+                        crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
+                    )
+                    if pesticide_result and pesticide_result.get("answer"):
+                        result = {
+                            "answer": pesticide_result["answer"],
+                            "references": pesticide_result.get("references", []),
+                            "retrieved": pesticide_result.get("retrieved", []),
+                            "topic": "pesticide",
+                        }
+                from app.hindi_translation import translate_answer
+                result = translate_answer(result)
+                final_answer = result["answer"]
+                topic = result.get("topic") or "rag"
+                query_log_id = log_query_answer(
+                    user_query=user_query,
+                    composed_query=composed_query,
+                    topic=topic,
+                    answer_text=final_answer,
+                    references=result.get("references", []),
+                    district=resolved_district,
+                    season=season_for_query,
+                    crop_name=preferred_crop_for_query or "unknown",
+                )
+                if topic == "weather" and ("मौसम के लिए स्थान" in final_answer or "कृपया स्थान लिखें" in final_answer):
+                    st.session_state["pending_weather_location"] = {"original_query": user_query}
+                if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide", "crop_guide_followup"}:
+                    st.session_state["last_structured_topic"] = topic
+                    st.session_state["last_structured_context"] = {
+                        "district": resolved_district,
+                        "season": season_for_query,
+                        "preferred_crop": query_crop_context,
+                    }
+                elif topic == "pesticide":
+                    st.session_state["last_structured_topic"] = topic
+                    st.session_state["last_structured_context"] = {
+                        "district": resolved_district,
+                        "season": season_for_query,
+                        "preferred_crop": query_crop_context or last_ctx.get("preferred_crop", ""),
+                    }
+                elif topic in {"weather", "rag", "clarification"}:
+                    st.session_state["last_structured_topic"] = topic
+                    if topic == "weather":
+                        place_guess, weather_district, weather_state = _resolve_query_location(user_query)
+                        if place_guess or weather_district:
+                            _set_session_location_context(
+                                place_guess or weather_district,
+                                weather_district or last_location_ctx.get("district", ""),
+                                weather_state or last_location_ctx.get("state", "Uttar Pradesh") or "Uttar Pradesh",
+                            )
+
+            st.session_state.chat_history.append(
+                {
+                    "role": "assistant",
+                    "text": final_answer,
+                    "references": ([] if intent_price else result.get("references", [])),
+                    "query_log_id": (None if intent_price else query_log_id),
+                    "topic": (None if intent_price else topic),
+                    "user_query": user_query,
+                    "weather_action": (None if intent_price else result.get("weather_action")),
+                    "agent_trace": (None if intent_price else result.get("agent_trace")),
+                    "translation": (None if intent_price else result.get("translation")),
+                }
+            )
+
+            with st.chat_message("assistant"):
+                if not intent_price and str(topic or "").strip().lower() == "weather":
+                    render_weather_chat_card(final_answer, action=result.get("weather_action"))
+                else:
+                    st.write(final_answer)
+                if not intent_price:
+                    from app.translation_status import render_translation_status
+                    render_translation_status(st, result.get("translation"))
+                    if result.get("agent_trace"):
+                        with st.expander("Plan and agent activity"):
+                            trace = result["agent_trace"]
+                            st.write(trace["goal"])
+                            st.write(" → ".join(trace["plan"]))
+                            st.json(trace["decisions"])
+                    with st.expander("Sources Used"):
+                        for src in result.get("references", []):
+                            st.write(f"- {src}")
+                    render_feedback_widget(st.session_state.chat_history[-1], advisor)
+
+            # Correction form only when auto-mapping failed
+            if st.session_state.pop("need_location_correction", False):
+                with st.expander("सही जिला बताएं (एक बार)"):
+                    place_guess = extract_place_from_query(user_query) or ""
+                    corr_place = st.text_input("स्थान (Village/Town)", value=place_guess, key="corr_place")
+                    corr_district = st.text_input("सही जिला", value="", key="corr_district")
+                    if st.button("सुधार सहेजें", use_container_width=True):
+                        if corr_place and corr_district:
+                            save_location_correction(corr_place, corr_district)
+                            clear_local_caches()
+                            st.success("सुधार सहेजा गया। अगली बार यही जिला उपयोग होगा।")
+
+            if intent_price:
+                st.session_state["pending_selection"] = {
+                    "state": selected_state,
+                    "district": selected_district,
+                    "commodity": selected_commodity,
+                }
+
+            save_advisory(
+                farmer_id=farmer_id,
+                district=district,
                 season=season,
-                crop_name=detected_query_crop or preferred_crop or "unknown",
+                crop_name=preferred_crop or "unknown",
+                recommendation_text=final_answer,
+            )
+        except Exception as exc:
+            error_ts = log_app_exception("user_query", exc, user_query=user_query)
+            final_answer = (
+                "अभी इस सवाल को प्रोसेस करते समय तकनीकी समस्या आई। "
+                f"कृपया दोबारा प्रयास करें। Error log time: {error_ts}."
             )
             st.session_state.chat_history.append(
                 {
                     "role": "assistant",
                     "text": final_answer,
                     "references": [],
-                    "query_log_id": query_log_id,
-                    "topic": "location_scope",
+                    "query_log_id": None,
+                    "topic": "runtime_error",
                     "user_query": user_query,
+                    "weather_action": None,
                 }
             )
             with st.chat_message("assistant"):
-                st.write(final_answer)
-            st.stop()
-        if query_place and (query_place_district or query_place_state):
-            _set_session_location_context(
-                query_place,
-                query_place_district or session_district_hint,
-                query_place_state or session_state_hint,
-            )
-            last_location_ctx = st.session_state.get("last_location_context", {}) or {}
-            session_state_hint = (last_location_ctx.get("state") or session_state_hint).strip() or "Uttar Pradesh"
-            session_district_hint = (last_location_ctx.get("district") or session_district_hint).strip() or "Meerut"
-
-        followup_profit = (
-            is_profitability_followup_query(user_query)
-            and st.session_state.get("last_structured_topic") in {"crop_profitability", "crop_profitability_followup"}
-        )
-        followup_crop_care = (
-            crop_protection_followup
-            and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
-        )
-        followup_crop_guide = (
-            crop_guide_followup_detected
-            and st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
-        )
-        remembered_crop_context = bool((last_ctx.get("preferred_crop") or "").strip())
-        can_use_pesticide_followup_context = (
-            crop_protection_followup
-            and (
-                st.session_state.get("last_structured_topic") in {"crop_guide", "crop_guide_followup", "pesticide"}
-                or remembered_crop_context
-            )
-        )
-        explicit_query_season = _extract_season_from_query_text(user_query, advisor)
-
-        # Resolve place->district for crop intent (so profit uses correct district)
-        resolved_district = session_district_hint
-        if is_crop_query(user_query):
-            if query_place_district:
-                resolved_district = query_place_district
-        elif followup_profit and last_ctx.get("district"):
-            resolved_district = last_ctx["district"]
-
-        season_for_query = (
-            explicit_query_season
-            or (last_ctx.get("season", season) if (followup_profit or followup_crop_care or followup_crop_guide) else season)
-        )
-        preferred_crop_for_query = (
-            last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else preferred_crop
-        )
-
-        question_for_advisor = user_query.strip()
-        fallback_weather_place = str(
-            last_location_ctx.get("place")
-            or (active_district if "active_district" in locals() else "")
-            or session_district_hint
-        ).strip()
-        if weather_intent and not (query_place or query_place_district or query_place_state) and fallback_weather_place:
-            question_for_advisor = f"{fallback_weather_place} में {question_for_advisor}"
-
-        query_location = dict(active_location)
-        if query_place:
-            if str(query_place).casefold() == str(active_district).casefold():
-                query_location.update(place="", sub_district="")
-            elif str(query_place).casefold() != str(active_place).casefold():
-                matches = [loc for loc in place_options(active_state, active_district).values()
-                           if str(loc["place"]).casefold() == str(query_place).casefold()]
-                query_location = matches[0] if len(matches) == 1 else dict(active_location, place=query_place, sub_district="")
-        resolved_district = active_district
-        composed_query = (
-            location_context(query_location)
-            + f"जिला: {resolved_district} | मौसम: {season_for_query} | पसंदीदा फसल: {preferred_crop_for_query or 'कोई नहीं'} | "
-            f"किसान का प्रश्न: {question_for_advisor}"
-        )
-
-        explicit_place = bool(extract_place_from_query(user_query))
-        explicit_district = False
-        query_crop_hint = detected_query_crop or preferred_crop_for_query or ""
-        feedback_hint = None
-        market_df = pd.DataFrame()
-        if intent_price:
-            market_df = load_agmarknet_df()
-            feedback_hint = find_feedback_memory_hint(
-                user_query,
-                topic_hint="price",
-                crop_hint=query_crop_hint,
-                db_path=cfg.paths["sqlite_db"],
-                advisor=advisor,
-            )
-            if not market_df.empty and "District" in market_df.columns:
-                known_districts = sorted(market_df["District"].dropna().astype(str).unique().tolist())
-                explicit_district = bool(extract_entities_ner(user_query, known_districts, [])[0])
-        feedback_district_hint = ""
-        feedback_prefers_omit_district = False
-        if feedback_hint:
-            feedback_prefers_omit_district = _feedback_prefers_omit_district(str(feedback_hint.get("correction_text") or ""))
-            if not market_df.empty and "District" in market_df.columns:
-                feedback_district_hint = _extract_district_from_feedback_text(
-                    str(feedback_hint.get("correction_text") or ""),
-                    sorted(market_df["District"].dropna().astype(str).unique().tolist()),
-                ) or ""
-        fallback_state_for_price = session_state_hint or (active_state if "active_state" in locals() else "Uttar Pradesh")
-        fallback_district_for_price = (
-            session_district_hint
-            or feedback_district_hint
-            or (active_district if "active_district" in locals() else district)
-        )
-        selected_state, selected_district, selected_commodity = extract_selection_from_query(
-            user_query,
-            market_df,
-            fallback_state=fallback_state_for_price,
-            fallback_district=fallback_district_for_price,
-            fallback_commodity=active_commodity if "active_commodity" in locals() else (preferred_crop or "Wheat"),
-        )
-        if intent_price and not explicit_place and not explicit_district and fallback_district_for_price:
-            selected_district = fallback_district_for_price
-            if fallback_state_for_price:
-                selected_state = fallback_state_for_price
-
-        agentic_enabled = os.getenv("KISAANAI_AGENTIC", "1").lower() not in {"0", "false", "no"}
-        if agentic_enabled:
-            # Every query, including prices and mixed intents, uses the coordinator.
-            intent_price = False
-
-        if intent_price:
-            # Ensure commodity is explicitly detected for price queries.
-            comm_from_query = resolve_commodity_from_query(
-                user_query, load_commodity_catalog()
-            )
-            if not comm_from_query and is_latest_commodity_price_query(user_query):
-                final_answer, price_references = summarize_latest_available_commodity(
-                    market_df,
-                    selected_state,
-                    selected_district,
-                )
-                query_log_id = log_query_answer(
-                    user_query=user_query,
-                    composed_query=composed_query,
-                    topic="price",
-                    answer_text=final_answer,
-                    references=price_references,
-                    district=selected_district,
-                    season=season,
-                    crop_name="latest_available_commodity",
-                )
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "text": final_answer, "references": price_references, "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
-                )
-                with st.chat_message("assistant"):
-                    st.write(final_answer)
-                st.stop()
-            if not comm_from_query:
-                final_answer = (
-                    "कृपया फसल/कमोडिटी का नाम बताएं (जैसे: गेहूं, गन्ना, धान)।"
-                    if not intent_msp
-                    else "कृपया जिस फसल का MSP चाहिए उसका नाम बताएं (जैसे: गेहूं, धान, चना)।"
-                )
-                query_log_id = log_query_answer(
-                    user_query=user_query,
-                    composed_query=composed_query,
-                    topic="price",
-                    answer_text=final_answer,
-                    references=[],
-                    district=selected_district,
-                    season=season,
-                    crop_name="unknown",
-                )
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
-                )
-                with st.chat_message("assistant"):
-                    st.write(final_answer)
-                st.stop()
-            if intent_msp:
-                selected_commodity = comm_from_query or selected_commodity
-                commodity_label = commodity_display_name(selected_commodity)
-                msp = get_msp_for_crop(selected_commodity)
-                if msp:
-                    final_answer = (
-                        f"{commodity_label} के लिए MSP (राष्ट्रीय): ₹{int(msp['msp'])}/क्विंटल.\n"
-                        f"स्रोत: {msp['source_url']}"
-                    )
-                else:
-                    final_answer = (
-                        f"{commodity_label} के लिए अभी MSP रिकॉर्ड उपलब्ध नहीं मिला। "
-                        "कृपया फसल का नाम दोबारा लिखें या दूसरी फसल पूछें।"
-                    )
-                query_log_id = log_query_answer(
-                    user_query=user_query,
-                    composed_query=composed_query,
-                    topic="price",
-                    answer_text=final_answer,
-                    references=[],
-                    district=selected_district,
-                    season=season,
-                    crop_name=selected_commodity or "unknown",
-                )
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
-                )
-                with st.chat_message("assistant"):
-                    st.write(final_answer)
-                st.stop()
-            if market_df.empty:
-                selected_commodity = comm_from_query or selected_commodity
-                commodity_label = commodity_display_name(selected_commodity)
-                msp = get_msp_for_crop(selected_commodity)
-                if msp:
-                    final_answer = (
-                        f"{commodity_label} के लिए MSP (राष्ट्रीय): ₹{int(msp['msp'])}/क्विंटल.\n"
-                        f"स्रोत: {msp['source_url']}"
-                    )
-                else:
-                    final_answer = (
-                        f"{commodity_label} के लिए अभी मंडी/MSP डेटा उपलब्ध नहीं मिला। "
-                        "कृपया थोड़ी देर बाद फिर प्रयास करें।"
-                    )
-                query_log_id = log_query_answer(
-                    user_query=user_query,
-                    composed_query=composed_query,
-                    topic="price",
-                    answer_text=final_answer,
-                    references=[],
-                    district=selected_district,
-                    season=season,
-                    crop_name=selected_commodity or "unknown",
-                )
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "text": final_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
-                )
-                with st.chat_message("assistant"):
-                    st.write(final_answer)
-                st.stop()
-            if selected_district and (query_place or explicit_place or explicit_district):
-                _set_session_location_context(
-                    query_place,
-                    selected_district,
-                    selected_state or session_state_hint,
-                )
-            if not selected_district:
-                st.session_state.pop("auto_chart", None)
-                st.session_state.pop("auto_forecast_table", None)
-                st.session_state.pop("auto_forecast_caption", None)
-                final_answer = (
-                    "स्थान का जिला ऑटो‑मैप नहीं हो पाया। "
-                    "कृपया सही जिला बताएं, ताकि अगली बार अपने‑आप सही जिला चुना जा सके।"
-                )
-                query_log_id = log_query_answer(
-                    user_query=user_query,
-                    composed_query=composed_query,
-                    topic="price",
-                    answer_text=final_answer,
-                    references=[],
-                    district="",
-                    season=season,
-                    crop_name=selected_commodity or "unknown",
-                )
-                st.session_state.chat_history.append(
-                    {
-                        "role": "assistant",
-                        "text": final_answer,
-                        "references": [],
-                        "query_log_id": query_log_id,
-                        "topic": "price",
-                        "user_query": user_query,
-                    }
-                )
-                with st.chat_message("assistant"):
-                    st.write(final_answer)
-                st.session_state["need_location_correction"] = True
-                st.stop()
-            # Use the commodity resolved from query (avoid fallback to unrelated commodity)
-            selected_commodity = comm_from_query or selected_commodity
-            commodity_label = commodity_display_name(selected_commodity)
-            filtered = filter_market_rows(market_df, selected_commodity, selected_state, selected_district)
-            mention_district_in_price_answer = bool(selected_district and (explicit_place or explicit_district))
-            price_references: list[str] = []
-            if filtered.empty:
-                if selected_commodity.lower() in {"sugarcane", "गन्ना"}:
-                    sugarcane_price = get_sugarcane_price_fallback()
-                    price = sugarcane_price.get("price")
-                    season = sugarcane_price.get("season", "")
-                    source_name = sugarcane_price.get("source", "")
-                    src = sugarcane_price.get("source_url", "")
-                    if price:
-                        intro = (
-                            f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है।\n"
-                            if mention_district_in_price_answer
-                            else ""
-                        )
-                        final_answer = (
-                            f"{intro}"
-                            f"गन्ना के लिए {source_name} {season}: ₹{int(float(price))}/क्विंटल."
-                        )
-                        if src:
-                            final_answer += f"\nस्रोत: {src}"
-                    else:
-                        intro = (
-                            f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा उपलब्ध नहीं है। "
-                            if mention_district_in_price_answer
-                            else ""
-                        )
-                        final_answer = f"{intro}CACP से FRP निकालने में समस्या आई।"
-                else:
-                    msp = get_msp_for_crop(selected_commodity)
-                    if msp:
-                        intro = (
-                            f"चयनित जिले ({selected_district}) में {commodity_label} का मंडी डेटा नहीं मिला।\n"
-                            if mention_district_in_price_answer
-                            else ""
-                        )
-                        final_answer = f"{intro}MSP (राष्ट्रीय) {msp['crop']}: ₹{int(msp['msp'])}/क्विंटल.\nस्रोत: {msp['source_url']}"
-                    else:
-                        web_answer, price_references = _try_price_web_fallback(
-                            advisor,
-                            user_query=user_query,
-                            commodity_label=commodity_label,
-                            commodity_key=selected_commodity,
-                            selected_state=selected_state,
-                            selected_district=selected_district,
-                            mention_district=mention_district_in_price_answer,
-                        )
-                        if web_answer:
-                            final_answer = web_answer
-                        else:
-                            commodity_key = re.sub(r"[^a-z0-9]+", "", str(selected_commodity).lower())
-                            final_answer = _format_specialty_crop_price_unavailable(
-                                commodity_label,
-                                commodity_key,
-                                selected_district,
-                                mention_district_in_price_answer,
-                            )
-                query_log_id = log_query_answer(
-                    user_query=user_query,
-                    composed_query=composed_query,
-                    topic="price",
-                    answer_text=final_answer,
-                    references=price_references,
-                    district=selected_district,
-                    season=season,
-                    crop_name=selected_commodity or "unknown",
-                )
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "text": final_answer, "references": price_references, "query_log_id": query_log_id, "topic": "price", "user_query": user_query}
-                )
-                with st.chat_message("assistant"):
-                    st.write(final_answer)
-                st.stop()
-            nearest_market = None
-            if not filtered.empty and "Market" in filtered.columns and filtered["Market"].notna().any():
-                place = extract_place_from_query(user_query)
-                if place:
-                    place_geo = _geocode_cached(place, f"{selected_district}, Uttar Pradesh")
-                    if place_geo:
-                        plat, plon, _ = place_geo
-                        markets = (
-                            filtered["Market"].dropna().astype(str).unique().tolist()
-                            if "Market" in filtered.columns
-                            else []
-                        )
-                        best = None
-                        for m in markets[:30]:
-                            geo = _geocode_cached(m, f"{selected_district}, Uttar Pradesh")
-                            if not geo:
-                                continue
-                            lat, lon, label = geo
-                            dist = haversine_km(plat, plon, lat, lon)
-                            if best is None or dist < best[0]:
-                                best = (dist, label, m)
-                        if best:
-                            nearest_market = best
-
-            forecast_df = filtered
-            if nearest_market:
-                latest_line, _latest = summarize_latest_market_for_market(filtered, nearest_market[2])
-                forecast_df = filtered[
-                    filtered["Market"].astype(str).str.lower() == nearest_market[2].lower()
-                ]
-            else:
-                latest_line, _latest = summarize_latest_market(filtered)
-            auto_caption = f"{selected_state} / {selected_district} / {commodity_label}"
-            detailed_forecast_requested = wants_detailed_price_forecast(user_query)
-            auto_chart = None
-            auto_table = None
-            try:
-                if detailed_forecast_requested:
-                    hist, fc = build_forecast_from_df(
-                        df=forecast_df,
-                        commodity=selected_commodity,
-                        state=selected_state,
-                        district=selected_district,
-                        horizon=15,
-                    )
-                    history_tail = hist.tail(90).copy()
-                    history_tail = history_tail.rename(columns={"value": "History"})
-                    fc2 = fc.rename(columns={"predicted_value": "Forecast"})
-
-                    chart_df = pd.DataFrame({"date": pd.to_datetime(history_tail["date"])})
-                    chart_df["History"] = history_tail["History"].values
-                    chart_df = chart_df.set_index("date")
-
-                    fc_chart = pd.DataFrame({"date": pd.to_datetime(fc2["date"])})
-                    fc_chart["Forecast"] = fc2["Forecast"].values
-                    fc_chart = fc_chart.set_index("date")
-                    auto_chart = chart_df.join(fc_chart, how="outer")
-                    auto_table = fc2
-            except Exception:
-                auto_chart = None
-                auto_table = None
-
-            market_list = []
-            if "Market" in filtered.columns:
-                market_list = (
-                    filtered["Market"].dropna().astype(str).unique().tolist()
-                )
-            market_answer = (
-                f"बाजार जानकारी ({selected_state} / {selected_district} / {commodity_label}):\n"
-                f"- {latest_line}\n"
-            )
-            if market_list:
-                sample_markets = ", ".join(sorted(market_list)[:8])
-                market_answer += f"- उपलब्ध मंडियाँ (नमूना): {sample_markets}\n"
-            if detailed_forecast_requested and auto_table is not None and not auto_table.empty:
-                next_vals = auto_table["Forecast"].head(7).tolist()
-                vals_str = ", ".join([f"{v:.0f}" for v in next_vals])
-                market_answer += f"- अगले 7 दिन के अनुमानित भाव: {vals_str} Rs./Quintal\n"
-
-            if nearest_market:
-                market_answer += (
-                    f"- निकटतम मंडी (लगभग): {nearest_market[1]} ({nearest_market[0]:.1f} km)\n"
-                )
-
-            query_log_id = log_query_answer(
-                user_query=user_query,
-                composed_query=composed_query,
-                topic="price",
-                answer_text=market_answer,
-                references=[],
-                district=selected_district,
-                season=season,
-                crop_name=selected_commodity or "unknown",
-            )
-            if detailed_forecast_requested and auto_table is not None:
-                market_meta = {
-                    "caption": auto_caption,
-                    "commodity_label": commodity_label,
-                    "latest": _latest or {},
-                    "market_list": market_list,
-                    "nearest_market": nearest_market,
-                }
-                st.session_state["auto_chart"] = auto_chart
-                st.session_state["auto_forecast_table"] = auto_table
-                st.session_state["auto_forecast_caption"] = auto_caption
-                st.session_state["auto_market_meta"] = market_meta
-                st.session_state["pending_selection"] = {
-                    "state": selected_state,
-                    "district": selected_district,
-                    "commodity": selected_commodity,
-                }
-                pending_chat_items = [
-                    {"role": "assistant", "text": market_answer, "references": [], "query_log_id": query_log_id, "topic": "price", "user_query": user_query},
-                ]
-                if detailed_forecast_requested and auto_chart is not None:
-                    pending_chat_items.append(
-                        {
-                            "role": "assistant",
-                            "type": "market_panel",
-                            "text": "",
-                            "references": [],
-                            "market_meta": market_meta,
-                            "market_chart": auto_chart,
-                            "market_table": auto_table,
-                        }
-                    )
-                st.session_state["pending_chat_items"] = pending_chat_items
-            else:
-                st.session_state.pop("auto_chart", None)
-                st.session_state.pop("auto_forecast_table", None)
-                st.session_state.pop("auto_forecast_caption", None)
-                st.session_state.pop("auto_market_meta", None)
-                st.session_state.chat_history.append(
-                    {
-                        "role": "assistant",
-                        "text": market_answer,
-                        "references": [],
-                        "query_log_id": query_log_id,
-                        "topic": "price",
-                        "user_query": user_query,
-                    }
-                )
-                with st.chat_message("assistant"):
-                    st.write(market_answer)
-                    render_feedback_widget(st.session_state.chat_history[-1], advisor)
-                st.stop()
-
-            # Re-render so the market answer and panel appear inline at this chat turn.
-            st.rerun()
-            final_answer = market_answer
-        else:
-            query_crop_context = advisor._extract_crop_from_query(advisor._normalize_hinglish(user_query)) or preferred_crop_for_query or ""
-            direct_crop_followup = None
-            direct_crop_protection_followup = None
-            if (
-                not agentic_enabled
-                and (
-                    crop_guide_followup_detected
-                    or _looks_like_crop_water_followup(user_query, advisor)
-                )
-                and advisor._has_agri_intent(normalized_user_query)
-                and not advisor._is_weather_intent(normalized_user_query)
-            ):
-                advisor._ensure_rag_components(load_generator=False)
-                guide_answer, guide_sources = build_crop_production_followup(
-                    normalized_user_query,
-                    crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
-                    reasoning_generator=advisor.generator,
-                )
-                if guide_answer:
-                    direct_crop_followup = {
-                        "answer": guide_answer,
-                        "references": guide_sources,
-                        "retrieved": [],
-                        "topic": "crop_guide_followup",
-                    }
-            if (
-                not agentic_enabled
-                and direct_crop_followup is None
-                and can_use_pesticide_followup_context
-                and not advisor._is_weather_intent(normalized_user_query)
-            ):
-                pesticide_result = advisor._structured_pesticide_advice(
-                    normalized_user_query,
-                    crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
-                )
-                if pesticide_result and pesticide_result.get("answer"):
-                    direct_crop_protection_followup = {
-                        "answer": pesticide_result["answer"],
-                        "references": pesticide_result.get("references", []),
-                        "retrieved": pesticide_result.get("retrieved", []),
-                        "topic": "pesticide",
-                    }
-            if agentic_enabled:
-                with st.spinner("Checking sources and coordinating specialists..."):
-                    result = advisor.answer(composed_query)
-            elif direct_crop_followup is not None:
-                result = direct_crop_followup
-            elif direct_crop_protection_followup is not None:
-                result = direct_crop_protection_followup
-            else:
-                with st.spinner("Generating recommendation..."):
-                    try:
-                        result = advisor.answer(composed_query)
-                    except Exception as exc:
-                        import traceback as _traceback
-
-                        print(f"[KisaanAI] advisor.answer failed: {exc}")
-                        _traceback.print_exc()
-                        result = {
-                            "answer": (
-                                "अभी उत्तर तैयार करते समय तकनीकी समस्या आई। "
-                                "कृपया सवाल थोड़ा छोटा लिखें या कुछ देर बाद फिर प्रयास करें।"
-                            ),
-                            "references": [],
-                            "retrieved": [],
-                            "topic": "clarification",
-                        }
-            if (
-                not agentic_enabled
-                and str(result.get("topic") or "").strip().lower() == "weather"
-                and (crop_guide_followup_detected or _looks_like_crop_water_followup(user_query, advisor))
-                and advisor._has_agri_intent(normalized_user_query)
-            ):
-                advisor._ensure_rag_components(load_generator=False)
-                guide_answer, guide_sources = build_crop_production_followup(
-                    normalized_user_query,
-                    crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
-                    reasoning_generator=advisor.generator,
-                )
-                if guide_answer:
-                    result = {
-                        "answer": guide_answer,
-                        "references": guide_sources,
-                        "retrieved": [],
-                        "topic": "crop_guide_followup",
-                    }
-            if (
-                not agentic_enabled
-                and str(result.get("topic") or "").strip().lower() == "weather"
-                and can_use_pesticide_followup_context
-                and not advisor._is_weather_intent(normalized_user_query)
-            ):
-                pesticide_result = advisor._structured_pesticide_advice(
-                    normalized_user_query,
-                    crop_hint=query_crop_context or last_ctx.get("preferred_crop", "") or None,
-                )
-                if pesticide_result and pesticide_result.get("answer"):
-                    result = {
-                        "answer": pesticide_result["answer"],
-                        "references": pesticide_result.get("references", []),
-                        "retrieved": pesticide_result.get("retrieved", []),
-                        "topic": "pesticide",
-                    }
-            from app.hindi_translation import translate_answer
-            result = translate_answer(result)
-            final_answer = result["answer"]
-            topic = result.get("topic") or "rag"
-            query_log_id = log_query_answer(
-                user_query=user_query,
-                composed_query=composed_query,
-                topic=topic,
-                answer_text=final_answer,
-                references=result.get("references", []),
-                district=resolved_district,
-                season=season_for_query,
-                crop_name=preferred_crop_for_query or "unknown",
-            )
-            if topic == "weather" and ("मौसम के लिए स्थान" in final_answer or "कृपया स्थान लिखें" in final_answer):
-                st.session_state["pending_weather_location"] = {"original_query": user_query}
-            if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide", "crop_guide_followup"}:
-                st.session_state["last_structured_topic"] = topic
-                st.session_state["last_structured_context"] = {
-                    "district": resolved_district,
-                    "season": season_for_query,
-                    "preferred_crop": query_crop_context,
-                }
-            elif topic == "pesticide":
-                st.session_state["last_structured_topic"] = topic
-                st.session_state["last_structured_context"] = {
-                    "district": resolved_district,
-                    "season": season_for_query,
-                    "preferred_crop": query_crop_context or last_ctx.get("preferred_crop", ""),
-                }
-            elif topic in {"weather", "rag", "clarification"}:
-                st.session_state["last_structured_topic"] = topic
-                if topic == "weather":
-                    place_guess, weather_district, weather_state = _resolve_query_location(user_query)
-                    if place_guess or weather_district:
-                        _set_session_location_context(
-                            place_guess or weather_district,
-                            weather_district or last_location_ctx.get("district", ""),
-                            weather_state or last_location_ctx.get("state", "Uttar Pradesh") or "Uttar Pradesh",
-                        )
-
-        st.session_state.chat_history.append(
-            {
-                "role": "assistant",
-                "text": final_answer,
-                "references": ([] if intent_price else result.get("references", [])),
-                "query_log_id": (None if intent_price else query_log_id),
-                "topic": (None if intent_price else topic),
-                "user_query": user_query,
-                "weather_action": (None if intent_price else result.get("weather_action")),
-                "agent_trace": (None if intent_price else result.get("agent_trace")),
-                "translation": (None if intent_price else result.get("translation")),
-            }
-        )
-
-        with st.chat_message("assistant"):
-            if not intent_price and str(topic or "").strip().lower() == "weather":
-                render_weather_chat_card(final_answer, action=result.get("weather_action"))
-            else:
-                st.write(final_answer)
-            if not intent_price:
-                from app.translation_status import render_translation_status
-                render_translation_status(st, result.get("translation"))
-                if result.get("agent_trace"):
-                    with st.expander("Plan and agent activity"):
-                        trace = result["agent_trace"]
-                        st.write(trace["goal"])
-                        st.write(" → ".join(trace["plan"]))
-                        st.json(trace["decisions"])
-                with st.expander("Sources Used"):
-                    for src in result.get("references", []):
-                        st.write(f"- {src}")
-                render_feedback_widget(st.session_state.chat_history[-1], advisor)
-
-        # Correction form only when auto-mapping failed
-        if st.session_state.pop("need_location_correction", False):
-            with st.expander("सही जिला बताएं (एक बार)"):
-                place_guess = extract_place_from_query(user_query) or ""
-                corr_place = st.text_input("स्थान (Village/Town)", value=place_guess, key="corr_place")
-                corr_district = st.text_input("सही जिला", value="", key="corr_district")
-                if st.button("सुधार सहेजें", use_container_width=True):
-                    if corr_place and corr_district:
-                        save_location_correction(corr_place, corr_district)
-                        clear_local_caches()
-                        st.success("सुधार सहेजा गया। अगली बार यही जिला उपयोग होगा।")
-
-        if intent_price:
-            st.session_state["pending_selection"] = {
-                "state": selected_state,
-                "district": selected_district,
-                "commodity": selected_commodity,
-            }
-
-        save_advisory(
-            farmer_id=farmer_id,
-            district=district,
-            season=season,
-            crop_name=preferred_crop or "unknown",
-            recommendation_text=final_answer,
-        )
-    except Exception as exc:
-        error_ts = log_app_exception("user_query", exc, user_query=user_query)
-        final_answer = (
-            "अभी इस सवाल को प्रोसेस करते समय तकनीकी समस्या आई। "
-            f"कृपया दोबारा प्रयास करें। Error log time: {error_ts}."
-        )
-        st.session_state.chat_history.append(
-            {
-                "role": "assistant",
-                "text": final_answer,
-                "references": [],
-                "query_log_id": None,
-                "topic": "runtime_error",
-                "user_query": user_query,
-                "weather_action": None,
-            }
-        )
-        with st.chat_message("assistant"):
-            st.error(final_answer)
-            with st.expander("Technical details"):
-                st.exception(exc)
+                st.error(final_answer)
+                with st.expander("Technical details"):
+                    st.exception(exc)
 
 _flush_pending_auth_cookie_write()
