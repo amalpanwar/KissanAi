@@ -38,6 +38,17 @@ async function freePort() {
     const input = frame.getByRole('combobox');
     await input.waitFor();
     const options = frame.getByRole('option');
+    async function assertComposerBelowReplies() {
+      const order = await page.evaluate(() => {
+        const replies = [...document.querySelectorAll('[data-testid="stChatMessage"]')];
+        const composer = document.querySelector('iframe[title="app.chat_controls.kisaan_chat_composer"]');
+        return replies.length > 0 && replies.every(reply =>
+          Boolean(reply.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+          reply.getBoundingClientRect().bottom <= composer.getBoundingClientRect().top);
+      });
+      assert.equal(order, true, 'All replies must render above the composer');
+    }
+
     await input.fill('wea');
     await options.first().waitFor();
     assert.match(await options.first().innerText(), /मौसम/);
@@ -51,15 +62,18 @@ async function freePort() {
     await input.press('Enter');
     await page.getByTestId('stJson').filter({ hasText: 'Doghat Rural' }).waitFor();
     assert.equal(await input.inputValue(), '');
+    await assertComposerBelowReplies();
     await page.getByRole('button', { name: 'Rerun unrelated control' }).click();
     await input.fill('pesti');
     await options.first().waitFor();
     assert.match(await options.first().innerText(), /कीटनाशक/);
+    await assertComposerBelowReplies();
     await input.press('ArrowDown');
     await input.press('Enter');
     assert.match(await input.inputValue(), /कीटनाशक/);
     await frame.getByRole('button', { name: 'सवाल भेजें' }).click();
     await page.getByTestId('stJson').filter({ hasText: 'दीमक' }).waitFor();
+    await assertComposerBelowReplies();
     let history = await page.getByTestId('stJson').innerText();
     assert.equal((history.match(/Doghat Rural/g) || []).length, 1);
     assert.equal((history.match(/दीमक/g) || []).length, 1);
@@ -79,6 +93,7 @@ async function freePort() {
     await options.first().waitFor();
     const overflow = await frame.locator('body').evaluate(el => el.scrollWidth > document.documentElement.clientWidth);
     assert.equal(overflow, false);
+    await assertComposerBelowReplies();
     if (process.env.COMPOSER_SCREENSHOT) await page.screenshot({ path: process.env.COMPOSER_SCREENSHOT, fullPage: true });
     assert.deepEqual(errors, []);
     console.log('Chat composer browser tests passed: typing, click/keyboard suggestions, edited send, no duplicate rerun, Escape, multiline and mobile.');
