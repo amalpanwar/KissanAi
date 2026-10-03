@@ -95,6 +95,24 @@ async function freePort() {
     assert.equal(overflow, false);
     await assertComposerBelowReplies();
     if (process.env.COMPOSER_SCREENSHOT) await page.screenshot({ path: process.env.COMPOSER_SCREENSHOT, fullPage: true });
+    // Changing location clears replies and the old draft, without replaying a submission.
+    await page.getByRole('combobox', { name: 'Selected village' }).click();
+    await page.getByRole('option', { name: 'Another village', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="stJson"]')?.innerText.trim() === '[]');
+    await input.waitFor();
+    assert.equal(await input.inputValue(), '');
+    assert.equal(await page.getByTestId('stChatMessage').count(), 0);
+    await page.getByRole('button', { name: 'Rerun unrelated control' }).click();
+    await input.fill('New location weather');
+    await input.press('Enter');
+    await page.getByTestId('stJson').filter({ hasText: 'New location weather' }).waitFor();
+    const newHistory = await page.getByTestId('stJson').innerText();
+    assert.equal((newHistory.match(/New location weather/g) || []).length, 1);
+    assert.ok(!newHistory.includes('Doghat Rural'));
+    await page.getByRole('combobox', { name: 'Selected village' }).click();
+    await page.getByRole('option', { name: 'Doghat Rural', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="stJson"]')?.innerText.trim() === '[]');
+    assert.equal(await input.inputValue(), '');
     assert.deepEqual(errors, []);
     console.log('Chat composer browser tests passed: typing, click/keyboard suggestions, edited send, no duplicate rerun, Escape, multiline and mobile.');
   } finally {

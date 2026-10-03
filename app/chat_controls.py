@@ -28,5 +28,6 @@ def consume_submission(value, state):
 
 
 def render_chat_composer(st):
-    value = _composer(suggestions=SUGGESTIONS, key="farmer_autocomplete_chat", default=None)
+    epoch = st.session_state.get("chat_location_epoch", 0)
+    value = _composer(suggestions=SUGGESTIONS, key=f"farmer_autocomplete_chat_{epoch}", default=None)
     return consume_submission(value, st.session_state)
