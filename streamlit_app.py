@@ -1,5 +1,6 @@
 from __future__ import annotations
 from app.location_query import strip_relative_location
+from app.chat_session import sync_chat_location
 
 from app.location_controls import render_place_selector
 from app.location_selection import location_context, place_options, qualified_place, scope_market_rows, market_scope_caption
@@ -3337,11 +3338,7 @@ district = active_district
 with town_col:
     active_location = render_place_selector(active_state, active_district)
 active_place = str(active_location.get("place") or "")
-selection_signature = (active_state, active_district, active_location.get("sub_district", ""), active_place)
-if st.session_state.get("location_selection_signature") != selection_signature:
-    st.session_state["last_location_context"] = dict(active_location)
-    st.session_state["location_selection_signature"] = selection_signature
-    st.session_state.pop("pending_weather_location", None)
+sync_chat_location(st.session_state, active_location)
 
 
 with loc_col3:
