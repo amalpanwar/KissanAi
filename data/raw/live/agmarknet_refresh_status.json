@@ -1,8 +1,8 @@
 {
   "status": "success",
-  "message": "Updated Agmarknet CSV, catalog and SQLite through 2026-10-04.",
-  "before_latest": "2026-10-03",
-  "after_latest": "2026-10-04",
+  "message": "Updated Agmarknet CSV, catalog and SQLite through 2026-10-05.",
+  "before_latest": "2026-10-04",
+  "after_latest": "2026-10-05",
   "mode": "auto",
   "lookback_days_requested": 3,
   "attempts": [
@@ -13,12 +13,12 @@
         "status": "success",
         "message": "Saved rows successfully.",
         "mode": "dashboard",
-        "from_date": "2026-10-01",
-        "to_date": "2026-10-04",
-        "started_at": "2026-10-04T06:42:20.337801",
-        "completed_at": "2026-10-04T06:43:22.771592",
-        "rows_saved": 197225,
-        "raw_rows": 1877,
+        "from_date": "2026-10-02",
+        "to_date": "2026-10-05",
+        "started_at": "2026-10-05T06:44:28.918040",
+        "completed_at": "2026-10-05T06:45:37.279814",
+        "rows_saved": 197425,
+        "raw_rows": 1823,
         "failure_count": 0,
         "out": "/home/runner/work/KissanAi/KissanAi/data/raw/live/agmarknet_report.csv",
         "fail_log": "data/raw/live/agmarknet_failures.csv",
@@ -57,6 +57,6 @@
       }
     }
   ],
-  "updated_at": "2026-10-04T12:13:24.855477+05:30",
+  "updated_at": "2026-10-05T12:15:39.434639+05:30",
   "return_code": 0
 }
