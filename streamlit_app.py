@@ -88,6 +88,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+# Public news must render before readiness and authentication can stop the page.
+from app.news_panel import render_news_panel
+with st.sidebar:
+    render_news_panel()
+
 if BRAND_IMAGE.exists():
     st.image(str(BRAND_IMAGE), use_container_width=True)
 
@@ -3384,10 +3389,6 @@ if st.session_state.get("show_local_prices_panel"):
     else:
         st.markdown(f"**{active_district} में फसलों के ताज़ा भाव**")
         st.dataframe(local_prices, use_container_width=True, height=420)
-
-from app.news_panel import render_news_panel
-with st.sidebar:
-    render_news_panel()
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
