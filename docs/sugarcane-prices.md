@@ -9,6 +9,6 @@ Sources verified on 6 October 2026:
 
 The reply includes source links, seasons and the fixed verification date. The 2025–26 UP rate is explicitly historical in 2026–27; the app states that its verified records do not contain the new UP SAP notification. Central FRP is not substituted for UP SAP. Other states do not receive UP rates. Once a stored season expires, its rate is labelled historical rather than today's price.
 
-These reviewed notices do not automatically refresh. Update the module and tests after verifying a new official notification; retain source and season labels. This change does not alter profitability estimates or the legacy non-agentic UI fallback.
+These reviewed notices do not automatically refresh. Update the module and tests after verifying a new official notification; retain source and season labels. This change does not alter profitability estimates. Commodity recognition is now shared with the UI; see `commodity-price-routing.md`.
 
 For other crops, missing mandi names no longer discard valid district price rows. Such rows retain their dates and show that the mandi name is unavailable.
