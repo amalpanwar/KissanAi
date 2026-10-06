@@ -94,6 +94,14 @@ class AdvisorTools:
 
     def prices(self, goal, payload):
         question = payload["question"]
+        normalized = self.advisor._normalize_hinglish(question)
+        crop = self.advisor._extract_crop_from_query(normalized)
+        if crop == "Sugarcane":
+            location = self.location(payload)
+            if location.get("invalid_selection"):
+                return AgentResult("स्थान चयन अब उपलब्ध नहीं है। कृपया गांव/कस्बा फिर चुनें।", "needs_input")
+            from app.sugarcane_prices import sugarcane_price_result
+            return sugarcane_price_result(location)
         msp = self.advisor._answer_msp_query(question)
         if msp:
             return AgentResult(msp, references=["PIB MSP notification"])
@@ -132,7 +140,7 @@ class AdvisorTools:
         if df.empty:
             return AgentResult(f"{district} में इस कमोडिटी का सत्यापित Agmarknet भाव नहीं मिला।", "unavailable")
         keys = [c for c in ["cmdt_name", "market_name"] if c in df.columns]
-        rows = df.sort_values("date").groupby(keys, as_index=False).tail(1).sort_values("date", ascending=False).head(10)
+        rows = df.sort_values("date").groupby(keys, as_index=False, dropna=False).tail(1).sort_values("date", ascending=False).head(10)
         recent = rows[rows["date"].dt.date.map(lambda d: (today - d).days <= 3)]
         stale = recent.empty
         if not recent.empty:
@@ -143,8 +151,10 @@ class AdvisorTools:
             date = row["date"].date().isoformat()
             unit = row.get("unit_name_price")
             unit = str(unit) if pd.notna(unit) else "इकाई उपलब्ध नहीं"
-            lines.append(f"- {row['cmdt_name']} | {row.get('market_name', district)}: {row['price']:,.2f} {unit} | {date}")
-            evidence.append({"commodity": row["cmdt_name"], "market": row.get("market_name", ""), "date": date, "price": float(row["price"]), "unit": unit})
+            market = row.get("market_name")
+            market = str(market).strip() if pd.notna(market) and str(market).strip() else "मंडी का नाम उपलब्ध नहीं (जिला रिकॉर्ड)"
+            lines.append(f"- {row['cmdt_name']} | {market}: {row['price']:,.2f} {unit} | {date}")
+            evidence.append({"commodity": row["cmdt_name"], "market": market, "date": date, "price": float(row["price"]), "unit": unit})
         if stale:
             lines.append("पुराने रिकॉर्ड दिखाए गए हैं; इन्हें आज का भाव न मानें।")
         return AgentResult("\n".join(lines), "stale" if stale else "ok", ["https://agmarknet.gov.in/"], {"records": evidence, "location": location, "market_scope": market_scope})
