@@ -453,7 +453,13 @@ class RAGAdvisor:
     def answer(self, user_query: str) -> dict:
         import os
         from app.hindi_translation import translate_answer
-        if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"}:
+        from app.agriculture_news import NEWS_INTENT
+        context, question = self._split_context_and_question(user_query)
+        if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"} and NEWS_INTENT.search(question):
+            from app.agent_tools import AdvisorTools
+            news = AdvisorTools(self).news("Latest agriculture news", {"question": question, "context": context})
+            result = {"answer": news.answer, "references": news.references, "topic": "news", "agent_status": news.status}
+        elif os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"}:
             result = self._answer_legacy(user_query)
         else:
             from app.agent_system import build_coordinator
