@@ -1,3 +1,4 @@
+import ast
 import tempfile
 import time
 import unittest
@@ -84,6 +85,30 @@ class NewsTests(unittest.TestCase):
         with patch('app.news_panel.get_news', return_value={'status':'unavailable','articles':[],'fetched_at':None}):
             at.run()
             self.assertFalse(at.exception)
+            self.assertTrue(at.sidebar.info)
+
+    def test_public_sidebar_renders_before_startup_or_sign_in_can_stop_page(self):
+        from streamlit.testing.v1 import AppTest
+        source = (Path(__file__).resolve().parents[1] / 'streamlit_app.py').read_text()
+        tree = ast.parse(source)
+        panel = next(node for node in tree.body if isinstance(node, ast.With)
+                     and any(isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+                             and child.func.id == 'render_news_panel' for child in ast.walk(node)))
+        stops = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+                 and node.func.value.id == 'st' and node.func.attr == 'stop']
+        self.assertLess(panel.lineno, min(stops))
+        config = next(node for node in tree.body if isinstance(node, ast.Expr)
+                      and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                      and node.value.func.attr == 'set_page_config')
+        # Execute the actual entrypoint's config and sidebar, then a stopped page.
+        script = ('import streamlit as st\nfrom app.news_panel import render_news_panel\nPAGE_ICON="🌾"\n'
+                  + ast.get_source_segment(source, config) + '\n'
+                  + ast.get_source_segment(source, panel) + '\nst.info("Sign in required")\nst.stop()')
+        with patch('app.news_panel.get_news', return_value={'status':'unavailable','articles':[],'fetched_at':None}):
+            at = AppTest.from_string(script).run()
+            self.assertFalse(at.exception)
+            self.assertEqual(at.sidebar.subheader[0].value, '🌾 कृषि समाचार')
             self.assertTrue(at.sidebar.info)
 
 
