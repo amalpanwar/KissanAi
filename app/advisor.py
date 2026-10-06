@@ -2608,7 +2608,9 @@ class RAGAdvisor:
             "Chickpea": ["चना", "chana", "chickpea", "bengal gram", "bengalgram"],
         }
         for crop_name, aliases in crop_aliases.items():
-            if any(alias.lower() in t for alias in aliases):
+            # Latin crop names must be whole words: "price" is not "rice".
+            if any(re.search(r"(?<![a-z])" + re.escape(alias.lower()) + r"(?![a-z])", t)
+                   if alias.isascii() else alias.lower() in t for alias in aliases):
                 return crop_name
         return None
 

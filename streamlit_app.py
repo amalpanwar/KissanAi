@@ -2118,66 +2118,9 @@ def save_location_correction(place: str, district: str) -> None:
 
 
 def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str | None:
-    if not query or not commodity_list:
-        return None
-    q = query.lower()
-    q_tokens = re.findall(r"[a-z0-9]+", q)
-    q_norm = " ".join(q_tokens)
-    q_hi = query
-    alias_path = Path("data/raw/commodity_aliases.json")
-    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
-    aliases = load_commodity_aliases(mtime_ns)
-
-    best_fuzzy: tuple[float, str] | None = None
-    for eng_name, alias_list in aliases.items():
-        for alias in alias_list:
-            alias_text = str(alias).strip()
-            if not alias_text:
-                continue
-            a_tokens = re.findall(r"[a-z0-9]+", alias_text.lower())
-            matched = False
-            if a_tokens:
-                if len(a_tokens) == 1:
-                    matched = a_tokens[0] in q_tokens
-                    if not matched:
-                        close = difflib.get_close_matches(a_tokens[0], q_tokens, n=1, cutoff=0.84)
-                        if close:
-                            score = difflib.SequenceMatcher(None, a_tokens[0], close[0]).ratio()
-                            if best_fuzzy is None or score > best_fuzzy[0]:
-                                best_fuzzy = (score, eng_name)
-                else:
-                    matched = " ".join(a_tokens) in q_norm
-            else:
-                matched = alias_text in q_hi
-            if matched:
-                for name in commodity_list:
-                    if name.lower() == eng_name.lower():
-                        return name
-                return eng_name.title()
-
-    if best_fuzzy is not None:
-        eng_name = best_fuzzy[1]
-        for name in commodity_list:
-            if name.lower() == eng_name.lower():
-                return name
-        return eng_name.title()
-
-    for name in commodity_list:
-        n_tokens = re.findall(r"[a-z0-9]+", name.lower())
-        if not n_tokens:
-            continue
-        if len(n_tokens) == 1:
-            if n_tokens[0] in q_tokens:
-                return name
-        else:
-            n_norm = " ".join(n_tokens)
-            if n_norm in q_norm:
-                return name
-    qn = _normalize_text(q)
-    for name in commodity_list:
-        if _normalize_text(name) in qn:
-            return name
-    return None
+    from app.commodity_lookup import resolve_commodities
+    matches = resolve_commodities(query, commodity_list)
+    return matches[0] if len(matches) == 1 else None
 
 
 def extract_entities_ner(query: str, districts: list[str], commodities: list[str]) -> tuple[str | None, str | None]:
@@ -2197,19 +2140,8 @@ def extract_entities_ner(query: str, districts: list[str], commodities: list[str
         if matches:
             district = matches[0]
 
-    # Commodity NER: alias map
-    alias_path = Path("data/raw/commodity_aliases.json")
-    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
-    aliases = load_commodity_aliases(mtime_ns)
-    for eng_name, alias_list in aliases.items():
-        for alias in sorted(alias_list, key=len, reverse=True):
-            if alias and alias.lower() in q:
-                for name in commodities:
-                    if name.lower() == eng_name.lower():
-                        commodity = name
-                        return district, commodity
-                commodity = eng_name.title()
-                return district, commodity
+    # Share the agent's token-safe catalog resolver.
+    commodity = resolve_commodity_from_query(query, commodities)
 
     return district, commodity
 
