@@ -1,6 +1,7 @@
 from __future__ import annotations
 from app.location_query import strip_relative_location
 from app.chat_session import sync_chat_location
+from app.agriculture_news import NEWS_INTENT
 
 from app.location_controls import render_place_selector
 from app.location_selection import location_context, place_options, qualified_place, scope_market_rows, market_scope_caption
@@ -85,7 +86,7 @@ st.set_page_config(
     page_title="KisaanAI - Agriculture Assistant",
     page_icon=PAGE_ICON,
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 if BRAND_IMAGE.exists():
     st.image(str(BRAND_IMAGE), use_container_width=True)
@@ -94,10 +95,6 @@ st.title("KisaanAI - Agriculture Assistant")
 st.markdown(
     """
     <style>
-    [data-testid="stSidebar"],
-    [data-testid="collapsedControl"] {
-        display: none;
-    }
     .block-container {
         padding-top: 1.1rem;
         padding-bottom: 2rem;
@@ -3388,6 +3385,10 @@ if st.session_state.get("show_local_prices_panel"):
         st.markdown(f"**{active_district} में फसलों के ताज़ा भाव**")
         st.dataframe(local_prices, use_container_width=True, height=420)
 
+from app.news_panel import render_news_panel
+with st.sidebar:
+    render_news_panel()
+
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_structured_topic" not in st.session_state:
@@ -3495,7 +3496,7 @@ if user_query:
             # only when it plausibly looks like a location reply. Otherwise continue with
             # normal routing so agri follow-up questions are not hijacked into weather.
             pending_weather_request = st.session_state.pop("pending_weather_location", None)
-            if pending_weather_request:
+            if pending_weather_request and not NEWS_INTENT.search(user_query):
                 place_guess = extract_place_from_query(user_query)
                 looks_like_location_reply = bool(
                     place_guess
@@ -3578,7 +3579,7 @@ if user_query:
             location_scope_result: dict[str, object] = {"status": "none"}
             scope_state = active_state if "active_state" in locals() else session_state_hint
             scope_district = active_district if "active_district" in locals() else session_district_hint
-            if not crop_guide_followup_detected and not crop_protection_followup:
+            if not NEWS_INTENT.search(user_query) and not crop_guide_followup_detected and not crop_protection_followup:
                 location_scope_result = _resolve_query_location_with_selection(
                     user_query,
                     selected_state=scope_state,
@@ -3750,7 +3751,7 @@ if user_query:
                     selected_state = fallback_state_for_price
 
             agentic_enabled = os.getenv("KISAANAI_AGENTIC", "1").lower() not in {"0", "false", "no"}
-            if agentic_enabled:
+            if agentic_enabled or NEWS_INTENT.search(user_query):
                 # Every query, including prices and mixed intents, uses the coordinator.
                 intent_price = False
 
@@ -4134,6 +4135,7 @@ if user_query:
                 direct_crop_protection_followup = None
                 if (
                     not agentic_enabled
+                    and not NEWS_INTENT.search(user_query)
                     and (
                         crop_guide_followup_detected
                         or _looks_like_crop_water_followup(user_query, advisor)
@@ -4156,6 +4158,7 @@ if user_query:
                         }
                 if (
                     not agentic_enabled
+                    and not NEWS_INTENT.search(user_query)
                     and direct_crop_followup is None
                     and can_use_pesticide_followup_context
                     and not advisor._is_weather_intent(normalized_user_query)
@@ -4198,6 +4201,7 @@ if user_query:
                             }
                 if (
                     not agentic_enabled
+                    and not NEWS_INTENT.search(user_query)
                     and str(result.get("topic") or "").strip().lower() == "weather"
                     and (crop_guide_followup_detected or _looks_like_crop_water_followup(user_query, advisor))
                     and advisor._has_agri_intent(normalized_user_query)
@@ -4217,6 +4221,7 @@ if user_query:
                         }
                 if (
                     not agentic_enabled
+                    and not NEWS_INTENT.search(user_query)
                     and str(result.get("topic") or "").strip().lower() == "weather"
                     and can_use_pesticide_followup_context
                     and not advisor._is_weather_intent(normalized_user_query)

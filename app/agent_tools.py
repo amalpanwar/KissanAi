@@ -157,6 +157,18 @@ class AdvisorTools:
         refs = result.get("references", [])
         return AgentResult(result["answer"], "ok" if refs else "needs_input", refs)
 
+    def news(self, goal, payload):
+        from app.agriculture_news import get_news, relevant_articles, format_news
+        related = bool(payload.get("related_only"))
+        # The sidebar refreshes the shared feed. Optional related news must never
+        # delay an existing crop guide or make a model-less answer depend on HTTP.
+        snapshot = get_news(cache_only=related)
+        articles = relevant_articles(snapshot["articles"], payload["question"], related_only=related)
+        return AgentResult(format_news(snapshot, articles, related_only=related), snapshot["status"],
+                           [item["url"] for item in articles],
+                           {"articles": articles, "fetched_at": snapshot["fetched_at"], "status": snapshot["status"]},
+                           {"topic": "news"})
+
     def agronomy(self, goal, payload):
         text = f"{payload['context']} किसान का प्रश्न: {payload['question']}" if payload.get("context") else payload["question"]
         result = self.advisor._answer_legacy(text)

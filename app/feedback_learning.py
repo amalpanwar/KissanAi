@@ -9,7 +9,7 @@ from app.feedback import guardrail_flags
 
 # Historical values are unsuitable as timeless model training targets.
 DYNAMIC_TOPICS = {"weather", "weather_impact", "price", "market_price", "crop_profitability",
-                  "crop_profitability_followup", "crop_choice", "mixed"}
+                  "crop_profitability_followup", "crop_choice", "mixed", "news"}
 
 
 def build_feedback_dataset(db_path):

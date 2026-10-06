@@ -107,6 +107,18 @@ class PesticideAgent:
         return result
 
 
+class AgronomyAgent(ToolAgent):
+    def run(self, goal, payload, bus):
+        result = super().run(goal, payload, bus)
+        if result.status == "ok" and "news" in bus.agents:
+            news = bus.ask("agronomy", "news", "Find recent related crop news", dict(payload, related_only=True))
+            if news.evidence.get("articles"):
+                result.answer += "\n\n" + news.answer
+                result.references = list(dict.fromkeys(result.references + news.references))
+                result.evidence["news"] = news.evidence
+        return result
+
+
 class Coordinator:
     def __init__(self, agents: dict, planner: Callable | None = None):
         self.agents = agents
@@ -114,6 +126,9 @@ class Coordinator:
 
     @staticmethod
     def domains(question: str) -> list[str]:
+        from app.agriculture_news import NEWS_INTENT
+        if NEWS_INTENT.search(question):
+            return ["news"]
         patterns = {
             "weather": r"\b(weather|mausam|mosam|rain|barish|temperature)\b|मौसम|बारिश|तापमान|वर्षा",
             "prices": r"\b(price|prices|rate|mandi|bhav|bhaav|daam|msp)\b|भाव|कीमत|दाम|मंडी|समर्थन मूल्य",
@@ -137,14 +152,14 @@ class Coordinator:
             try:
                 raw = self.planner(
                     'Return only JSON {"agents": [names]}. Select specialists needed for this farmer question. '
-                    'Allowed names: weather, prices, pesticides, agronomy. '
+                    'Allowed names: weather, prices, pesticides, agronomy, news. '
                     'Use agronomy for crop planning or general agriculture. Do not answer the question.\n'
                     + json.dumps({"question": question}, ensure_ascii=False)
                 )
                 proposed = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())["agents"]
-                if not isinstance(proposed, list) or not proposed or len(proposed) > 4:
+                if not isinstance(proposed, list) or not proposed or len(proposed) > 5:
                     raise ValueError("Invalid plan")
-                if any(not isinstance(n, str) or n not in {"weather", "prices", "pesticides", "agronomy"} for n in proposed):
+                if any(not isinstance(n, str) or n not in {"weather", "prices", "pesticides", "agronomy", "news"} for n in proposed):
                     raise ValueError("Unknown specialist")
                 selected, source = list(dict.fromkeys(required + proposed)), "model"
             except Exception:
@@ -171,7 +186,7 @@ class Coordinator:
         statuses = [r.status for _, r in results]
         status = "ok" if all(s == "ok" for s in statuses) else "partial" if "ok" in statuses else statuses[0]
         metadata = results[0][1].metadata if len(results) == 1 else {}
-        topic = {"prices": "price", "pesticides": "pesticide", "weather": "weather", "agronomy": "rag"}.get(names[0]) if len(names) == 1 else "multi_agent"
+        topic = {"prices": "price", "pesticides": "pesticide", "weather": "weather", "agronomy": "rag", "news": "news"}.get(names[0]) if len(names) == 1 else "multi_agent"
         return {"answer": text, "references": refs, "retrieved": [], "topic": topic,
                 **metadata, "agent_status": status,
                 "agent_trace": {"goal": goal, "plan": names, "planner": source,
@@ -195,4 +210,5 @@ def build_coordinator(advisor):
                         "market_data": ToolAgent(handlers.refresh_market),
                         "prices": PriceAgent(handlers.prices),
                         "pesticides": PesticideAgent(handlers.pesticides),
-                        "agronomy": ToolAgent(handlers.agronomy)}, planner=plan_with_model)
+                        "agronomy": AgronomyAgent(handlers.agronomy),
+                        "news": ToolAgent(handlers.news)}, planner=plan_with_model)
