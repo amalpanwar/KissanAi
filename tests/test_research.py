@@ -58,20 +58,30 @@ class ResearchTests(unittest.TestCase):
         result=self.run_question({'status':'unavailable','provider':'none','results':[],'reason':'search_not_configured'})
         self.assertIn('वेब खोज उपलब्ध नहीं',result['answer'])
 
-    def test_related_evidence_requires_explicit_confirmation(self):
-        self.docs('Soil organic matter improves structure.')
-        result=self.run_question({'status':'ok','provider':'tavily','results':[]})
-        self.assertEqual(result['agent_status'],'needs_input')
-        self.assertNotIn('improves structure',result['answer'])
-        advisor=SimpleNamespace(_split_context_and_question=lambda q:('',q),answer=MagicMock(return_value=result))
-        state={}
-        answer_with_research_followup(advisor,'mitti ki jaanch kaise kare?',state)
-        accepted=answer_with_research_followup(advisor,'हाँ',state)
-        self.assertIn('improves structure',accepted['answer'])
-        self.assertNotIn('pending_research_offer',state)
-        self.assertEqual(advisor.answer.call_count,1)
-        state={'pending_research_offer':result['research_offer']}
-        advisor.answer.return_value={'answer':'new question'}
+    def test_weak_matches_fall_back_without_switching_topics(self):
+        self.docs('Soil application of insecticide controls pests. Approved bio pesticide formulations.')
+        for question in ['mitti ki urvarta k bare me jankari de', 'mitti ki jaanch kaise karvaye?']:
+            result=self.run_question({'status':'ok','provider':'tavily','results':[]},question)
+            self.assertEqual(result['agent_status'],'unavailable')
+            self.assertFalse(result['references'])
+            self.assertNotIn('research_offer',result)
+            self.assertNotIn('soil-guide.pdf',result['answer'])
+
+    def test_fertility_hinglish_and_hindi_search_same_concepts(self):
+        from app.research import search_question, rank
+        for question in ['mitti ki urvarta k bare me jankari de', 'मिट्टी की उर्वरता के बारे में जानकारी दें']:
+            self.docs('Soil fertility depends on organic matter and nutrient availability.')
+            result=self.run_question({'status':'ok','provider':'tavily','results':[]},question)
+            self.assertEqual(result['agent_status'],'ok')
+            self.assertIn('organic matter',result['answer'])
+        self.assertEqual(search_question('mitti ki jaanch kaise karvaye?'),'soil test')
+        self.assertEqual(search_question('mitti ki urvarta k bare me jankari de'),'soil fertility')
+        self.assertEqual(rank('soil fertility',[{'source_file':'soil fertility.pdf',
+            'text':'Soil application of pesticide. Fertility is discussed elsewhere.'}]),[])
+
+    def test_new_question_discards_previous_offer(self):
+        advisor=SimpleNamespace(_split_context_and_question=lambda q:('',q),answer=MagicMock(return_value={'answer':'new question'}))
+        state={'pending_research_offer':{'records':[]}}
         self.assertEqual(answer_with_research_followup(advisor,'another topic',state)['answer'],'new question')
         self.assertNotIn('pending_research_offer',state)
 

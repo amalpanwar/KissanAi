@@ -1,6 +1,6 @@
 """Bounded document and web evidence lookup without downloading an LLM.
 
-Relevance is a conservative lexical heuristic, not proof that a snippet answers
+Relevance uses bilingual concept coverage, not proof that a snippet answers
 all parts of a question. Output is labelled excerpts, never invented synthesis.
 """
 from __future__ import annotations
@@ -14,8 +14,11 @@ from app.agent_system import AgentResult
 from app.commodity_lookup import normalize, resolve_commodities
 
 STOP = set('how what is are the a an to of for in and or please tell me can do i my ka ki ke ko mein me hai hain kare karen kaise kese kya batao bataye btaye mujhe करें करे कैसे क्या की का के में है हैं मुझे बताएं'.split())
+STOP.update('k दें karvaye karwaye karvana karwana karaye bare baare barey jankari jaankari de den दीजिए जानकारी बारे करवाएं करवाये करवाएँ कराएं बताइए give information about explain describe'.split())
 GROUPS = {
     'soil': 'soil mitti matti मृदा मिट्टी',
+    'fertility': 'fertility fertile urvarta urvarata उर्वरता उपजाऊपन उपजाऊ',
+    'organic': 'organic जैविक कार्बनिक',
     'test': 'test tests testing check checking जांच जाँच jaanch janch parikshan परीक्षण',
     'sample': 'sample samples sampling नमूना नमूने नमूना लेना',
     'fertilizer': 'fertilizer fertiliser fertilizers खाद उर्वरक',
@@ -32,7 +35,7 @@ def terms(text):
 
 def search_question(question):
     words = normalize(question).split()
-    normalized = ' '.join(SYNONYMS.get(word, word) for word in words)
+    normalized = ' '.join(SYNONYMS.get(word, word) for word in words if word not in STOP)
     crops = resolve_commodities(question)
     return normalized + (' ' + ' '.join(crops) if crops else '')
 
@@ -49,13 +52,20 @@ def rank(question, records, query_terms=None):
         seen.add((source,text))
         # Source filenames alone cannot make an unrelated paragraph relevant.
         overlap = query & terms(text)
-        if not overlap:
+        # Require the question's concepts together, not a single common word
+        # such as soil in a pesticide registration table.
+        if len(query) < 2 or len(overlap) / len(query) < 0.75:
             continue
         parts = re.split(r"(?<=[.!?।])\s+|\n+", text)
         parts = sorted(parts, key=lambda part: len(query & terms(part)), reverse=True)
-        relevant = [part.strip() for part in parts if query & terms(part)][:3]
+        relevant = [part.strip() for part in parts
+                    if len(query & terms(part)) / len(query) >= 0.75][:3]
+        if not relevant:
+            continue
         snippet = " ".join(relevant)[:1800]
         item = dict(row, text=snippet, coverage=len(query & terms(snippet))/max(1,len(query)))
+        if any(r['source_file'] == source for r in ranked):
+            continue
         ranked.append(item)
     return sorted(ranked,key=lambda row:row['coverage'],reverse=True)[:5]
 
@@ -94,7 +104,9 @@ def web(payload):
         if url.scheme=='https' and not url.username and any(host==d or host.endswith('.'+d) for d in DOMAINS):
             records.append({'text':hit.snippet[:1800],'source_file':hit.link,'title':hit.title})
     return AgentResult('',response['status'], evidence={'records':rank(payload['question'],records),
-                       'provider':response['provider'],'reason':response.get('reason','')})
+                       'provider':response['provider'],'reason':response.get('reason',''),
+                       'query':search_question(payload['question']), 'results_received':len(response['results']),
+                       'relevant_results':len(rank(payload['question'],records))})
 
 
 def excerpt(row):
@@ -109,7 +121,7 @@ def excerpt(row):
 def evidence_answer(rows, heading):
     parts=[heading]
     for i,row in enumerate(rows[:3],1):
-        parts += [f"{i}. स्रोत: {row['source_file']}", '> '+excerpt(row)]
+        parts += [f"{i}. {excerpt(row)}"]
     return '\n\n'.join(parts)
 
 
@@ -120,22 +132,19 @@ class ResearchAgent:
         rows=rank(payload['question'],local.evidence.get('records',[])+remote.evidence.get('records',[]))
         direct=[r for r in rows if r['coverage']>=0.75 and len(terms(search_question(payload['question'])))>=2]
         checks={'documents':local.status,'web_search':remote.status,'web_provider':remote.evidence.get('provider'),
-                'web_reason':remote.evidence.get('reason'),'document_reason':local.evidence.get('reason')}
+                'web_reason':remote.evidence.get('reason'),'document_reason':local.evidence.get('reason'),
+                'web_query':remote.evidence.get('query'),
+                'web_results_received':remote.evidence.get('results_received',0),
+                'web_relevant_results':remote.evidence.get('relevant_results',0),
+                'document_relevant_results':len(local.evidence.get('records',[]))}
         limitations=[]
         if local.status!='ok': limitations.append('साझा दस्तावेज़ों की खोज पूरी नहीं हो सकी।')
         if remote.status!='ok': limitations.append('वेब खोज उपलब्ध नहीं हुई; उसकी पुष्टि नहीं हो सकी।')
         if direct:
-            answer=evidence_answer(direct,'आपके विषय से मेल खाते स्रोतों में यह जानकारी मिली। नीचे स्रोत-अंश हैं; इन्हें पूर्ण या व्यक्तिगत सलाह न मानें:')
+            answer=evidence_answer(direct,'आपके सवाल से मेल खाते स्रोतों के अनुसार:\n\nनीचे उपलब्ध जानकारी के अंश हैं; इन्हें पूरे उत्तर या व्यक्तिगत सलाह के रूप में सत्यापित नहीं किया गया है:')
             if limitations: answer+='\n\n'+' '.join(limitations)
             return AgentResult(answer,'partial' if limitations else 'ok',[r['source_file'] for r in direct[:3]],
                                {'checks':checks}, {'topic':'research'})
-        if rows:
-            titles='\n'.join('- '+str(r.get('title') or Path(r['source_file']).name) for r in rows[:3])
-            answer=('आपके सवाल का सीधा, पर्याप्त उत्तर नहीं मिला। इससे संबंधित इन स्रोतों में कुछ जानकारी मिली है:\n'
-                    +titles+'\n\nक्या आप यह संबंधित जानकारी देखना चाहेंगे? “हाँ” लिखें, या सवाल और स्पष्ट करें।')
-            if limitations: answer+='\n\n'+' '.join(limitations)
-            return AgentResult(answer,'needs_input',[r['source_file'] for r in rows[:3]],{'checks':checks},
-                               {'topic':'research_related','research_offer':{'question':payload['question'],'records':rows[:3]}})
         answer='इस सवाल का उत्तर देने के लिए पर्याप्त संबंधित जानकारी नहीं मिली। कृपया विषय/फसल स्पष्ट करें या संबंधित दस्तावेज़ साझा करें।'
         if limitations: answer+='\n\n'+' '.join(limitations)
         return AgentResult(answer,'unavailable',evidence={'checks':checks},metadata={'topic':'research'})
