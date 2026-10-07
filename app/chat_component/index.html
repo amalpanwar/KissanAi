@@ -28,6 +28,12 @@
     <textarea id="question" role="combobox" aria-autocomplete="list" aria-controls="suggestions" aria-expanded="false" aria-describedby="help" placeholder="अपना सवाल लिखें..." rows="1" maxlength="4000"></textarea>
     <button id="send" type="submit" aria-label="सवाल भेजें" title="सवाल भेजें" disabled>↑</button>
   </form>
+  <div style="font-size:13px;margin-top:6px">
+    <label><input type="checkbox" id="translate" checked> हिंदी में सवाल तैयार करें (Sarvam)</label>
+    <p id="translation-status" role="status" aria-live="polite"></p>
+    <textarea id="hindi-preview" aria-label="हिंदी सवाल — संपादन करें" hidden maxlength="4000"></textarea>
+    <small>अंग्रेज़ी/Hinglish लिखने पर थोड़े विराम के बाद Sarvam से हिंदी मसौदा बनेगा। भेजने से पहले जाँचें या बदलें।</small>
+  </div>
   <span id="help" class="sr-only">टाइप करते समय सवालों के सुझाव मिलेंगे। ऊपर और नीचे तीर से सुझाव चुनें। Enter से भेजें; Shift और Enter से नई पंक्ति लिखें।</span>
   <span id="status" class="sr-only" role="status" aria-live="polite"></span>
   <script src="composer.js"></script>

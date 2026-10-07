@@ -5,6 +5,24 @@
   const send = document.getElementById('send');
   const status = document.getElementById('status');
   let suggestions = [], visible = [], active = -1, focused = false, dismissed = false;
+  const translate = document.getElementById('translate');
+  const preview = document.getElementById('hindi-preview');
+  const translationStatus = document.getElementById('translation-status');
+  let draftTimer, draftId = '', previewOriginal = '', previewReady = false, appliedPreview = '';
+  function draft() {
+    clearTimeout(draftTimer);
+    draftId = ''; previewReady = false; previewOriginal = ''; preview.hidden = true;
+    translationStatus.textContent = '';
+    if (!translate.checked || !/[a-z]/i.test(input.value)) { resize(); return; }
+    translationStatus.textContent = 'हिंदी मसौदा तैयार हो रहा है…';
+    draftTimer = setTimeout(() => {
+      draftId = `${sessionId}-draft-${++sequence}`;
+      post('streamlit:setComponentValue', {value:{kind:'draft',text:input.value.trim(),id:draftId},dataType:'json'});
+    }, 900);
+    resize();
+  }
+  translate.addEventListener('change', draft);
+  preview.addEventListener('input', resize);
   let previousHeight = 0, sequence = 0;
   const sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2);
   const post = (type, rest = {}) => window.parent.postMessage({ isStreamlitMessage: true, type, ...rest }, '*');
@@ -69,12 +87,21 @@
     dismissed = true;
     input.focus();
     refresh();
+    draft();
   }
 
   function submit(event) {
     event.preventDefault();
-    const text = input.value.trim();
+    const original = input.value.trim();
+    if (!original) return;
+    if (translate.checked && /[a-z]/i.test(original) && !previewReady) {
+      translationStatus.textContent = 'हिंदी मसौदे की प्रतीक्षा करें, या मूल सवाल भेजने के लिए हिंदी विकल्प बंद करें।';
+      resize(); return;
+    }
+    const text = translate.checked && previewReady && previewOriginal === original && !preview.hidden ? preview.value.trim() : original;
     if (!text) return;
+    clearTimeout(draftTimer); draftId = ''; previewReady = false; preview.hidden = true;
+    translationStatus.textContent = '';
     post('streamlit:setComponentValue', { value: { text, id: `${sessionId}-${++sequence}` }, dataType: 'json' });
     input.value = '';
     dismissed = true;
@@ -83,7 +110,7 @@
 
   input.addEventListener('focus', () => { focused = true; dismissed = false; refresh(); });
   input.addEventListener('blur', () => { focused = false; refresh(); });
-  input.addEventListener('input', () => { dismissed = false; refresh(); });
+  input.addEventListener('input', () => { dismissed = false; refresh(); draft(); });
   input.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229) return;
     if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && visible.length) {
@@ -102,6 +129,16 @@
   document.getElementById('chat-form').addEventListener('submit', submit);
   window.addEventListener('message', event => {
     if (event.source !== window.parent || event.data?.type !== 'streamlit:render') return;
+    const translated = event.data.args?.preview;
+    if (draftId && translated?.id === draftId && appliedPreview !== draftId && translated.original === input.value.trim()) {
+      appliedPreview = draftId;
+      previewOriginal = translated.original; previewReady = true;
+      preview.hidden = !['ok', 'unchanged'].includes(translated.status);
+      preview.value = translated.text || '';
+      translationStatus.textContent = preview.hidden
+        ? 'हिंदी अनुवाद उपलब्ध नहीं है। मूल सवाल भेज सकते हैं।'
+        : 'भेजा जाने वाला हिंदी सवाल — नीचे सुधार सकते हैं:';
+    }
     const next = (event.data.args?.suggestions || []).filter(item => typeof item.question === 'string' && typeof item.keywords === 'string');
     const changed = JSON.stringify(next) !== JSON.stringify(suggestions);
     suggestions = next;

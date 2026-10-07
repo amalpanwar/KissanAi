@@ -110,6 +110,11 @@ class PesticideAgent:
 class AgronomyAgent(ToolAgent):
     def run(self, goal, payload, bus):
         result = super().run(goal, payload, bus)
+        if result.metadata.get("research_question"):
+            crop = result.metadata.get("crop")
+            result = bus.ask("agronomy", "research", "Find evidence for the crop follow-up",
+                             dict(payload, question=result.metadata["research_question"]))
+            result.metadata.update({"topic": "crop_guide_followup", "crop": crop})
         if result.status == "ok" and "news" in bus.agents:
             news = bus.ask("agronomy", "news", "Find recent related crop news", dict(payload, related_only=True))
             if news.evidence.get("articles"):
@@ -139,7 +144,11 @@ class Coordinator:
             r"\b(profit(?:able|ability)?|la?bhdayak|laabhdayak|munafa)\b|लाभ|मुनाफा|लाभदायक",
             question, re.I,
         )
-        if profitability or (not selected and re.search(
+        crop_detail = re.search(
+            r"\b(variety|varieties|kism|kisam|fertilizer|irrigation|sinchai|harvest|katai)\b|किस्म|प्रजाति|बीज दर|खाद|उर्वरक|सिंचाई|कटाई|रोपाई|बुवाई",
+            question, re.I,
+        )
+        if profitability or (not selected and crop_detail) or (not selected and re.search(
                 r"\b(kheti|cultivation)\b|खेती|how to (grow|cultivate)", question, re.I)):
             selected.append("agronomy")
         return selected
