@@ -1,5 +1,7 @@
 [server]
 headless = true
+# Retain an existing session through brief WebSocket disconnects (seconds).
+disconnectedSessionTTL = 600
 port = 8501
 enableCORS = false
 enableXsrfProtection = false

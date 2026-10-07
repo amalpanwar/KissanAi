@@ -1,6 +1,7 @@
 from __future__ import annotations
 from app.location_query import strip_relative_location
 from app.chat_session import sync_chat_location
+from app.research import answer_with_research_followup
 from app.agriculture_news import NEWS_INTENT
 
 from app.location_controls import render_place_selector
@@ -560,15 +561,9 @@ def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | Non
 
 def check_ready() -> tuple[bool, str]:
     db_exists = os.path.exists(cfg.paths["sqlite_db"])
-    idx_exists = os.path.exists(cfg.paths["vector_store"])
-    md_exists = os.path.exists(cfg.paths["metadata_store"])
-
     if not db_exists:
         return False, f"Missing SQLite DB: {cfg.paths['sqlite_db']}"
-    if not idx_exists:
-        return False, f"Missing vector index: {cfg.paths['vector_store']}"
-    if not md_exists:
-        return False, f"Missing metadata store: {cfg.paths['metadata_store']}"
+    # Missing document/vector files must not block the web research fallback.
     return True, "System ready"
 
 
@@ -1425,114 +1420,11 @@ def _match_place_from_lookup(
 
 
 def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> str | None:
-    # Prefer a direct lookup match from the known location table before falling
-    # back to token filtering. This keeps place parsing stable even when the
-    # query contains extra words like commodity names or question words.
-    q = strip_relative_location(query)
-    if not q:
-        return None
-
-    stop = {
-        "like", "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
-        "and", "or", "also", "please", "tell", "my", "for", "in", "at", "of", "to", "a", "an", "on", "with", "और", "होगा", "the", "is", "are", "will", "it", "be", "how", "today", "tomorrow", "tonight", "forecast", "next", "week", "day", "days", "rain", "rainfall", "temperature", "kal", "parso", "आज", "कल", "बारिश", "तापमान", "रहेगा", "कैसा", "है",
-        "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
-        "me", "mein", "में", "kesa", "kaisa", "hai", "h",
-        "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
-        "lagta", "lagti", "lagte", "lata", "leti", "chahiye",
-        "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam",
-        "भाव", "कीमत", "मंडी", "मौसम", "mausam", "mosam", "weather",
-        "btaye", "bataye", "bataiye", "btao", "batao", "boliye", "bolo",
-        "do", "de", "dijiye", "dijie", "batayiye", "btaiye", "liye", "liyee",
-        "बताएं", "बताये", "बताइए", "बताओ", "दीजिए", "दो",
-    }
-    alias_path = Path("data/raw/commodity_aliases.json")
-    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
-    aliases = load_commodity_aliases(mtime_ns)
-    commodity_tokens = set()
-    for alias_list in aliases.values():
-        for alias in alias_list:
-            for t in re.findall(r"[a-z0-9]+", alias.lower()):
-                commodity_tokens.add(t)
-
+    from app.location_query import explicit_named_place
     if lookup is None:
         lookup_path = Path("data/processed/location_lookup.csv")
-        lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
-        lookup = load_location_lookup(lookup_mtime)
-    q_norm = _normalize_text(q)
-    q_tokens = re.findall(r"[a-z0-9]+", q.lower())
-    if q_norm and not lookup.empty:
-        candidates: list[tuple[int, int, str]] = []
-        for col in ["place", "sub_district", "district"]:
-            if col not in lookup.columns:
-                continue
-            for raw in lookup[col].dropna().astype(str).unique().tolist():
-                raw = raw.strip()
-                if not raw or raw.lower() == "nan":
-                    continue
-                raw_tokens = re.findall(r"[a-z0-9]+", raw.lower())
-                if not raw_tokens:
-                    continue
-                matched = False
-                token_hits = 0
-                if len(raw_tokens) == 1:
-                    token = raw_tokens[0]
-                    if len(token) >= 3 and token in q_tokens and token not in stop and token not in commodity_tokens:
-                        matched = True
-                        token_hits = 1
-                else:
-                    joined = " ".join(raw_tokens)
-                    q_joined = " ".join(q_tokens)
-                    if joined in q_joined:
-                        useful = [t for t in raw_tokens if t not in stop and t not in commodity_tokens]
-                        if useful:
-                            matched = True
-                            token_hits = len(useful)
-                    else:
-                        hits = [
-                            t for t in raw_tokens
-                            if len(t) >= 3 and t in q_tokens and t not in stop and t not in commodity_tokens
-                        ]
-                        if hits:
-                            matched = True
-                            token_hits = len(hits)
-                if matched:
-                    candidates.append((token_hits, len("".join(raw_tokens)), raw))
-        if candidates:
-            candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-            return candidates[0][2]
-
-    lookup_match = _match_place_from_lookup(q, lookup, stop, commodity_tokens)
-    if lookup_match:
-        return lookup_match
-
-    tokens = [t.strip(" ?!.,") for t in q.split() if t.strip()]
-    if not tokens:
-        return None
-
-    filtered = []
-    for tok in tokens:
-        t = re.sub(r"[^a-zA-Z0-9ऀ-ॿ]+", "", tok).lower()
-        if not t or t in stop or t in commodity_tokens:
-            continue
-        filtered.append(tok)
-
-    while filtered:
-        last = re.sub(r"[^a-zA-Z0-9ऀ-ॿ]+", "", filtered[-1]).lower()
-        if not last or last in stop or last in commodity_tokens or len(re.sub(r"[^a-z0-9]+", "", last)) <= 1:
-            filtered.pop()
-        else:
-            break
-    if not filtered:
-        return None
-    candidate = " ".join(filtered)
-    if not lookup.empty:
-        matched_candidate = _match_place_from_lookup(candidate, lookup, stop, commodity_tokens)
-        if matched_candidate:
-            return matched_candidate
-        district_guess, state_guess = _lookup_district_from_location(candidate, lookup)
-        if district_guess or state_guess:
-            return candidate
-    return None
+        lookup = load_location_lookup(lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0)
+    return explicit_named_place(query, lookup)
 
 
 
@@ -1836,7 +1728,7 @@ def _resolve_query_location_with_selection(
         }
 
     hint = _extract_location_search_hint(query)
-    if hint:
+    if hint and strict_on_hint:
         suggestions = _suggest_locations_within_scope(hint, scoped_lookup)
         if suggestions or strict_on_hint:
             return {
@@ -4109,7 +4001,7 @@ if user_query:
                         }
                 if agentic_enabled:
                     with st.spinner("Checking sources and coordinating specialists..."):
-                        result = advisor.answer(composed_query)
+                        result = answer_with_research_followup(advisor, composed_query, st.session_state)
                 elif direct_crop_followup is not None:
                     result = direct_crop_followup
                 elif direct_crop_protection_followup is not None:
@@ -4117,7 +4009,7 @@ if user_query:
                 else:
                     with st.spinner("Generating recommendation..."):
                         try:
-                            result = advisor.answer(composed_query)
+                            result = answer_with_research_followup(advisor, composed_query, st.session_state)
                         except Exception as exc:
                             import traceback as _traceback
 

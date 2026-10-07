@@ -10,7 +10,7 @@ def sync_chat_location(state, location):
     if changed:
         state['chat_history'] = []
         for key in ('last_structured_topic', 'last_structured_context', 'pending_weather_location',
-                    'pending_chat_items', 'pending_selection', 'need_location_correction',
+                    'pending_research_offer', 'pending_chat_items', 'pending_selection', 'need_location_correction',
                     'auto_chart', 'auto_forecast_table', 'auto_forecast_caption', 'auto_market_meta',
                     'fc_commodity_override', 'last_chat_submission', 'corr_place', 'corr_district'):
             state.pop(key, None)
