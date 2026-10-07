@@ -3238,16 +3238,10 @@ except Exception as exc:
         st.exception(exc)
     st.stop()
 
+from app.chat_response import render_response_footer
+
 for item in st.session_state.chat_history:
     with st.chat_message(item["role"]):
-        if item["role"] == "assistant" and item.get("type") != "market_panel":
-            from app.translation_status import render_translation_status
-            render_translation_status(st, item.get("translation"))
-        if item.get("agent_trace"):
-            with st.expander("Plan and agent activity"):
-                st.write(item["agent_trace"]["goal"])
-                st.write(" → ".join(item["agent_trace"]["plan"]))
-                st.json(item["agent_trace"]["decisions"])
         if item.get("type") == "market_panel":
             render_market_panel(
                 meta=item.get("market_meta") or {},
@@ -3256,18 +3250,10 @@ for item in st.session_state.chat_history:
             )
         elif item.get("role") == "assistant" and str(item.get("topic") or "").strip().lower() == "weather":
             render_weather_chat_card(item["text"], action=item.get("weather_action"))
-            refs = item.get("references", [])
-            if refs:
-                with st.expander("Sources Used"):
-                    for src in refs:
-                        st.write(f"- {src}")
         else:
             st.write(item["text"])
-            refs = item.get("references", [])
-            if refs:
-                with st.expander("Sources Used"):
-                    for src in refs:
-                        st.write(f"- {src}")
+        if item["role"] == "assistant" and item.get("type") != "market_panel":
+            render_response_footer(st, item)
         render_feedback_widget(item, advisor)
 
 from app.chat_controls import render_chat_composer
@@ -4123,17 +4109,7 @@ if user_query:
                 else:
                     st.write(final_answer)
                 if not intent_price:
-                    from app.translation_status import render_translation_status
-                    render_translation_status(st, result.get("translation"))
-                    if result.get("agent_trace"):
-                        with st.expander("Plan and agent activity"):
-                            trace = result["agent_trace"]
-                            st.write(trace["goal"])
-                            st.write(" → ".join(trace["plan"]))
-                            st.json(trace["decisions"])
-                    with st.expander("Sources Used"):
-                        for src in result.get("references", []):
-                            st.write(f"- {src}")
+                    render_response_footer(st, st.session_state.chat_history[-1])
                     render_feedback_widget(st.session_state.chat_history[-1], advisor)
 
             # Correction form only when auto-mapping failed
@@ -4185,3 +4161,4 @@ if user_query:
                     st.exception(exc)
 
 _flush_pending_auth_cookie_write()
+
