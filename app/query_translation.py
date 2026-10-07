@@ -2,6 +2,7 @@
 import json
 import re
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 from app.hindi_translation import ENDPOINT, _setting, _token, TOKEN
 
 
@@ -25,18 +26,29 @@ def translate_query(text, names=()):
         return {'status':'too_long', 'text':text}
     request = Request(ENDPOINT,data=json.dumps({
         'input':masked, 'source_language_code':'auto', 'target_language_code':'hi-IN',
-        'model':'mayura:v1', 'mode':'formal', 'output_script':'native',
+        'model':'mayura:v1', 'mode':'formal', 'output_script':'fully-native',
         'numerals_format':'international',
     }).encode(),headers={'Content-Type':'application/json','api-subscription-key':key},method='POST')
     try:
         with urlopen(request,timeout=8) as response:
             output=json.loads(response.read().decode()).get('translated_text')
         if not isinstance(output,str) or not re.search('[\u0900-\u097f]',output):
-            raise ValueError('No Hindi output')
+            return {'status':'invalid_output','text':text}
         if TOKEN.findall(output) != TOKEN.findall(masked):
-            raise ValueError('Protected values changed')
+            return {'status':'protected_values_changed','text':text}
         for i,value in enumerate(protected):
             output=output.replace(_token(i),value)
         return {'status':'ok','text':output.strip()}
+    except HTTPError as exc:
+        # Never return upstream bodies, request headers or credentials to the UI.
+        status = {400:'invalid_request', 401:'authentication_failed', 403:'authentication_failed',
+                  422:'invalid_request', 429:'rate_limited'}.get(exc.code, 'service_error')
+        return {'status':status, 'text':text}
+    except TimeoutError:
+        return {'status':'timeout', 'text':text}
+    except URLError as exc:
+        return {'status':'timeout' if isinstance(exc.reason, TimeoutError) else 'network_error', 'text':text}
+    except (ValueError, TypeError, AttributeError):
+        return {'status':'invalid_output', 'text':text}
     except Exception:
         return {'status':'unavailable','text':text}
