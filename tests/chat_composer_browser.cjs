@@ -128,6 +128,12 @@ async function freePort() {
     await page.getByTestId('stJson').filter({ hasText: 'धान की जल्दी पकने वाली किस्म बताएं' }).waitFor();
     assert.equal(await input.inputValue(), '');
     await assertComposerBelowReplies();
+    await page.getByText('Simulate translation failure', { exact: true }).click();
+    await input.fill('rice seed rate');
+    await frame.locator('#translation-status').filter({ hasText: 'API कुंजी या अनुमति' }).waitFor();
+    assert.equal(await preview.isVisible(), false);
+    await frame.getByRole('button', { name: 'सवाल भेजें' }).click();
+    await page.getByTestId('stJson').filter({ hasText: 'rice seed rate' }).waitFor();
     assert.deepEqual(errors, []);
     console.log('Chat composer browser tests passed: typing, click/keyboard suggestions, edited send, no duplicate rerun, Escape, multiline and mobile.');
   } finally {

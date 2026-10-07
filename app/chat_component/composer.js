@@ -136,7 +136,18 @@
       preview.hidden = !['ok', 'unchanged'].includes(translated.status);
       preview.value = translated.text || '';
       translationStatus.textContent = preview.hidden
-        ? 'हिंदी अनुवाद उपलब्ध नहीं है। मूल सवाल भेज सकते हैं।'
+        ? ({
+            not_configured: 'Sarvam की API कुंजी उपलब्ध नहीं है। Streamlit Secrets में SARVAM_API_KEY जोड़ें।',
+            authentication_failed: 'Sarvam ने API कुंजी या अनुमति स्वीकार नहीं की। अपनी कुंजी और API पहुँच जाँचें।',
+            invalid_request: 'Sarvam ने अनुवाद अनुरोध स्वीकार नहीं किया। ऐप अपडेट या अनुरोध की जाँच ज़रूरी है।',
+            rate_limited: 'Sarvam की अनुरोध सीमा पूरी हुई है। थोड़ी देर बाद फिर लिखें।',
+            timeout: 'Sarvam से जवाब मिलने में समय लगा। थोड़ी देर बाद फिर कोशिश करें।',
+            network_error: 'Sarvam से कनेक्शन नहीं बन सका।',
+            service_error: 'Sarvam सेवा अभी जवाब नहीं दे सकी।',
+            too_long: 'लाइव हिंदी मसौदे के लिए सवाल 1,000 अक्षरों से छोटा रखें।',
+            protected_values_changed: 'अनुवाद में स्थान या संख्या बदल गई थी, इसलिए मूल सवाल रखा गया है।',
+            invalid_output: 'Sarvam से उपयोग योग्य हिंदी अनुवाद नहीं मिला।',
+          }[translated.status] || 'हिंदी अनुवाद उपलब्ध नहीं है।') + ' मूल सवाल भेज सकते हैं।'
         : 'भेजा जाने वाला हिंदी सवाल — नीचे सुधार सकते हैं:';
     }
     const next = (event.data.args?.suggestions || []).filter(item => typeof item.question === 'string' && typeof item.keywords === 'string');

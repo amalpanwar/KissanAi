@@ -11,3 +11,7 @@ Variety, irrigation, fertilizer and similar follow-ups route to agronomy. An exp
 Validation uses mocked Sarvam outputs and crop-document fixtures plus a real local Streamlit/Chrome composer integration test. Live Sarvam quality and the deployed rice-document contents were not verified.
 
 API reference: https://docs.sarvam.ai/api-reference/text/translate-text
+
+## API request correction
+
+The preview now uses Sarvam's documented `output_script: fully-native`; `native` is not a valid output-script value. UI failures distinguish missing configuration, authentication/permission failures, rejected requests, rate limits, timeout/network errors, invalid output, and changed protected values. These messages use fixed status labels and never expose upstream response bodies or credentials. The original remains available to send. Contract regression tests assert the documented output-script value; live validation still requires a configured deployment.
