@@ -17,6 +17,7 @@ STOP = set('how what is are the a an to of for in and or please tell me can do i
 STOP.update('k दें karvaye karwaye karvana karwana karaye bare baare barey jankari jaankari de den दीजिए जानकारी बारे करवाएं करवाये करवाएँ कराएं बताइए give information about explain describe'.split())
 GROUPS = {
     'soil': 'soil mitti matti मृदा मिट्टी',
+    'variety': 'variety varieties किस्म किस्में किस्मों प्रजाति kism kisam',
     'fertility': 'fertility fertile urvarta urvarata उर्वरता उपजाऊपन उपजाऊ',
     'organic': 'organic जैविक कार्बनिक',
     'test': 'test tests testing check checking जांच जाँच jaanch janch parikshan परीक्षण',

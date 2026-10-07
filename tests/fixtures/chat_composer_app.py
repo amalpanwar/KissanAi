@@ -12,7 +12,9 @@ if st.button('Rerun unrelated control'):
 place = st.selectbox('Selected village', ['Doghat Rural', 'Another village'])
 sync_chat_location(st.session_state, {'state': 'Uttar Pradesh', 'district': 'Baghpat', 'sub_district': 'Baraut', 'place': place})
 response_area = st.container()
-question = render_chat_composer(st)
+from unittest.mock import patch
+with patch('app.query_translation.translate_query', side_effect=lambda text, names: {'status':'ok','text':'धान की किस्म बताएं'}):
+    question = render_chat_composer(st)
 if question:
     st.session_state.setdefault('chat_history', []).append(question)
 with response_area:

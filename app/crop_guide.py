@@ -3183,8 +3183,7 @@ def build_crop_production_followup(
     if not section:
         return None, []
     phase_points, entries, sources = _build_guide_points_for_crop(crop)
-    if not phase_points:
-        return None, []
+    phase_points = phase_points or {}
 
     matched_points: list[str] = []
     for entry in entries:

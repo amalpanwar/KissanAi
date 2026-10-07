@@ -38,6 +38,7 @@ async function freePort() {
     const input = frame.getByRole('combobox');
     await input.waitFor();
     const options = frame.getByRole('option');
+    await frame.locator('#translate').uncheck();
     async function assertComposerBelowReplies() {
       const order = await page.evaluate(() => {
         const replies = [...document.querySelectorAll('[data-testid="stChatMessage"]')];
@@ -103,6 +104,7 @@ async function freePort() {
     assert.equal(await input.inputValue(), '');
     assert.equal(await page.getByTestId('stChatMessage').count(), 0);
     await page.getByRole('button', { name: 'Rerun unrelated control' }).click();
+    await frame.locator('#translate').uncheck();
     await input.fill('New location weather');
     await input.press('Enter');
     await page.getByTestId('stJson').filter({ hasText: 'New location weather' }).waitFor();
@@ -113,6 +115,19 @@ async function freePort() {
     await page.getByRole('option', { name: 'Doghat Rural', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[data-testid="stJson"]')?.innerText.trim() === '[]');
     assert.equal(await input.inputValue(), '');
+    // A debounced draft translates without posting chat, remains editable, and sends only once.
+    await input.fill('rice varieties');
+    const preview = frame.getByRole('textbox', { name: 'हिंदी सवाल — संपादन करें' });
+    await preview.waitFor();
+    assert.equal(await preview.inputValue(), 'धान की किस्म बताएं');
+    assert.equal((await page.getByTestId('stJson').innerText()).trim(), '[]');
+    await preview.fill('धान की जल्दी पकने वाली किस्म बताएं');
+    await page.getByRole('button', { name: 'Rerun unrelated control' }).click();
+    assert.equal(await preview.inputValue(), 'धान की जल्दी पकने वाली किस्म बताएं');
+    await frame.getByRole('button', { name: 'सवाल भेजें' }).click();
+    await page.getByTestId('stJson').filter({ hasText: 'धान की जल्दी पकने वाली किस्म बताएं' }).waitFor();
+    assert.equal(await input.inputValue(), '');
+    await assertComposerBelowReplies();
     assert.deepEqual(errors, []);
     console.log('Chat composer browser tests passed: typing, click/keyboard suggestions, edited send, no duplicate rerun, Escape, multiline and mobile.');
   } finally {
