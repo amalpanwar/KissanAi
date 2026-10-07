@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
@@ -20,20 +21,33 @@ class WebSearchResult:
     source: str
 
 
+def _setting(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if value:
+        return value
+    st = sys.modules.get("streamlit")
+    if st is not None:
+        try:
+            return str(st.secrets.get(name, "")).strip()
+        except Exception:
+            pass
+    return ""
+
+
 def is_tavily_search_configured() -> bool:
-    return bool(os.getenv("TAVILY_API_KEY"))
+    return bool(_setting("TAVILY_API_KEY"))
 
 
 def is_google_search_configured() -> bool:
-    return bool(os.getenv("GOOGLE_SEARCH_API_KEY") and os.getenv("GOOGLE_SEARCH_CX"))
+    return bool(_setting("GOOGLE_SEARCH_API_KEY") and _setting("GOOGLE_SEARCH_CX"))
 
 
 def is_web_search_configured() -> bool:
     return is_tavily_search_configured() or is_google_search_configured()
 
 
-def tavily_search(query: str, *, num: int = 5, include_domains: list[str] | None = None) -> list[WebSearchResult]:
-    api_key = os.getenv("TAVILY_API_KEY")
+def tavily_search(query: str, *, num: int = 5, include_domains: list[str] | None = None, _raise_errors: bool = False) -> list[WebSearchResult]:
+    api_key = _setting("TAVILY_API_KEY")
     if not api_key or not query.strip():
         return []
     body: dict[str, Any] = {
@@ -61,10 +75,18 @@ def tavily_search(query: str, *, num: int = 5, include_domains: list[str] | None
         with urlopen(req, timeout=20) as resp:
             payload: dict[str, Any] = json.loads(resp.read().decode("utf-8"))
     except Exception:
+        if _raise_errors:
+            raise
         return []
-    items = payload.get("results") or []
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        if _raise_errors:
+            raise ValueError("Invalid search response")
+        return []
+    items = payload["results"]
     out: list[WebSearchResult] = []
     for item in items:
+        if not isinstance(item, dict):
+            continue
         title = str(item.get("title") or "").strip()
         snippet = str(item.get("content") or item.get("snippet") or "").strip()
         link = str(item.get("url") or "").strip()
@@ -81,8 +103,8 @@ def tavily_search(query: str, *, num: int = 5, include_domains: list[str] | None
 
 
 def google_search(query: str, *, num: int = 5) -> list[WebSearchResult]:
-    api_key = os.getenv("GOOGLE_SEARCH_API_KEY")
-    cx = os.getenv("GOOGLE_SEARCH_CX")
+    api_key = _setting("GOOGLE_SEARCH_API_KEY")
+    cx = _setting("GOOGLE_SEARCH_CX")
     if not api_key or not cx or not query.strip():
         return []
     params = urlencode(
@@ -107,6 +129,8 @@ def google_search(query: str, *, num: int = 5) -> list[WebSearchResult]:
     items = payload.get("items") or []
     out: list[WebSearchResult] = []
     for item in items:
+        if not isinstance(item, dict):
+            continue
         title = str(item.get("title") or "").strip()
         snippet = str(item.get("snippet") or "").strip()
         link = str(item.get("link") or "").strip()
@@ -123,3 +147,18 @@ def web_search(query: str, *, num: int = 5, include_domains: list[str] | None = 
         if results:
             return results
     return google_search(query, num=num)
+
+
+def search_with_status(query: str, *, num: int = 5, include_domains=None) -> dict:
+    """Expose empty results separately from an unavailable Tavily connection."""
+    if is_tavily_search_configured():
+        try:
+            hits = tavily_search(query, num=num, include_domains=include_domains, _raise_errors=True)
+            return {"status": "ok", "provider": "tavily", "results": hits}
+        except Exception:
+            return {"status": "unavailable", "provider": "tavily", "results": [], "reason": "search_request_failed"}
+    if is_google_search_configured():
+        hits = google_search(query, num=num)
+        return {"status": "ok" if hits else "unavailable", "provider": "google", "results": hits,
+                "reason": "" if hits else "no_results_or_request_failed"}
+    return {"status": "unavailable", "provider": "none", "results": [], "reason": "search_not_configured"}

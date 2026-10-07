@@ -53,6 +53,12 @@ class RelativeLocationTests(unittest.TestCase):
         self.assertEqual(named['place'], 'Doghat Rural')
         invalid = resolve('weather in Xyzunknownplace', selected_state='Uttar Pradesh', selected_district='Baghpat', strict_on_hint=True)
         self.assertEqual(invalid['status'], 'suggest')
+        for query in ['mitti ki jaanch kaise kare?', 'मिट्टी की जांच कैसे करें?', 'how do I test soil?']:
+            with self.subTest(query=query):
+                result = resolve(query, selected_state='Uttar Pradesh', selected_district='Baghpat')
+                self.assertEqual(result['status'], 'none')
+        outside = resolve('Kareempur mein mitti ki jaanch', selected_state='Uttar Pradesh', selected_district='Baghpat')
+        self.assertEqual(outside['status'], 'outside_scope')
 
     def test_doghat_weather_uses_village_coordinates_and_district_only_falls_back(self):
         _, lookup = load_ui_location_functions()

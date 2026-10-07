@@ -773,90 +773,17 @@ class RAGAdvisor:
         normalized_query: str,
         context_part: str,
     ) -> dict:
-        plan = self.query_agent.decide(normalized_question, context_part)
-        cached = self.response_cache.get(
-            question=normalized_question,
-            context_part=context_part,
-            route=plan.route,
-            model_name=plan.model_name or "",
-        )
-        if cached:
-            cached.setdefault("topic", "rag")
-            cached["query_plan"] = plan.to_dict()
-            return cached
-
-        try:
-            self._ensure_rag_components(load_generator=False)
-        except Exception:
-            web_result = self._answer_with_web_search(normalized_question, context_part) if plan.allow_web_fallback else None
-            if web_result:
-                web_result["query_plan"] = plan.to_dict()
-                return web_result
-            return {
-                "answer": "अभी यह सवाल local source से नहीं निकल पाया और RAG model उपलब्ध नहीं है। कृपया सवाल में फसल/जिला साफ लिखें या थोड़ी देर बाद फिर प्रयास करें।",
-                "references": [],
-                "retrieved": [],
-                "topic": "rag",
-                "query_plan": plan.to_dict(),
-                "cache_hit": False,
-            }
-
-        if self.embedder is None or self.retriever is None:
-            web_result = self._answer_with_web_search(normalized_question, context_part) if plan.allow_web_fallback else None
-            if web_result:
-                web_result["query_plan"] = plan.to_dict()
-                return web_result
-            return {
-                "answer": "मॉडल अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।",
-                "status": "unavailable",
-                "references": [],
-                "retrieved": [],
-                "topic": "rag",
-                "query_plan": plan.to_dict(),
-                "cache_hit": False,
-            }
-
-        retrieved = self._retrieve_with_hyde_and_rerank(normalized_question, context_part, top_k=plan.top_k)
-        response = ""
-        generator = None
-        if plan.route != "retrieval_only":
-            generator = self._get_generator_for_model(plan.model_name)
-        if generator is not None:
-            prompt = build_prompt(
-                normalized_query,
-                retrieved,
-                query_family=plan.query_family,
-                max_chunks=plan.prompt_context_k,
-            )
-            try:
-                response = generator.generate(prompt)
-            except Exception:
-                response = ""
-        if not response or self._is_low_quality_response(response):
-            if plan.allow_web_fallback:
-                web_result = self._answer_with_web_search(normalized_question, context_part)
-                if web_result:
-                    web_result["query_plan"] = plan.to_dict()
-                    return web_result
-            response = self._fallback_answer(retrieved, normalized_question)
-
-        result = {
-            "answer": response,
-            "references": [r.get("source_file") for r in retrieved],
-            "retrieved": retrieved,
-            "topic": "rag",
-            "query_plan": plan.to_dict(),
-            "cache_hit": False,
-        }
-        self.response_cache.put(
-            question=normalized_question,
-            context_part=context_part,
-            route=plan.route,
-            model_name=plan.model_name or "",
-            result=result,
-            ttl_sec=min(plan.cache_ttl_sec, self.cfg.query_cache_ttl_sec),
-        )
-        return result
+        # General questions must check both sources before declining; this
+        # path does not download an LLM or embedding model during a request.
+        from app.agent_system import MessageBus, ToolAgent
+        from app.research import ResearchAgent, documents, web
+        bus = MessageBus({"research": ResearchAgent(),
+                          "documents": ToolAgent(lambda g,p: documents(self,p)),
+                          "web_search": ToolAgent(lambda g,p: web(p))})
+        result = bus.ask("agronomy", "research", "Find evidence for this question",
+                         {"question": normalized_question, "context": context_part})
+        return {"answer": result.answer, "references": result.references, "retrieved": [],
+                "status": result.status, **result.metadata}
 
     def _query_tokens(self, text: str) -> set[str]:
         tokens = re.findall(r"[a-z0-9\u0900-\u097F]+", (text or "").lower())

@@ -146,20 +146,20 @@ class Coordinator:
 
     def plan(self, question: str) -> tuple[list[str], str]:
         required = self.domains(question)
-        selected, source = required or ["agronomy"], "rules"
+        selected, source = required or ["research"], "rules"
         # Straightforward tool queries do not need an LLM round trip.
-        if self.planner and (not required or len(required) > 1):
+        if self.planner and len(required) > 1:
             try:
                 raw = self.planner(
                     'Return only JSON {"agents": [names]}. Select specialists needed for this farmer question. '
-                    'Allowed names: weather, prices, pesticides, agronomy, news. '
-                    'Use agronomy for crop planning or general agriculture. Do not answer the question.\n'
+                    'Allowed names: weather, prices, pesticides, agronomy, news, research. '
+                    'Use agronomy for crop planning; research checks sources for unfamiliar questions. Do not answer the question.\n'
                     + json.dumps({"question": question}, ensure_ascii=False)
                 )
                 proposed = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())["agents"]
-                if not isinstance(proposed, list) or not proposed or len(proposed) > 5:
+                if not isinstance(proposed, list) or not proposed or len(proposed) > 6:
                     raise ValueError("Invalid plan")
-                if any(not isinstance(n, str) or n not in {"weather", "prices", "pesticides", "agronomy", "news"} for n in proposed):
+                if any(not isinstance(n, str) or n not in {"weather", "prices", "pesticides", "agronomy", "news", "research"} for n in proposed):
                     raise ValueError("Unknown specialist")
                 selected, source = list(dict.fromkeys(required + proposed)), "model"
             except Exception:
@@ -197,16 +197,20 @@ class Coordinator:
 def build_coordinator(advisor):
     from app.agent_tools import AdvisorTools
     handlers = AdvisorTools(advisor)
+    from app.research import ResearchAgent, documents, web
 
     def plan_with_model(prompt):
-        if os.getenv("KISAANAI_LLM_PLANNER", "1").lower() in {"0", "false", "no"}:
+        if os.getenv("KISAANAI_LLM_PLANNER", "0").lower() in {"0", "false", "no"}:
             raise RuntimeError("Model planning disabled")
         generator = advisor._get_generator_for_model(advisor.cfg.complex_generator_model or advisor.cfg.generator_model)
         if generator is None:
             raise RuntimeError("Planner model unavailable")
         return generator.generate(prompt)
 
-    return Coordinator({"weather": ToolAgent(handlers.weather),
+    return Coordinator({"research": ResearchAgent(),
+                        "documents": ToolAgent(lambda g,p: documents(advisor,p)),
+                        "web_search": ToolAgent(lambda g,p: web(p)),
+                        "weather": ToolAgent(handlers.weather),
                         "market_data": ToolAgent(handlers.refresh_market),
                         "prices": PriceAgent(handlers.prices),
                         "pesticides": PesticideAgent(handlers.pesticides),

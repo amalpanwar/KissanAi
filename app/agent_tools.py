@@ -202,4 +202,5 @@ class AdvisorTools:
         text = f"{payload['context']} किसान का प्रश्न: {payload['question']}" if payload.get("context") else payload["question"]
         result = self.advisor._answer_legacy(text)
         return AgentResult(result["answer"], status=result.get("status", "ok"), references=result.get("references", []),
-                           metadata={"topic": result.get("topic", "rag")})
+                           metadata={"topic": result.get("topic", "rag"),
+                                     **({"research_offer": result["research_offer"]} if result.get("research_offer") else {})})
