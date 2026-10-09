@@ -6,9 +6,12 @@ from urllib.error import HTTPError, URLError
 from app.hindi_translation import ENDPOINT, _setting, _token, TOKEN
 
 
-def translate_query(text, names=()):
+def translate_query(text, names=(), target="hi-IN"):
     text = str(text).strip()
-    if not text or not re.search('[A-Za-z]', text):
+    if target not in {'hi-IN', 'en-IN'}:
+        raise ValueError('Unsupported query language')
+    needs_translation = re.search('[A-Za-z]', text) if target == 'hi-IN' else re.search('[\u0900-\u097f]', text)
+    if not text or not needs_translation:
         return {'status':'unchanged', 'text':text}
     if len(text) > 1000:
         return {'status':'too_long', 'text':text}
@@ -25,14 +28,14 @@ def translate_query(text, names=()):
     if len(masked) > 1000:
         return {'status':'too_long', 'text':text}
     request = Request(ENDPOINT,data=json.dumps({
-        'input':masked, 'source_language_code':'auto', 'target_language_code':'hi-IN',
-        'model':'mayura:v1', 'mode':'formal', 'output_script':'fully-native',
+        'input':masked, 'source_language_code':'auto', 'target_language_code':target,
+        'model':'mayura:v1', 'mode':'formal', 'output_script':'fully-native' if target == 'hi-IN' else None,
         'numerals_format':'international',
     }).encode(),headers={'Content-Type':'application/json','api-subscription-key':key},method='POST')
     try:
         with urlopen(request,timeout=8) as response:
             output=json.loads(response.read().decode()).get('translated_text')
-        if not isinstance(output,str) or not re.search('[\u0900-\u097f]',output):
+        if not isinstance(output,str) or not re.search('[\u0900-\u097f]' if target == 'hi-IN' else '[A-Za-z]', output):
             return {'status':'invalid_output','text':text}
         if TOKEN.findall(output) != TOKEN.findall(masked):
             return {'status':'protected_values_changed','text':text}

@@ -125,9 +125,10 @@ class AgronomyAgent(ToolAgent):
 
 
 class Coordinator:
-    def __init__(self, agents: dict, planner: Callable | None = None):
+    def __init__(self, agents: dict, planner: Callable | None = None, preprocessor=None):
         self.agents = agents
         self.planner = planner
+        self.preprocessor = preprocessor
 
     @staticmethod
     def domains(question: str) -> list[str]:
@@ -136,7 +137,7 @@ class Coordinator:
             return ["news"]
         patterns = {
             "weather": r"\b(weather|mausam|mosam|rain|barish|temperature)\b|मौसम|बारिश|तापमान|वर्षा",
-            "prices": r"\b(price|prices|rate|mandi|bhav|bhaav|daam|msp)\b|भाव|कीमत|दाम|मंडी|समर्थन मूल्य",
+            "prices": r"\b(price|prices|rate|mandi|bhav|bhaav|daam|msp)\b|भाव|कीमत|दाम|मंडी|मूल्य",
             "pesticides": r"\b(pesticide|pesticides|insecticide|fungicide|herbicide|spray|dawai|keet|rog|disease|pest)\b|दवा|दवाई|कीट|रोग|छिड़क|फफूंद|लक्षण",
         }
         selected = [name for name, pattern in patterns.items() if re.search(pattern, question, re.I)]
@@ -180,9 +181,13 @@ class Coordinator:
 
     def answer(self, question: str, context: str = "") -> dict:
         goal = f"Answer the farmer's question using dated evidence: {question}"
+        original_question = question
+        language_info = {}
+        if self.preprocessor:
+            question, language_info = self.preprocessor(question, context)
         names, source = self.plan(question)
         bus = MessageBus(self.agents)
-        payload = {"question": question, "context": context}
+        payload = {"question": question, "context": context, **language_info}
         results = []
         decisions = []
         for name in names:
@@ -200,13 +205,16 @@ class Coordinator:
                 **metadata, "agent_status": status,
                 "agent_trace": {"goal": goal, "plan": names, "planner": source,
                                 "decisions": decisions, "messages": [asdict(m) for m in bus.messages],
-                                "calls": bus.calls}}
+                                "calls": bus.calls, "query_translation": language_info.get("query_translation", {}),
+                                "display_question": language_info.get("display_question", original_question),
+                                "backend_question": question}}
 
 
 def build_coordinator(advisor):
     from app.agent_tools import AdvisorTools
     handlers = AdvisorTools(advisor)
     from app.research import ResearchAgent, documents, web
+    from app.multilingual_retrieval import prepare_query
 
     def plan_with_model(prompt):
         if os.getenv("KISAANAI_LLM_PLANNER", "0").lower() in {"0", "false", "no"}:
@@ -218,10 +226,12 @@ def build_coordinator(advisor):
 
     return Coordinator({"research": ResearchAgent(),
                         "documents": ToolAgent(lambda g,p: documents(advisor,p)),
-                        "web_search": ToolAgent(lambda g,p: web(p)),
+                        "web_search": ToolAgent(lambda g,p: web(p,advisor)),
                         "weather": ToolAgent(handlers.weather),
                         "market_data": ToolAgent(handlers.refresh_market),
                         "prices": PriceAgent(handlers.prices),
                         "pesticides": PesticideAgent(handlers.pesticides),
                         "agronomy": AgronomyAgent(handlers.agronomy),
-                        "news": ToolAgent(handlers.news)}, planner=plan_with_model)
+                        "news": ToolAgent(handlers.news)}, planner=plan_with_model,
+                       preprocessor=lambda q,c: prepare_query(advisor,q,c))
+

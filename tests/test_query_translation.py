@@ -48,3 +48,13 @@ class TranslationFailureTests(unittest.TestCase):
         response=MagicMock();response.__enter__.return_value.read.return_value=json.dumps({'translated_text':'डोगहट में धान की किस्म'}).encode()
         with patch('app.query_translation._setting',return_value='key'), patch('app.query_translation.urlopen',return_value=response):
             self.assertEqual(translate_query('Doghat rice variety',['Doghat'])['status'],'protected_values_changed')
+
+class EnglishBackendTranslationTests(unittest.TestCase):
+    def test_hindi_to_english_uses_english_target_without_native_script(self):
+        response=MagicMock();response.__enter__.return_value.read.return_value=json.dumps({'translated_text':'Which rice cultivar is suitable?'}).encode()
+        with patch('app.query_translation._setting',return_value='test-key'),patch('app.query_translation.urlopen',return_value=response) as request:
+            result=translate_query('कौन सी धान की किस्म उपयुक्त है?',target='en-IN')
+        body=json.loads(request.call_args.args[0].data)
+        self.assertEqual(body['target_language_code'],'en-IN')
+        self.assertIsNone(body['output_script'])
+        self.assertEqual(result['text'],'Which rice cultivar is suitable?')

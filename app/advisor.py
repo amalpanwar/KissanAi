@@ -779,7 +779,7 @@ class RAGAdvisor:
         from app.research import ResearchAgent, documents, web
         bus = MessageBus({"research": ResearchAgent(),
                           "documents": ToolAgent(lambda g,p: documents(self,p)),
-                          "web_search": ToolAgent(lambda g,p: web(p))})
+                          "web_search": ToolAgent(lambda g,p: web(p,self))})
         result = bus.ask("agronomy", "research", "Find evidence for this question",
                          {"question": normalized_question, "context": context_part})
         return {"answer": result.answer, "references": result.references, "retrieved": [],

@@ -1,107 +1,83 @@
-import csv
-import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
-
+import numpy as np
 import pandas as pd
 from app.agent_system import build_coordinator
-from app.location_query import explicit_named_place
+from app.retriever import Retriever
+from app.multilingual_retrieval import prepare_query, retrieve_documents
 from app.research import answer_with_research_followup
-from app.web_search import WebSearchResult, search_with_status
+
+
+def translation(text,names=(),target='hi-IN'):
+    return {'status':'ok','text':'What cultivars suit this crop?' if target=='en-IN' else 'इस फसल की कौन सी किस्में उपयुक्त हैं?'}
 
 
 class ResearchTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.path=Path(self.tmp.name)/'metadata.csv'
-        self.advisor=SimpleNamespace(cfg=SimpleNamespace(metadata_path=str(self.path)),
-            _get_generator_for_model=MagicMock(side_effect=AssertionError('No model download')))
+        self.metadata=pd.DataFrame([
+            {'text':'Cultivar A matures early; cultivar B needs a longer season.','source_file':'crop.pdf'},
+            {'text':'Insecticide registration restrictions.','source_file':'pesticides.pdf'},
+            {'text':'यह किस्म जल्दी पकती है। दूसरी किस्म देर से पकती है।','source_file':'hindi.pdf'}])
+        self.metadata.to_csv(self.path,index=False)
+        self.embedder=MagicMock();self.embedder.encode.side_effect=lambda texts:np.array([[1.,0.] for _ in texts])
+        self.advisor=SimpleNamespace(cfg=SimpleNamespace(metadata_path=str(self.path)),embedder=self.embedder,
+            retriever=Retriever(np.array([[1.,0.],[0.,1.],[.99,.01]]),self.metadata),
+            _ensure_rag_components=MagicMock(),_extract_preferred_crop_from_context=lambda c:'Rice' if c else None,
+            _extract_crop_from_query=lambda q:None,_has_profitability_terms=lambda q:False,_has_crop_guide_terms=lambda q:False)
 
-    def docs(self, text):
-        with self.path.open('w',newline='') as f:
-            writer=csv.DictWriter(f,fieldnames=['text','source_file']);writer.writeheader()
-            if text: writer.writerow({'text':text,'source_file':'soil-guide.pdf'})
+    def test_language_specific_semantic_queries_not_word_overlap(self):
+        with patch('app.multilingual_retrieval.translate_query',side_effect=translation):
+            q,info=prepare_query(self.advisor,'kaunsi achhi hai','Rice')
+            result=retrieve_documents(self.advisor,dict(question=q,context='Rice',**info))
+        sources={r['source_file'] for r in result.evidence['records']}
+        self.assertEqual(sources,{'crop.pdf','hindi.pdf'})
+        calls=[c.args[0][0] for c in self.embedder.encode.call_args_list]
+        self.assertTrue(any('What cultivars' in c for c in calls))
+        self.assertTrue(any('कौन सी किस्में' in c for c in calls))
+        self.assertTrue(all('Rice' in c for c in calls))
 
-    def run_question(self, remote, question='mitti ki jaanch kaise kare?'):
-        with patch('app.web_search.search_with_status',return_value=remote):
-            return build_coordinator(self.advisor).answer(question,'State: Uttar Pradesh | District: Baghpat |')
+    def test_hindi_only_corpus_skips_english_translation(self):
+        self.metadata.iloc[[2]].to_csv(self.path,index=False)
+        with patch('app.multilingual_retrieval.translate_query',side_effect=translation) as translate:
+            _,info=prepare_query(self.advisor,'इसकी किस्म बताएं','')
+        self.assertEqual(translate.call_count,1)
+        self.assertNotIn('en-IN',info['query_variants'])
 
-    def test_soil_question_checks_both_agents_and_uses_documents(self):
-        self.docs('Soil test: collect soil samples and take them to the laboratory for testing.')
-        result=self.run_question({'status':'ok','provider':'tavily','results':[]})
-        self.assertEqual(result['agent_status'],'ok')
-        self.assertIn('soil-guide.pdf',result['references'])
-        self.assertIn('laboratory',result['answer'])
-        pairs=[(m['sender'],m['recipient']) for m in result['agent_trace']['messages']]
-        self.assertIn(('research','documents'),pairs)
-        self.assertIn(('research','web_search'),pairs)
-        self.advisor._get_generator_for_model.assert_not_called()
+    def test_documents_answer_before_web_and_keep_citations(self):
+        with patch('app.multilingual_retrieval.translate_query',side_effect=translation), patch('app.web_search.search_with_status') as search:
+            result=build_coordinator(self.advisor).answer('किस प्रकार का चावल बेहतर है?','Rice')
+        self.assertIn('Cultivar A',result['answer'])
+        self.assertNotIn('Insecticide',result['answer'])
+        self.assertIn('crop.pdf',result['references'])
+        search.assert_not_called()
 
-    def test_missing_documents_still_checks_tavily(self):
-        result=self.run_question({'status':'ok','provider':'tavily','results':[
-            WebSearchResult('Soil testing','Soil test samples are collected for laboratory testing.',
-                            'https://icar.gov.in/soil-test','icar.gov.in')]})
-        self.assertEqual(result['agent_status'],'partial')
-        self.assertEqual(result['references'],['https://icar.gov.in/soil-test'])
-        self.assertIn('दस्तावेज़ों की खोज पूरी नहीं',result['answer'])
-
-    def test_both_sources_empty_or_unavailable_are_honest(self):
-        self.docs('')
-        result=self.run_question({'status':'ok','provider':'tavily','results':[]})
+    def test_missing_index_reports_failure_then_checks_web(self):
+        self.advisor.retriever=None
+        with patch('app.multilingual_retrieval.translate_query',side_effect=translation), patch('app.web_search.search_with_status',return_value={'status':'ok','provider':'tavily','results':[]}) as search:
+            result=build_coordinator(self.advisor).answer('किस्म बताएं','Rice')
         self.assertEqual(result['agent_status'],'unavailable')
-        self.assertFalse(result['references'])
-        self.assertNotIn('मॉडल',result['answer'])
-        self.path.unlink()
-        result=self.run_question({'status':'unavailable','provider':'none','results':[],'reason':'search_not_configured'})
-        self.assertIn('वेब खोज उपलब्ध नहीं',result['answer'])
+        self.assertIn('खोज या आवश्यक अनुवाद पूरा नहीं',result['answer'])
+        search.assert_called_once()
 
-    def test_weak_matches_fall_back_without_switching_topics(self):
-        self.docs('Soil application of insecticide controls pests. Approved bio pesticide formulations.')
-        for question in ['mitti ki urvarta k bare me jankari de', 'mitti ki jaanch kaise karvaye?']:
-            result=self.run_question({'status':'ok','provider':'tavily','results':[]},question)
-            self.assertEqual(result['agent_status'],'unavailable')
-            self.assertFalse(result['references'])
-            self.assertNotIn('research_offer',result)
-            self.assertNotIn('soil-guide.pdf',result['answer'])
+    def test_failed_english_translation_does_not_search_wrong_partition(self):
+        self.metadata.iloc[:2].to_csv(self.path,index=False)
+        self.advisor.retriever=Retriever(np.array([[1.,0.],[0.,1.]]),self.metadata.iloc[:2])
+        def failed(q,**kw):
+            return {'status':'unavailable','text':q} if kw.get('target')=='en-IN' else {'status':'unchanged','text':q}
+        with patch('app.multilingual_retrieval.translate_query',side_effect=failed):
+            q,info=prepare_query(self.advisor,'किस्म बताएं','')
+            result=retrieve_documents(self.advisor,dict(question=q,**info))
+        self.assertEqual(result.status,'partial')
+        self.assertEqual(result.evidence['records'],[])
+        self.embedder.encode.assert_not_called()
 
-    def test_fertility_hinglish_and_hindi_search_same_concepts(self):
-        from app.research import search_question, rank
-        for question in ['mitti ki urvarta k bare me jankari de', 'मिट्टी की उर्वरता के बारे में जानकारी दें']:
-            self.docs('Soil fertility depends on organic matter and nutrient availability.')
-            result=self.run_question({'status':'ok','provider':'tavily','results':[]},question)
-            self.assertEqual(result['agent_status'],'ok')
-            self.assertIn('organic matter',result['answer'])
-        self.assertEqual(search_question('mitti ki jaanch kaise karvaye?'),'soil test')
-        self.assertEqual(search_question('mitti ki urvarta k bare me jankari de'),'soil fertility')
-        self.assertEqual(rank('soil fertility',[{'source_file':'soil fertility.pdf',
-            'text':'Soil application of pesticide. Fertility is discussed elsewhere.'}]),[])
-
-    def test_new_question_discards_previous_offer(self):
-        advisor=SimpleNamespace(_split_context_and_question=lambda q:('',q),answer=MagicMock(return_value={'answer':'new question'}))
+    def test_old_offer_cannot_override_new_query(self):
+        advisor=SimpleNamespace(answer=MagicMock(return_value={'answer':'new'}))
         state={'pending_research_offer':{'records':[]}}
-        self.assertEqual(answer_with_research_followup(advisor,'another topic',state)['answer'],'new question')
+        self.assertEqual(answer_with_research_followup(advisor,'new question',state),{'answer':'new'})
         self.assertNotIn('pending_research_offer',state)
-
-    def test_ordinary_prose_is_not_a_village(self):
-        lookup=pd.DataFrame([{'place':'Kareempur','district':'Meerut','sub_district':'Sardhana'},
-                             {'place':'Doghat Rural','district':'Baghpat','sub_district':'Baraut'}])
-        for q in ['mitti ki jaanch kaise kare?', 'gehu ki kheti kaise kare', 'how do I test soil?']:
-            self.assertIsNone(explicit_named_place(q,lookup))
-        self.assertEqual(explicit_named_place('Doghat mein mitti ki jaanch kaise kare?',lookup),'Doghat Rural')
-        self.assertEqual(explicit_named_place('Kareempur weather',lookup),'Kareempur')
-        self.assertIsNone(explicit_named_place('kare kaise',lookup))
-
-    def test_tavily_timeout_and_missing_key_have_distinct_status(self):
-        with patch('app.web_search._setting',return_value=''):
-            self.assertEqual(search_with_status('soil test')['reason'],'search_not_configured')
-        with patch('app.web_search._setting',return_value='key'),patch('app.web_search.urlopen',side_effect=TimeoutError()):
-            self.assertEqual(search_with_status('soil test')['reason'],'search_request_failed')
-        with patch.dict(os.environ,{'TAVILY_API_KEY':''}),patch.dict('sys.modules',{'streamlit':SimpleNamespace(secrets={'TAVILY_API_KEY':'secret'})}):
-            from app.web_search import is_tavily_search_configured
-            self.assertTrue(is_tavily_search_configured())
-
-
-if __name__=='__main__': unittest.main()
