@@ -2607,7 +2607,7 @@ def render_auth_sidebar(db_path: str) -> None:
                     username=(username or "").strip(),
                     display_name=(display_name or "").strip() or (username or "").strip(),
                 )
-                st.session_state["auth_mode_state"] = "Sign In"
+                st.session_state["auth_mode_state"] = "Sign In" if ok else "Create Account"
                 if ok:
                     st.session_state["auth_notice"] = (
                         "success",
@@ -2616,7 +2616,7 @@ def render_auth_sidebar(db_path: str) -> None:
                     st.session_state.pop("auth_verification_link", None)
                 else:
                     st.session_state["auth_notice"] = (
-                        "error",
+                        "warning" if payload.get("code") == "client_timeout" else "error",
                         str(payload.get("msg") or payload.get("error_description") or payload.get("message") or "Could not create account in Supabase."),
                     )
                 st.rerun()
