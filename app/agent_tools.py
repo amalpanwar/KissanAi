@@ -200,22 +200,16 @@ class AdvisorTools:
 
     def agronomy(self, goal, payload):
         question = payload["question"]
-        if self.advisor._is_crop_guide_followup_intent(question):
-            from app.crop_guide import build_crop_production_followup
-            crop = (self.advisor._extract_crop_from_query(self.advisor._normalize_hinglish(question))
+        if (not self.advisor._has_profitability_terms(question)
+                and not self.advisor._has_crop_guide_terms(question)):
+            # Agronomic answers come from retrieved evidence, not crop templates.
+            crop = (self.advisor._extract_crop_from_query(question)
                     or self.advisor._extract_preferred_crop_from_context(payload.get("context", "")))
-            if not crop:
-                return AgentResult("किस फसल की जानकारी चाहिए? कृपया फसल का नाम लिखें।", "needs_input",
-                                   metadata={"topic": "clarification"})
-            answer, refs = build_crop_production_followup(question, crop_hint=crop, reasoning_generator=None)
-            if answer and refs:
-                return AgentResult(answer, references=refs,
-                                   metadata={"topic": "crop_guide_followup", "crop": crop})
-            # Carry the resolved crop into research when the guide has no section.
-            return AgentResult("", "unavailable", metadata={"topic": "crop_guide_followup",
-                               "crop": crop, "research_question": f"{crop}: {question}"})
+            return AgentResult("", "unavailable", metadata={"topic":"research", "crop":crop,
+                               "research_question":question})
         text = f"{payload['context']} किसान का प्रश्न: {payload['question']}" if payload.get("context") else payload["question"]
         result = self.advisor._answer_legacy(text)
         return AgentResult(result["answer"], status=result.get("status", "ok"), references=result.get("references", []),
                            metadata={"topic": result.get("topic", "rag"),
                                      **({"research_offer": result["research_offer"]} if result.get("research_offer") else {})})
+

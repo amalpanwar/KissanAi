@@ -3490,7 +3490,7 @@ if user_query:
                 or (last_ctx.get("season", season) if (followup_profit or followup_crop_care or followup_crop_guide) else season)
             )
             preferred_crop_for_query = (
-                last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else preferred_crop
+                last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else (preferred_crop or last_ctx.get("preferred_crop", ""))
             )
 
             question_for_advisor = user_query.strip()
@@ -4064,7 +4064,7 @@ if user_query:
                 )
                 if topic == "weather" and ("मौसम के लिए स्थान" in final_answer or "कृपया स्थान लिखें" in final_answer):
                     st.session_state["pending_weather_location"] = {"original_query": user_query}
-                if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide", "crop_guide_followup"}:
+                if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide", "crop_guide_followup", "research"}:
                     st.session_state["last_structured_topic"] = topic
                     st.session_state["last_structured_context"] = {
                         "district": resolved_district,

@@ -19,6 +19,10 @@ def render_response_footer(st, item):
         with st.expander('Plan and agent activity'):
             st.write(trace.get('goal', ''))
             st.write(' → '.join(trace.get('plan', [])))
+            if trace.get('backend_question'):
+                st.write('Backend query: ' + trace['backend_question'])
+            if trace.get('query_translation'):
+                st.json({'query_translation':trace['query_translation']})
             # Tool outcomes are observable evidence, not invented reasoning.
             for message in trace.get('messages', []):
                 if message.get('kind') != 'result':
@@ -37,6 +41,10 @@ def render_response_footer(st, item):
                         st.write('Search outcome: ' + evidence['reason'])
                 elif sender == 'documents':
                     st.write(f"Documents: {payload.get('status', 'unavailable')}; relevant passages: {len(evidence.get('records', []))}")
+                    if evidence.get('queries'):
+                        st.json(evidence['queries'])
+                    if evidence.get('reason'):
+                        st.write('Document search outcome: ' + evidence['reason'])
             st.json(trace.get('decisions', []))
     refs = clean_references(item.get('references', []))
     if refs:
