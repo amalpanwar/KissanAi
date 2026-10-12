@@ -4,6 +4,16 @@ from app.evidence_reranker import verify, bibliography
 
 
 class EvidenceVerificationTests(unittest.TestCase):
+    def setUp(self):
+        # These unit tests mock inference; CI intentionally omits PyTorch.
+        # Keep activation construction mocked too, so missing dependencies do
+        # not masquerade as a model failure before predict() is exercised.
+        torch = MagicMock()
+        self.identity = torch.nn.Identity.return_value
+        patcher = patch.dict('sys.modules', {'torch': torch})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_bibliography_and_duplicate_text_never_reach_answers(self):
         ref='Jones. 2009. Journal 10(3): 311–20. Singh. 2005. Crop Protection 24:1042–53. Cohen. 2005. Nature.'
         self.assertTrue(bibliography(ref))
@@ -14,6 +24,7 @@ class EvidenceVerificationTests(unittest.TestCase):
         self.assertEqual(status,'ok')
         self.assertEqual([r['text'] for r in accepted],['cultivar description'])
         self.assertEqual(len(model.predict.call_args.args[0]),2)
+        self.assertIs(model.predict.call_args.kwargs['activation_fct'], self.identity)
 
     def test_unavailable_or_invalid_model_fails_closed(self):
         for value in [None, [float('nan')], []]:
@@ -26,6 +37,7 @@ class EvidenceVerificationTests(unittest.TestCase):
                 rows,status=verify({'question':'rice?'},[{'text':'potentially unrelated'}])
             self.assertEqual(rows,[])
             self.assertEqual(status,'unavailable')
+            model.predict.assert_called_once()
 
     def test_rejected_documents_trigger_web_search(self):
         from app.research import ResearchAgent
