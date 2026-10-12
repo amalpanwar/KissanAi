@@ -103,4 +103,12 @@ class ResearchAgent:
 def answer_with_research_followup(advisor,query,state):
     # Older weak-match offers must never override the user's current question.
     state.pop('pending_research_offer',None)
-    return advisor.answer(query)
+    try:
+        return advisor.answer(query)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception('Advisor query failed')
+        return {'answer': 'अभी उत्तर तैयार करते समय तकनीकी समस्या आई। कृपया कुछ देर बाद फिर प्रयास करें।',
+                'references': [], 'retrieved': [], 'topic': 'research',
+                'agent_status': 'unavailable',
+                'error': {'stage': 'advisor', 'type': type(exc).__name__}}
