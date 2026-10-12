@@ -38,6 +38,22 @@ class SourceGuideTests(unittest.TestCase):
         self.assertIn('7. SUGARCANE', text)
         self.assertNotIn('8. SWEET SORGHUM', text)
 
+    def test_rice_and_wheat_guides_without_models_or_translation(self):
+        for question, label in [('Rice ki kheti kaise kare', 'धान'),
+                                ('धान की खेती कैसे करें?', 'धान'),
+                                ('How to grow rice?', 'धान'),
+                                ('gehu ki kheti kaise kare', 'गेहूं')]:
+            with self.subTest(question=question), patch(
+                    'app.multilingual_retrieval.translate_query', side_effect=AssertionError('No query translation')), patch(
+                    'app.hindi_translation.translate_answer', side_effect=AssertionError('No output translation')), patch.object(
+                    self.advisor, '_ensure_rag_components', side_effect=AssertionError('No model loading')):
+                result = self.advisor.answer(question)
+            self.assertEqual(result['agent_status'], 'ok')
+            self.assertIn(label, result['answer'])
+            self.assertEqual(result['references'], ['data/raw/Crop Production guide.pdf'])
+            self.assertEqual(result['agent_trace']['planner'], 'source_guide')
+            self.assertNotIn('ट्रेंच विधि', result['answer'])
+
     def test_ssnm_values_come_from_supplied_trench_pdf(self):
         with patch.object(self.advisor, '_ensure_rag_components', side_effect=AssertionError('No model loading')):
             result = self.advisor.answer('Ganne ki trench SSNM formula batao')

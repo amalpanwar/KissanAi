@@ -1,6 +1,6 @@
 # Document retrieval and Hindi answers
 
-Known sugarcane cultivation and trench-method questions first use the existing source guide renderer and verified trench extraction. This path reads the supplied PDFs without loading embeddings, reranking, generation models, or translation services. SSNM nutrient-uptake figures are extracted directly from the trench PDF and labeled as study values, not fertilizer prescriptions. General cultivation answers cite both available sources. Other agronomic questions retain the research pipeline below.
+Known cultivation questions for crops recognized by the production guide, including rice, wheat, and sugarcane, first use the existing source guide renderer. Sugarcane alone also uses the verified trench extraction for cultivation and trench-method questions. This path reads the supplied PDFs without loading embeddings, reranking, generation models, or translation services. SSNM nutrient-uptake figures are extracted directly from the trench PDF and labeled as study values, not fertilizer prescriptions. General cultivation answers cite both available sources. Other agronomic questions retain the research pipeline below.
 
 Agronomic questions, including cultivation guides and crop follow-ups, use the document research pipeline. Profitability questions continue to use the structured financial tools.
 

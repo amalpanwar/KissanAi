@@ -1,4 +1,4 @@
-"""Model-free rendering of the existing sugarcane source guide and trench extraction."""
+"""Model-free rendering of known crop guides and sugarcane trench extraction."""
 import json
 import logging
 import re
@@ -6,6 +6,37 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TRENCH = ROOT / 'data/processed/trench_planting_sugarcane_structured.json'
+
+
+def source_crop_guide(advisor, question, context=''):
+    normalized = advisor._normalize_hinglish(question)
+    crop = (advisor._extract_crop_from_query(normalized)
+            or advisor._extract_preferred_crop_from_context(context))
+    if crop == 'Sugarcane':
+        return sugarcane_guide(advisor, question, context)
+    from app.crop_guide import MANUAL_PAGE_MAP, build_crop_production_guide
+    from app.agent_system import Coordinator
+    if (crop not in MANUAL_PAGE_MAP or advisor._has_profitability_terms(normalized)
+            or any(name != 'agronomy' for name in Coordinator.domains(normalized))):
+        return None
+    general = advisor._has_crop_guide_terms(normalized) or bool(re.search(r'\bfarming\b', normalized, re.I))
+    if not general or re.search(r'fertilizer|irrigation|variet|खाद|उर्वरक|सिंचाई|किस्म', normalized, re.I):
+        return None
+    try:
+        answer, sources = build_crop_production_guide(crop)
+    except Exception:
+        logging.getLogger(__name__).exception('Crop source guide failed')
+        answer, sources = None, []
+    if not answer:
+        return {'answer': 'इस फसल की स्रोत गाइड उपलब्ध नहीं है या पढ़ी नहीं जा सकी। कृपया फसल उत्पादन दस्तावेज़ की उपलब्धता जाँचें।',
+                'references': [], 'retrieved': [], 'topic': 'crop_guide', 'agent_status': 'unavailable'}
+    return {'answer': answer + '\n\nयह जानकारी फसल उत्पादन गाइड से है; क्षेत्र और मिट्टी के अनुसार स्थानीय उपयुक्तता की जाँच करें।',
+            'references': sources, 'retrieved': [], 'topic': 'crop_guide', 'agent_status': 'ok',
+            'translation': {'provider': 'source_renderer', 'status': 'not_needed', 'version': 'crop-source-v1'},
+            'agent_trace': {'plan': ['agronomy'], 'planner': 'source_guide', 'calls': 0,
+                            'display_question': question, 'backend_question': crop,
+                            'decisions': [{'agent': 'agronomy', 'status': 'ok',
+                                           'decision': 'Render existing crop production source guide'}]}}
 
 
 def sugarcane_guide(advisor, question, context=''):
