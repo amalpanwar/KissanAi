@@ -185,9 +185,12 @@ class Coordinator:
         language_info = {}
         if self.preprocessor:
             question, language_info = self.preprocessor(question, context)
-        names, source = self.plan(question)
+        # Translation wording must not erase an explicit specialist intent.
+        intent_question = original_question if self.domains(original_question) else question
+        names, source = self.plan(intent_question)
         bus = MessageBus(self.agents)
-        payload = {"question": question, "context": context, **language_info}
+        payload = {"question": question, "context": context, **language_info,
+                   "original_question": original_question}
         results = []
         decisions = []
         for name in names:
@@ -234,4 +237,3 @@ def build_coordinator(advisor):
                         "agronomy": AgronomyAgent(handlers.agronomy),
                         "news": ToolAgent(handlers.news)}, planner=plan_with_model,
                        preprocessor=lambda q,c: prepare_query(advisor,q,c))
-

@@ -40,6 +40,25 @@ class AgronomyTests(unittest.TestCase):
         self.assertEqual(result['agent_status'], 'unavailable')
         self.assertNotIn('मॉडल', result['answer'])
 
+    def test_sugarcane_translation_does_not_replace_cultivation_guide(self):
+        from app.agent_system import build_coordinator
+        question = 'गन्ने की खेती कैसे करें?'
+        for translated in ['How is sugarcane farming done?', 'How to cultivate sugarcane?']:
+            with self.subTest(translated=translated), patch(
+                    'app.multilingual_retrieval.prepare_query', return_value=(translated,
+                    {'display_question': question, 'query_variants': {'en-IN': translated}})), patch(
+                    'app.advisor.build_crop_production_guide',
+                    return_value=('गन्ने की खेती: स्टेप-बाय-स्टेप गाइड', ['guide.pdf'])) as guide, patch(
+                    'app.research.documents', side_effect=AssertionError('Use the cultivation guide')), patch(
+                    'app.agent_tools.AdvisorTools.news'):
+                result = build_coordinator(self.advisor).answer(question)
+            self.assertEqual(result['agent_trace']['plan'], ['agronomy'])
+            self.assertEqual(result['topic'], 'crop_guide')
+            self.assertEqual(result['agent_status'], 'ok')
+            self.assertIn('गन्ने की खेती', result['answer'])
+            self.assertEqual(result['references'], ['guide.pdf'])
+            guide.assert_called_once()
+
     def test_unreadable_guide_is_unavailable(self):
         with patch('app.advisor.build_crop_production_guide', side_effect=OSError('unreadable')), \
                 self.assertLogs('app.advisor', level='ERROR'):
