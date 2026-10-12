@@ -200,11 +200,7 @@ class AdvisorTools:
 
     def agronomy(self, goal, payload):
         question = payload["question"]
-        original = payload.get("original_question", "")
-        if self.advisor._has_crop_guide_terms(original):
-            question = original
-        if (not self.advisor._has_profitability_terms(question)
-                and not self.advisor._has_crop_guide_terms(question)):
+        if not self.advisor._has_profitability_terms(question):
             # Agronomic answers come from retrieved evidence, not crop templates.
             crop = (self.advisor._extract_crop_from_query(question)
                     or self.advisor._extract_preferred_crop_from_context(payload.get("context", "")))

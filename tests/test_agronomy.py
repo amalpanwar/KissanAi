@@ -1,86 +1,36 @@
-"""Regression coverage for cultivation questions without model downloads."""
-import os
+"""Cultivation uses translated retrieval and reranking, never crop templates."""
 import unittest
 from unittest.mock import patch
-
-from app.advisor import RAGAdvisor, AdvisorConfig
-from app import crop_guide
+import test_research as fixtures
+from app.agent_system import build_coordinator
 
 
 class AgronomyTests(unittest.TestCase):
-    def setUp(self):
-        self.advisor = RAGAdvisor(AdvisorConfig(
-            'unused-embedding', 'unused-generator', '/tmp/missing-index.npz',
-            '/tmp/missing-metadata.csv', 3))
-        self.model = patch.object(self.advisor, '_get_generator_for_model',
-                                 side_effect=AssertionError('No model needed'))
-        self.semantic = patch.object(self.advisor, '_ensure_agri_intent_semantic_index',
-                                    side_effect=AssertionError('No embeddings needed'))
-        self.model_mock = self.model.start()
-        self.semantic_mock = self.semantic.start()
-        self.addCleanup(self.model.stop)
-        self.addCleanup(self.semantic.stop)
-
-    def test_cultivation_routes_without_models(self):
-        for question in ['gehu ki kheti kese kare', 'gehun ki kheti kaise karein',
-                         'गेहूं की खेती कैसे करें', 'how to grow wheat']:
-            with self.subTest(question=question), patch('app.advisor.build_crop_production_guide',
-                    return_value=('गेहूं की खेती: स्टेप-बाय-स्टेप गाइड', ['guide.pdf'])):
-                result = self.advisor.answer(question)
-                self.assertEqual(result['topic'], 'crop_guide')
-                self.assertEqual(result['agent_status'], 'ok')
-                self.assertEqual(result['agent_trace']['planner'], 'rules')
-                self.assertEqual(result['references'], ['guide.pdf'])
-        self.model_mock.assert_not_called()
-        self.semantic_mock.assert_not_called()
-
-    def test_missing_guide_is_unavailable(self):
-        with patch('app.advisor.build_crop_production_guide', return_value=(None, [])):
-            result = self.advisor.answer('gehu ki kheti kese kare')
-        self.assertEqual(result['agent_status'], 'unavailable')
-        self.assertNotIn('मॉडल', result['answer'])
-
-    def test_sugarcane_translation_does_not_replace_cultivation_guide(self):
-        from app.agent_system import build_coordinator
-        question = 'गन्ने की खेती कैसे करें?'
-        for translated in ['How is sugarcane farming done?', 'How to cultivate sugarcane?']:
-            with self.subTest(translated=translated), patch(
-                    'app.multilingual_retrieval.prepare_query', return_value=(translated,
-                    {'display_question': question, 'query_variants': {'en-IN': translated}})), patch(
-                    'app.advisor.build_crop_production_guide',
-                    return_value=('गन्ने की खेती: स्टेप-बाय-स्टेप गाइड', ['guide.pdf'])) as guide, patch(
-                    'app.research.documents', side_effect=AssertionError('Use the cultivation guide')), patch(
-                    'app.agent_tools.AdvisorTools.news'):
-                result = build_coordinator(self.advisor).answer(question)
-            self.assertEqual(result['agent_trace']['plan'], ['agronomy'])
-            self.assertEqual(result['topic'], 'crop_guide')
-            self.assertEqual(result['agent_status'], 'ok')
-            self.assertIn('गन्ने की खेती', result['answer'])
-            self.assertEqual(result['references'], ['guide.pdf'])
-            guide.assert_called_once()
-
-    def test_unreadable_guide_is_unavailable(self):
-        with patch('app.advisor.build_crop_production_guide', side_effect=OSError('unreadable')), \
-                self.assertLogs('app.advisor', level='ERROR'):
-            result = self.advisor.answer('gehu ki kheti kese kare')
-        self.assertEqual(result['agent_status'], 'unavailable')
-
-    def test_repository_wheat_guide_without_models(self):
-        if not crop_guide.GUIDE_PDF.exists():
-            if os.getenv('CI'):
-                self.fail('Deployment must include the crop production guide PDF')
-            self.skipTest('Guide PDF absent from this local checkout; required in CI')
-        result = self.advisor.answer('gehu ki kheti kese kare')
-        self.assertEqual(result['agent_status'], 'ok', result['answer'])
-        self.assertEqual(result['topic'], 'crop_guide')
-        self.assertIn('गेहूं', result['answer'])
-        self.assertGreater(len(result['answer']), 200)
-        self.assertNotIn('basally for soils', result['answer'])
-        self.assertIn('जिंक सल्फेट', result['answer'])
-        self.assertTrue(result['references'])
-        self.model_mock.assert_not_called()
-        self.semantic_mock.assert_not_called()
+    def test_hindi_sugarcane_uses_english_retrieval_and_synthesis(self):
+        for english in ['How is sugarcane farming done?', 'How to cultivate sugarcane?']:
+            with self.subTest(english=english):
+                fixture = fixtures.ResearchTests(); fixture.setUp()
+                try:
+                    def translate(q, **kw):
+                        return {'status': 'ok', 'text': english if kw.get('target') == 'en-IN' else q}
+                    fixture.metadata.loc[0, 'text'] = 'Plant sugarcane in trenches 30 cm deep and 90 cm apart.'
+                    fixture.metadata.to_csv(fixture.path, index=False)
+                    fixture.generator.generate.return_value = 'Plant sugarcane in trenches 30 cm deep and 90 cm apart. [1]'
+                    with patch('app.multilingual_retrieval.translate_query', side_effect=translate), patch(
+                            'app.advisor.build_crop_production_guide', side_effect=AssertionError('No templates')):
+                        result = build_coordinator(fixture.advisor).answer('गन्ने की खेती कैसे करें?')
+                    self.assertEqual(result['agent_trace']['plan'], ['agronomy'])
+                    self.assertEqual(result['agent_status'], 'ok')
+                    self.assertIn('crop.pdf', result['references'])
+                    self.assertTrue(result['requires_hindi'])
+                    self.assertTrue(any(english in c.args[0][0] for c in fixture.embedder.encode.call_args_list))
+                    prompt = fixture.generator.generate.call_args.args[0]
+                    self.assertIn(english, prompt)
+                    self.assertIn('30 cm', prompt)
+                    self.assertNotIn('Insecticide', prompt)
+                    self.assertIn('relevance', str(result['agent_trace']))
+                finally:
+                    fixture.doCleanups()
 
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == '__main__': unittest.main()

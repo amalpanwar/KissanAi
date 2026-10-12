@@ -49,7 +49,7 @@ def prepare_query(advisor, question, context):
         pass
     variants={'hi-IN':hindi} if hi['status'] in {'ok','unchanged'} else {}
     statuses={'hi-IN':hi['status']}
-    if 'en-IN' in langs:
+    if 'en-IN' in langs or not langs:
         en=translate_query(hindi,names=names,target='en-IN')
         statuses['en-IN']=en['status']
         if en['status'] in {'ok','unchanged'}:
