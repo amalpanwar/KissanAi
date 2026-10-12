@@ -1,5 +1,7 @@
 # Document retrieval and Hindi answers
 
+Known sugarcane cultivation and trench-method questions first use the existing source guide renderer and verified trench extraction. This path reads the supplied PDFs without loading embeddings, reranking, generation models, or translation services. SSNM nutrient-uptake figures are extracted directly from the trench PDF and labeled as study values, not fertilizer prescriptions. General cultivation answers cite both available sources. Other agronomic questions retain the research pipeline below.
+
 Agronomic questions, including cultivation guides and crop follow-ups, use the document research pipeline. Profitability questions continue to use the structured financial tools.
 
 1. Keep the submitted question visible. Translate Hindi into English in the background for English documents, retaining separate language-specific query variants when Hindi documents are also present. Translation failure must not search the English partition with an untranslated Hindi query.
