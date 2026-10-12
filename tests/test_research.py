@@ -91,3 +91,12 @@ class ResearchTests(unittest.TestCase):
         state={'pending_research_offer':{'records':[]}}
         self.assertEqual(answer_with_research_followup(advisor,'new question',state),{'answer':'new'})
         self.assertNotIn('pending_research_offer',state)
+
+    def test_query_exception_is_logged_without_crashing_chat(self):
+        advisor=SimpleNamespace(answer=MagicMock(side_effect=RuntimeError('internal detail')))
+        with self.assertLogs('app.research', level='ERROR') as logs:
+            result=answer_with_research_followup(advisor,'Ganne ki kheti kaise kare',{})
+        self.assertEqual(result['agent_status'],'unavailable')
+        self.assertEqual(result['error']['type'],'RuntimeError')
+        self.assertNotIn('internal detail',result['answer'])
+        self.assertIn('RuntimeError',logs.output[0])
