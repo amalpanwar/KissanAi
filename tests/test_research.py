@@ -35,6 +35,10 @@ class ResearchTests(unittest.TestCase):
             retriever=Retriever(np.array([[1.,0.],[0.,1.],[.99,.01]]),self.metadata),
             _ensure_rag_components=MagicMock(),_extract_preferred_crop_from_context=lambda c:'Rice' if c else None,
             _extract_crop_from_query=lambda q:None,_has_profitability_terms=lambda q:False,_has_crop_guide_terms=lambda q:False)
+        self.advisor.cfg.generator_model = 'test-model'
+        self.generator = MagicMock()
+        self.generator.generate.return_value = 'Cultivar A matures early; cultivar B needs a longer season. [1]'
+        self.advisor._get_generator_for_model = MagicMock(return_value=self.generator)
 
     def test_language_specific_semantic_queries_not_word_overlap(self):
         with patch('app.multilingual_retrieval.translate_query',side_effect=translation):

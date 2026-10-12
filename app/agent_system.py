@@ -185,9 +185,12 @@ class Coordinator:
         language_info = {}
         if self.preprocessor:
             question, language_info = self.preprocessor(question, context)
-        names, source = self.plan(question)
+        # Translation wording must not erase an explicit specialist intent.
+        intent_question = original_question if self.domains(original_question) else question
+        names, source = self.plan(intent_question)
         bus = MessageBus(self.agents)
-        payload = {"question": question, "context": context, **language_info}
+        payload = {"question": question, "context": context, **language_info,
+                   "original_question": original_question}
         results = []
         decisions = []
         for name in names:
@@ -203,6 +206,7 @@ class Coordinator:
         topic = {"prices": "price", "pesticides": "pesticide", "weather": "weather", "agronomy": "rag", "news": "news"}.get(names[0]) if len(names) == 1 else "multi_agent"
         return {"answer": text, "references": refs, "retrieved": [], "topic": topic,
                 **metadata, "agent_status": status,
+                "requires_hindi": any(r.metadata.get("requires_hindi", False) for _, r in results),
                 "agent_trace": {"goal": goal, "plan": names, "planner": source,
                                 "decisions": decisions, "messages": [asdict(m) for m in bus.messages],
                                 "calls": bus.calls, "query_translation": language_info.get("query_translation", {}),
@@ -224,7 +228,7 @@ def build_coordinator(advisor):
             raise RuntimeError("Planner model unavailable")
         return generator.generate(prompt)
 
-    return Coordinator({"research": ResearchAgent(),
+    return Coordinator({"research": ResearchAgent(advisor),
                         "documents": ToolAgent(lambda g,p: documents(advisor,p)),
                         "web_search": ToolAgent(lambda g,p: web(p,advisor)),
                         "weather": ToolAgent(handlers.weather),
@@ -234,4 +238,3 @@ def build_coordinator(advisor):
                         "agronomy": AgronomyAgent(handlers.agronomy),
                         "news": ToolAgent(handlers.news)}, planner=plan_with_model,
                        preprocessor=lambda q,c: prepare_query(advisor,q,c))
-

@@ -1,7 +1,10 @@
-# Evidence lookup for unfamiliar questions
+# Document retrieval and Hindi answers
 
-The document research path now uses the configured multilingual embedding model and saved index rather than the earlier bilingual keyword-overlap filter. See [multilingual-document-search.md](multilingual-document-search.md) for the query-language pipeline, relevance verification, index requirements, and limitations.
+Agronomic questions, including cultivation guides and crop follow-ups, use the document research pipeline. Profitability questions continue to use the structured financial tools.
 
-Document agents search first. If no document passage qualifies, the web agent checks official sources and verifies snippets with the same cross-encoder. The response uses cited source excerpts and the existing Hindi output translator. Missing indexes, failed translation, and unavailable providers are diagnosed separately from no matching evidence; weak-match topic suggestions are not used.
+1. Keep the submitted question visible. Translate Hindi into English in the background for English documents, retaining separate language-specific query variants when Hindi documents are also present. Translation failure must not search the English partition with an untranslated Hindi query.
+2. Retrieve semantic candidates from the saved document index and supplemental PDFs. Rerank candidates with the multilingual cross-encoder, exclude reference lists and duplicate text, and keep up to three accepted passages. If none qualify, check official web sources through the same relevance verifier.
+3. Generate an English answer using only those reranked passages. Include evidence IDs and preserve quantities, units, page metadata, and source limitations. Missing models, invalid citations, or novel quantities produce an explicit failure instead of a source-excerpt dump. Citation and numeric checks do not prove complete factual correctness; model output still needs evaluation.
+4. Translate the generated answer into Hindi using the existing protected-value translation pipeline. Keep source references and retrieval records. If translation is disabled, unavailable, or invalid, show a Hindi failure message instead of silently displaying English as the final answer.
 
-Location extraction still requires complete known names. Translation, agent activity, and citations remain below the answer. Conversation storage and training are separate future work. The ten-minute reconnect window still does not persist sessions across server restarts.
+Deployment requires the configured embedding model and index, cross-encoder, answer-generation model, and a working Sarvam API key for query and output translation. Tests use controlled inference and translation fixtures; passing CI does not establish live provider availability or evaluate the deployed model's agronomic accuracy.

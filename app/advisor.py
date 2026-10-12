@@ -465,7 +465,11 @@ class RAGAdvisor:
             from app.agent_system import build_coordinator
             context, question = self._split_context_and_question(user_query)
             result = build_coordinator(self).answer(question, context)
-        return translate_answer(result)
+        translated = translate_answer(result)
+        if result.get('requires_hindi') and translated.get('translation', {}).get('status') not in {'translated', 'not_needed'}:
+            translated = {**translated, 'answer': 'स्रोतों से उत्तर तैयार हुआ, लेकिन हिंदी अनुवाद पूरा नहीं हो सका। कृपया फिर प्रयास करें।',
+                          'agent_status': 'unavailable'}
+        return translated
 
     def _answer_legacy(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)
@@ -777,7 +781,7 @@ class RAGAdvisor:
         # path does not download an LLM or embedding model during a request.
         from app.agent_system import MessageBus, ToolAgent
         from app.research import ResearchAgent, documents, web
-        bus = MessageBus({"research": ResearchAgent(),
+        bus = MessageBus({"research": ResearchAgent(self),
                           "documents": ToolAgent(lambda g,p: documents(self,p)),
                           "web_search": ToolAgent(lambda g,p: web(p,self))})
         result = bus.ask("agronomy", "research", "Find evidence for this question",
