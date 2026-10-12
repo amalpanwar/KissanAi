@@ -14,7 +14,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,12 +32,22 @@ jobs:
           AGMARKNET_LOOKBACK_DAYS: '3'
           AGMARKNET_RUN_TIMEOUT_SEC: '480'
         run: python scripts/agmarknet_daily_refresh.py
+      - name: Upload refresh diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agmarknet-refresh-diagnostics
+          path: |
+            data/raw/live/agmarknet_refresh_status.json
+            data/raw/live/agmarknet_fetch_summary.json
+            data/raw/live/agmarknet_failures.csv
+          retention-days: 7
       - name: Persist validated data
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add data/raw/live/agmarknet_report.csv data/raw/live/agmarknet_refresh_status.json
-          git add data/processed/kisaanai.db
+          git add data/processed/kisaanai.db data/processed/agmarknet_catalog.csv
           if ! git diff --cached --quiet; then
             git commit -m 'Refresh official Agmarknet market records'
             git push

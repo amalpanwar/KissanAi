@@ -29,8 +29,8 @@ class QueryTranslationTests(unittest.TestCase):
         state={}
         self.assertIsNone(consume_submission({'kind':'draft','text':'rice','id':'draft1'},state))
         self.assertEqual(state,{})
-        self.assertEqual(consume_submission({'text':'धान की किस्म बताएं','id':'sent1'},state),'धान की किस्म बताएं')
-        self.assertIsNone(consume_submission({'text':'धान की किस्म बताएं','id':'sent1'},state))
+        self.assertEqual(consume_submission({'kind':'submit','text':'धान की किस्म बताएं','id':'sent1'},state),'धान की किस्म बताएं')
+        self.assertIsNone(consume_submission({'kind':'submit','text':'धान की किस्म बताएं','id':'sent1'},state))
 
 
 class TranslationFailureTests(unittest.TestCase):

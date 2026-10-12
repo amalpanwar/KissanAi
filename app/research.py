@@ -34,19 +34,22 @@ def evidence_answer(rows,heading):
         text=str(row['text']).strip()
         if len(text)>1800:
             text=text[:1800].rsplit(' ',1)[0]+'…'
-        parts.append(f'{i}. {text}')
+        page=f" (पृष्ठ {row['page']})" if row.get('page') else ''
+        parts.append(f'{i}. {text}{page}')
     return '\n\n'.join(parts)
 
 
 class ResearchAgent:
     def run(self,goal,payload,bus):
         local=bus.ask('research','documents','Search document embeddings in each document language',payload)
-        rows=local.evidence.get('records',[])
+        from app.evidence_reranker import verify
+        rows, document_verification = verify(payload, local.evidence.get('records',[]))
         remote=None
+        web_verification='not_needed'
         if not rows:
             remote=bus.ask('research','web_search','Search official web sources after document lookup',payload)
-            rows=remote.evidence.get('records',[])
-        checks={'documents':local.status,'document_search':local.evidence,
+            rows, web_verification = verify(payload, remote.evidence.get('records',[]))
+        checks={'documents':local.status,'document_relevance':document_verification,'web_relevance':web_verification,'document_search':local.evidence,
                 'web_search':remote.status if remote else 'not_needed'}
         if remote:
             checks.update({'web_provider':remote.evidence.get('provider'),'web_reason':remote.evidence.get('reason')})
@@ -56,9 +59,9 @@ class ResearchAgent:
             return AgentResult(answer,'partial' if local.status!='ok' else 'ok',
                                list(dict.fromkeys(r['source_file'] for r in rows[:3])),{'checks':checks}, {'topic':'research'})
         answer='इस सवाल का उत्तर देने के लिए पर्याप्त संबंधित जानकारी नहीं मिली।'
-        if local.status!='ok':
+        if local.status!='ok' or document_verification!='ok':
             answer+=' दस्तावेज़ की semantic खोज या आवश्यक अनुवाद पूरा नहीं हो सका।'
-        if remote and remote.status!='ok':
+        if remote and (remote.status!='ok' or web_verification!='ok'):
             answer+=' वेब खोज या उसके परिणामों की जाँच भी उपलब्ध नहीं हुई।'
         answer+=' कृपया सवाल स्पष्ट करें या संबंधित दस्तावेज़ की उपलब्धता जाँचें।'
         return AgentResult(answer,'unavailable',evidence={'checks':checks},metadata={'topic':'research'})

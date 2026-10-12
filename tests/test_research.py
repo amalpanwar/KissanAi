@@ -17,6 +17,12 @@ def translation(text,names=(),target='hi-IN'):
 
 class ResearchTests(unittest.TestCase):
     def setUp(self):
+        missing=patch('app.supplemental_documents.missing_pdfs',return_value=())
+        missing.start();self.addCleanup(missing.stop)
+        supplementary=patch('app.supplemental_documents.candidates',return_value=([],{'files':0,'failures':[]}))
+        supplementary.start();self.addCleanup(supplementary.stop)
+        verifier=patch('app.evidence_reranker.verify', side_effect=lambda payload, rows: ([r for r in rows if r.get('score', 0) >= .8], 'ok'))
+        verifier.start(); self.addCleanup(verifier.stop)
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.path=Path(self.tmp.name)/'metadata.csv'
         self.metadata=pd.DataFrame([
@@ -35,7 +41,7 @@ class ResearchTests(unittest.TestCase):
             q,info=prepare_query(self.advisor,'kaunsi achhi hai','Rice')
             result=retrieve_documents(self.advisor,dict(question=q,context='Rice',**info))
         sources={r['source_file'] for r in result.evidence['records']}
-        self.assertEqual(sources,{'crop.pdf','hindi.pdf'})
+        self.assertEqual(sources,{'crop.pdf','hindi.pdf','pesticides.pdf'})  # Candidates are checked by the separate verifier.
         calls=[c.args[0][0] for c in self.embedder.encode.call_args_list]
         self.assertTrue(any('What cultivars' in c for c in calls))
         self.assertTrue(any('कौन सी किस्में' in c for c in calls))
