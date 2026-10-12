@@ -4,25 +4,34 @@
   const list = document.getElementById('suggestions');
   const send = document.getElementById('send');
   const status = document.getElementById('status');
+  let crops = [], storageKey = '', restored = false;
   let suggestions = [], visible = [], active = -1, focused = false, dismissed = false;
   const translate = document.getElementById('translate');
   const preview = document.getElementById('hindi-preview');
   const translationStatus = document.getElementById('translation-status');
   let draftTimer, draftId = '', previewOriginal = '', previewReady = false, appliedPreview = '';
+  function persist() {
+    if (!storageKey) return;
+    try { sessionStorage.setItem(storageKey, JSON.stringify({text: input.value, translate: translate.checked,
+      draftId, previewOriginal, previewReady, appliedPreview, previewText: preview.value,
+      previewHidden: preview.hidden, status: translationStatus.textContent})); } catch {}
+  }
   function draft() {
     clearTimeout(draftTimer);
     draftId = ''; previewReady = false; previewOriginal = ''; preview.hidden = true;
     translationStatus.textContent = '';
+    persist();
     if (!translate.checked || !/[a-z]/i.test(input.value)) { resize(); return; }
     translationStatus.textContent = 'हिंदी मसौदा तैयार हो रहा है…';
     draftTimer = setTimeout(() => {
       draftId = `${sessionId}-draft-${++sequence}`;
+      persist();
       post('streamlit:setComponentValue', {value:{kind:'draft',text:input.value.trim(),id:draftId},dataType:'json'});
     }, 900);
     resize();
   }
   translate.addEventListener('change', draft);
-  preview.addEventListener('input', resize);
+  preview.addEventListener('input', () => { persist(); resize(); });
   let previousHeight = 0, sequence = 0;
   const sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2);
   const post = (type, rest = {}) => window.parent.postMessage({ isStreamlitMessage: true, type, ...rest }, '*');
@@ -43,6 +52,22 @@
   function matches(query) {
     const words = tokens(query).filter(word => word.length >= 2);
     if (!words.length) return suggestions;
+    const queryWords = tokens(query);
+    const cropMatches = crops.flatMap(crop => crop.aliases.map(alias => ({crop, words: tokens(alias)})))
+      .filter(row => row.words.length && queryWords.some((_, start) => row.words.every((word, j) => queryWords[start+j] === word)))
+      .sort((a,b) => b.words.length-a.words.length);
+    if (cropMatches.length) {
+      const label = cropMatches[0].crop.label;
+      const completions = [
+        {question: `${label} की कीमत क्या है?`, keywords: 'price rate keemat kimat bhav daam कीमत भाव मूल्य दाम'},
+        {question: `${label} की कौन सी किस्में उपयुक्त हैं?`, keywords: 'variety varieties kisam kism किस्म किस्में प्रकार'},
+        {question: `${label} की खेती कैसे करें?`, keywords: 'grow cultivation kheti खेती उगाएं'},
+        {question: `${label} में रोग और कीट की पहचान कैसे करें?`, keywords: 'pesticide disease pest rog keet dawa रोग कीट दवा'}
+      ];
+      const intentWords = words.filter(word => !['ki', 'ka', 'ke', 'की', 'का', 'के'].includes(word));
+      const filtered = completions.filter(item => tokens(item.keywords).some(key => intentWords.some(word => key.startsWith(word))));
+      return filtered.length ? filtered : completions;
+    }
     return suggestions.map((item, order) => {
       const keys = tokens(item.keywords);
       const score = words.reduce((sum, word) => sum + (keys.some(key => key === word) ? 3 : keys.some(key => key.startsWith(word)) ? 1 : 0), 0);
@@ -102,8 +127,9 @@
     if (!text) return;
     clearTimeout(draftTimer); draftId = ''; previewReady = false; preview.hidden = true;
     translationStatus.textContent = '';
-    post('streamlit:setComponentValue', { value: { text, id: `${sessionId}-${++sequence}` }, dataType: 'json' });
+    post('streamlit:setComponentValue', { value: { kind: 'submit', text, id: `${sessionId}-${++sequence}` }, dataType: 'json' });
     input.value = '';
+    persist();
     dismissed = true;
     refresh();
   }
@@ -129,6 +155,22 @@
   document.getElementById('chat-form').addEventListener('submit', submit);
   window.addEventListener('message', event => {
     if (event.source !== window.parent || event.data?.type !== 'streamlit:render') return;
+    if (!restored) {
+      storageKey = 'kisaan-draft:' + event.data.args?.storage_key;
+      restored = true;
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
+        if (saved) {
+          input.value = saved.text || ''; translate.checked = saved.translate !== false;
+          draftId = saved.draftId || ''; previewOriginal = saved.previewOriginal || '';
+          previewReady = !!saved.previewReady; appliedPreview = saved.appliedPreview || '';
+          preview.value = saved.previewText || ''; preview.hidden = saved.previewHidden !== false;
+          translationStatus.textContent = saved.status || '';
+        }
+      } catch {}
+      refresh();
+    }
+    crops = event.data.args?.crops || [];
     const translated = event.data.args?.preview;
     if (draftId && translated?.id === draftId && appliedPreview !== draftId && translated.original === input.value.trim()) {
       appliedPreview = draftId;
@@ -150,6 +192,7 @@
           }[translated.status] || 'हिंदी अनुवाद उपलब्ध नहीं है।') + ' मूल सवाल भेज सकते हैं।'
         : 'भेजा जाने वाला हिंदी सवाल — नीचे सुधार सकते हैं:';
     }
+    persist();
     const next = (event.data.args?.suggestions || []).filter(item => typeof item.question === 'string' && typeof item.keywords === 'string');
     const changed = JSON.stringify(next) !== JSON.stringify(suggestions);
     suggestions = next;

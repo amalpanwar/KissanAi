@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -46,6 +47,8 @@ def _refresh() -> int:
     lookback = int(os.getenv("AGMARKNET_LOOKBACK_DAYS", "14"))
     requested = os.getenv("AGMARKNET_MODE", "auto").lower()
     modes = ["dashboard", "report"] if requested == "auto" else [requested]
+    modes_per_round = len(modes)
+    modes = modes * max(1, min(2, int(os.getenv("AGMARKNET_REFRESH_ATTEMPTS", "2"))))
     attempts = []
     summary_path = STATUS_JSON.with_name("agmarknet_fetch_summary.json")
     result_status, message, rc = "failed", "No complete refresh succeeded; previous data retained.", 4
@@ -68,13 +71,19 @@ def _refresh() -> int:
                "--out", str(OUT_CSV), "--summary_json", str(summary_path), "--require_complete"]
         if os.getenv("AGMARKNET_ALL_DISTRICTS", "0") == "1":
             cmd.append("--all_districts")
+        if attempts and len(attempts) % modes_per_round == 0:
+            time.sleep(10)
         print(f"Fetching Agmarknet mode={mode}, lookback={lookback}", flush=True)
         summary_path.unlink(missing_ok=True)
         try:
             rc = subprocess.call(cmd, cwd=ROOT, timeout=int(os.getenv("AGMARKNET_RUN_TIMEOUT_SEC", "300")))
         except subprocess.TimeoutExpired:
             rc = 124
-        summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
+        try:
+            summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
+        except (OSError, ValueError):
+            summary = {"status": "failed", "message": "Fetch summary missing or invalid"}
+        print(json.dumps({"mode": mode, "return_code": rc, "summary": summary}), flush=True)
         attempts.append({"mode": mode, "return_code": rc, "summary": summary})
         if rc != 0 or summary.get("status") != "success":
             continue

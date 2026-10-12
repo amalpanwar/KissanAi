@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import streamlit as st
 import streamlit.components.v1 as components
+import uuid
 
 _composer = components.declare_component("kisaan_chat_composer", path=str(Path(__file__).with_name("chat_component")))
 
@@ -17,7 +19,7 @@ SUGGESTIONS = [
 def consume_submission(value, state):
     if not isinstance(value, dict):
         return None
-    if value.get("kind") == "draft":
+    if value.get("kind") != "submit":
         return None
     text = value.get("text")
     submission_id = value.get("id")
@@ -29,12 +31,26 @@ def consume_submission(value, state):
     return text.strip()
 
 
-def render_chat_composer(st):
+def crop_suggestions():
+    from app.commodity_lookup import load_aliases
+    import re
+    result = []
+    for name, aliases in load_aliases().items():
+        hindi = next((a for a in reversed(aliases) if re.search(r'[\u0900-\u097f]', a)), None)
+        if hindi:
+            result.append({"label": hindi, "aliases": list(dict.fromkeys([name, *aliases]))})
+    return result
+
+
+@st.fragment
+def _render_composer(st):
     epoch = st.session_state.get("chat_location_epoch", 0)
     from app.query_translation import translate_query
     preview_key = f"query_preview_{epoch}"
     preview = st.session_state.get(preview_key, {})
-    value = _composer(suggestions=SUGGESTIONS, preview=preview,
+    st.session_state.setdefault("composer_session", uuid.uuid4().hex)
+    value = _composer(suggestions=SUGGESTIONS, crops=crop_suggestions(), preview=preview,
+                      storage_key=f"{st.session_state['composer_session']}:{epoch}",
                       key=f"farmer_autocomplete_chat_{epoch}", default=None)
     if isinstance(value, dict) and value.get("kind") == "draft":
         text = value.get("text", "")
@@ -44,6 +60,18 @@ def render_chat_composer(st):
             names = [location.get(k, "") for k in ('place', 'district', 'state', 'sub_district')]
             result = translate_query(text, names)
             st.session_state[preview_key] = dict(result, id=draft_id, original=text)
-            st.rerun()
+            try:
+                st.rerun(scope="fragment")
+            except st.errors.StreamlitAPIException:
+                # An unrelated full-app rerun can race a queued draft event.
+                st.rerun(scope="app")
         return None
-    return consume_submission(value, st.session_state)
+    submitted = consume_submission(value, st.session_state)
+    if submitted:
+        st.session_state["composer_pending_submit"] = submitted
+        st.rerun(scope="app")
+
+
+def render_chat_composer(st):
+    _render_composer(st)
+    return st.session_state.pop("composer_pending_submit", None)
