@@ -485,6 +485,15 @@ def _section_page_range(crop: str) -> tuple[int, int] | None:
     start_print = toc[target_key]
     later = sorted([p for k, p in toc.items() if p > start_print])
     next_print = later[0] if later else start_print + 12
+    # PDFs can have different front-matter lengths. Prefer their actual
+    # printed page numbers so the next crop cannot leak into this section.
+    printed = {}
+    for index, text in enumerate(_load_pages()):
+        match = re.match(r'^\s*(\d{1,3})(?:\s|$)', text)
+        if match:
+            printed.setdefault(int(match.group(1)), index)
+    if start_print in printed and next_print in printed:
+        return printed[start_print], printed[next_print] - 1
     start_pdf = start_print + PDF_OFFSET - 1
     end_pdf = next_print + PDF_OFFSET - 2
     return start_pdf, end_pdf
@@ -1520,6 +1529,11 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         return f"{label}: {' '.join(parts)}"
 
     if "WEED MANAGEMENT" in heading_key:
+        if crop.lower() == "sugarcane":
+            days = re.search(r'on\s+(\d+),\s*(\d+)\s+and\s+(\d+)\s+DAP', text, re.I)
+            if days:
+                return f"{label}: रोपाई के {', '.join(days.groups())} दिन बाद कतारों में निराई और मेड़ों की गुड़ाई का उल्लेख है।"
+            return ""
         return f"{label}: 3 दिन बाद बुवाई पर प्री-इमर्जेन्स खरपतवारनाशी का छिड़काव करें। उसके बाद 20-35 दिन के बीच 1-2 बार निराई करें।"
 
     if "WATER MANAGEMENT" in heading_key or heading_key == "IRRIGATION":
