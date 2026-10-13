@@ -458,8 +458,11 @@ class RAGAdvisor:
         from app.source_guide import source_crop_guide
         guide = source_crop_guide(self, question, context)
         if guide is not None:
-            return guide
-        if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"} and NEWS_INTENT.search(question):
+            from app.sarvam_generation import generate_guide
+            result = generate_guide(guide, question)
+            result['agent_trace'] = {**result.get('agent_trace', {}),
+                                     'generation': result.get('generation', {})}
+        elif os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"} and NEWS_INTENT.search(question):
             from app.agent_tools import AdvisorTools
             news = AdvisorTools(self).news("Latest agriculture news", {"question": question, "context": context})
             result = {"answer": news.answer, "references": news.references, "topic": "news", "agent_status": news.status}
