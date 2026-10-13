@@ -8,10 +8,28 @@ ROOT = Path(__file__).resolve().parents[1]
 TRENCH = ROOT / 'data/processed/trench_planting_sugarcane_structured.json'
 
 
-def source_crop_guide(advisor, question, context=''):
-    normalized = advisor._normalize_hinglish(question)
+def guide_crop(advisor, normalized, context):
+    # Guide section names differ from commodity names (Bajra is Cumbu).
+    # Resolve the guide's own aliases before consulting commodity/context data.
+    from app.crop_guide import CROP_ALIASES, MANUAL_PAGE_MAP
+    aliases = [(alias, crop) for crop, names in CROP_ALIASES.items()
+               for alias in [crop, *names]]
+    for alias, crop in sorted(aliases, key=lambda item: len(item[0]), reverse=True):
+        if re.search(r'(?<!\w)' + re.escape(alias) + r'(?!\w)', normalized, re.I):
+            return crop
     crop = (advisor._extract_crop_from_query(normalized)
             or advisor._extract_preferred_crop_from_context(context))
+    if crop in MANUAL_PAGE_MAP:
+        return crop
+    for alias, canonical in aliases:
+        if isinstance(crop, str) and crop.casefold() == alias.casefold():
+            return canonical
+    return None
+
+
+def source_crop_guide(advisor, question, context=''):
+    normalized = advisor._normalize_hinglish(question)
+    crop = guide_crop(advisor, normalized, context)
     if crop == 'Sugarcane':
         return sugarcane_guide(advisor, question, context)
     from app.crop_guide import MANUAL_PAGE_MAP, build_crop_production_guide
@@ -41,8 +59,7 @@ def source_crop_guide(advisor, question, context=''):
 
 def sugarcane_guide(advisor, question, context=''):
     normalized = advisor._normalize_hinglish(question)
-    crop = (advisor._extract_crop_from_query(normalized)
-            or advisor._extract_preferred_crop_from_context(context))
+    crop = guide_crop(advisor, normalized, context)
     if crop != 'Sugarcane' or advisor._has_profitability_terms(normalized):
         return None
     from app.agent_system import Coordinator

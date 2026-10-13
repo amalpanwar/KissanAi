@@ -38,6 +38,26 @@ class SourceGuideTests(unittest.TestCase):
         self.assertIn('7. SUGARCANE', text)
         self.assertNotIn('8. SWEET SORGHUM', text)
 
+    def test_bajra_aliases_use_cumbu_guide_without_models(self):
+        for question in ['Bajra ki kheti kaise kare', 'बाजरा की खेती कैसे करें?',
+                         'How to grow pearl millet?', 'How to grow cumbu?']:
+            with self.subTest(question=question), patch.object(
+                    self.advisor, '_ensure_rag_components', side_effect=AssertionError('No model loading')), patch(
+                    'app.multilingual_retrieval.translate_query', side_effect=AssertionError('No query translation')):
+                result = self.advisor.answer(question)
+            self.assertEqual(result['agent_status'], 'ok')
+            self.assertIn('बाजरा', result['answer'])
+            self.assertEqual(result['agent_trace']['backend_question'], 'Cumbu')
+            self.assertEqual(result['references'], ['data/raw/Crop Production guide.pdf'])
+
+    def test_all_guide_aliases_resolve_without_commodity_dictionary(self):
+        from app.source_guide import guide_crop
+        from app.crop_guide import CROP_ALIASES
+        for crop, aliases in CROP_ALIASES.items():
+            for alias in [crop, *aliases]:
+                with self.subTest(crop=crop, alias=alias):
+                    self.assertEqual(guide_crop(self.advisor, alias, ''), crop)
+
     def test_rice_and_wheat_guides_without_models_or_translation(self):
         for question, label in [('Rice ki kheti kaise kare', 'धान'),
                                 ('धान की खेती कैसे करें?', 'धान'),
