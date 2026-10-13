@@ -455,8 +455,8 @@ class RAGAdvisor:
         from app.hindi_translation import translate_answer
         from app.agriculture_news import NEWS_INTENT
         context, question = self._split_context_and_question(user_query)
-        from app.source_guide import sugarcane_guide
-        guide = sugarcane_guide(self, question, context)
+        from app.source_guide import source_crop_guide
+        guide = source_crop_guide(self, question, context)
         if guide is not None:
             return guide
         if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"} and NEWS_INTENT.search(question):
