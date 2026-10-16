@@ -4,6 +4,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 from app.advisor import RAGAdvisor, AdvisorConfig
+from app.hindi_translation import TOKEN
 from app.crop_guide import GUIDE_PDF, _section_page_range, _extract_section_text
 
 
@@ -13,13 +14,18 @@ class SourceGuideTests(unittest.TestCase):
             if os.getenv('CI'):
                 self.fail('Both sugarcane source PDFs must be deployed')
             self.skipTest('Repository source PDFs absent')
+        settings = patch('app.hindi_translation._setting', side_effect=lambda name, default='': 'test-key' if name == 'SARVAM_API_KEY' else default)
+        settings.start(); self.addCleanup(settings.stop)
+        translator = patch('app.hindi_translation._translate', side_effect=lambda text, key, timeout: 'हिंदी विवरण ' + ' '.join(TOKEN.findall(text)))
+        translator.start(); self.addCleanup(translator.stop)
+        generator = patch('app.sarvam_generation.generate_guide', side_effect=lambda result, question: result)
+        generator.start(); self.addCleanup(generator.stop)
         self.advisor = RAGAdvisor(AdvisorConfig('unused', 'unused', 'missing', 'missing', 3))
 
-    def test_hindi_hinglish_and_english_guide_without_models_or_translation(self):
+    def test_hindi_hinglish_and_english_guide_without_local_models(self):
         for question in ['Ganne ki kheti kaise kare', 'गन्ने की खेती कैसे करें?', 'How to grow sugarcane?']:
             with self.subTest(question=question), patch(
-                    'app.multilingual_retrieval.translate_query', side_effect=AssertionError('No query translation')), patch(
-                    'app.hindi_translation.translate_answer', side_effect=AssertionError('Already rendered Hindi')), patch.object(
+                    'app.multilingual_retrieval.translate_query', side_effect=AssertionError('No query translation')), patch.object(
                     self.advisor, '_ensure_rag_components', side_effect=AssertionError('No model loading')):
                 result = self.advisor.answer(question)
             self.assertEqual(result['agent_status'], 'ok')
@@ -31,6 +37,19 @@ class SourceGuideTests(unittest.TestCase):
             self.assertIn('data/raw/Trench_Planting_Sugarcane.pdf', result['references'])
             self.assertNotIn('बीज की गहराई लगभग 2 सेमी', result['answer'])
             self.assertNotIn('20-35', result['answer'])
+
+    def test_bajra_uses_final_sarvam_translation(self):
+        result = self.advisor.answer('Bajra ki kheti kaise kare')
+        self.assertEqual(result['translation']['provider'], 'sarvam')
+        self.assertEqual(result['translation']['status'], 'translated')
+        self.assertNotIn('Apply', result['answer'])
+
+    def test_failed_guide_translation_does_not_show_english(self):
+        with patch('app.hindi_translation._translate', side_effect=TimeoutError):
+            result = self.advisor.answer('Bajra ki kheti kaise kare')
+        self.assertEqual(result['agent_status'], 'unavailable')
+        self.assertNotIn('Apply', result['answer'])
+        self.assertEqual(result['translation']['status'], 'fallback')
 
     def test_sugarcane_section_stops_before_sweet_sorghum(self):
         self.assertEqual(_section_page_range('Sugarcane'), (296, 318))
@@ -58,14 +77,13 @@ class SourceGuideTests(unittest.TestCase):
                 with self.subTest(crop=crop, alias=alias):
                     self.assertEqual(guide_crop(self.advisor, alias, ''), crop)
 
-    def test_rice_and_wheat_guides_without_models_or_translation(self):
+    def test_rice_and_wheat_guides_without_local_models(self):
         for question, label in [('Rice ki kheti kaise kare', 'धान'),
                                 ('धान की खेती कैसे करें?', 'धान'),
                                 ('How to grow rice?', 'धान'),
                                 ('gehu ki kheti kaise kare', 'गेहूं')]:
             with self.subTest(question=question), patch(
-                    'app.multilingual_retrieval.translate_query', side_effect=AssertionError('No query translation')), patch(
-                    'app.hindi_translation.translate_answer', side_effect=AssertionError('No output translation')), patch.object(
+                    'app.multilingual_retrieval.translate_query', side_effect=AssertionError('No query translation')), patch.object(
                     self.advisor, '_ensure_rag_components', side_effect=AssertionError('No model loading')):
                 result = self.advisor.answer(question)
             self.assertEqual(result['agent_status'], 'ok')

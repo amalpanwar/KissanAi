@@ -1,6 +1,6 @@
 # Document retrieval and Hindi answers
 
-Known cultivation questions for crops recognized by the production guide, including rice, wheat, and sugarcane, first use the existing source guide renderer. Sugarcane alone also uses the verified trench extraction for cultivation and trench-method questions. This path reads the supplied PDFs without loading embeddings, reranking, generation models, or translation services. SSNM nutrient-uptake figures are extracted directly from the trench PDF and labeled as study values, not fertilizer prescriptions. General cultivation answers cite both available sources. Other agronomic questions retain the research pipeline below.
+Known cultivation questions first select the existing crop-production guide content without loading local embedding, reranking, or generation models. Sugarcane also selects its reviewed trench extraction and reads SSNM study figures from the supplied PDF. Sarvam chat (`sarvam-105b`, `/v1/chat/completions`) rewrites selected guide content into a practical Hindi answer; references are retained. Generation rejects truncated outputs, predominantly English outputs, and numeric values absent from the source content. These checks do not establish semantic faithfulness. If generation is unavailable or invalid, the original guide content passes through Sarvam translation. Guide answers always use the shared final Hindi check; failed translation shows a Hindi failure message instead of mixed-language source text.
 
 Agronomic questions, including cultivation guides and crop follow-ups, use the document research pipeline. Profitability questions continue to use the structured financial tools.
 
@@ -10,3 +10,6 @@ Agronomic questions, including cultivation guides and crop follow-ups, use the d
 4. Translate the generated answer into Hindi using the existing protected-value translation pipeline. Keep source references and retrieval records. If translation is disabled, unavailable, or invalid, show a Hindi failure message instead of silently displaying English as the final answer.
 
 Deployment requires the configured embedding model and index, cross-encoder, answer-generation model, and a working Sarvam API key for query and output translation. Tests use controlled inference and translation fixtures; passing CI does not establish live provider availability or evaluate the deployed model's agronomic accuracy.
+
+
+Sarvam generation and translation use `SARVAM_API_KEY` from the existing environment/Streamlit secrets. `KISAANAI_SARVAM_CHAT_MODEL` defaults to `sarvam-105b`; `KISAANAI_SARVAM_GENERATION=0` disables generation while retaining final translation. Chat access is separate from translation access. Generation has a 25-second request timeout and does not fall back to loading a local model. Generation metadata is included in the agent trace. Unit tests mock provider calls; deployment API access must be verified separately.
