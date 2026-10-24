@@ -50,7 +50,7 @@ def source_crop_guide(advisor, question, context=''):
                 'references': [], 'retrieved': [], 'topic': 'crop_guide', 'agent_status': 'unavailable'}
     return {'answer': answer + '\n\nयह जानकारी फसल उत्पादन गाइड से है; क्षेत्र और मिट्टी के अनुसार स्थानीय उपयुक्तता की जाँच करें।',
             'references': sources, 'retrieved': [], 'topic': 'crop_guide', 'agent_status': 'ok',
-            'translation': {'provider': 'source_renderer', 'status': 'not_needed', 'version': 'crop-source-v1'},
+            'requires_hindi': True,
             'agent_trace': {'plan': ['agronomy'], 'planner': 'source_guide', 'calls': 0,
                             'display_question': question, 'backend_question': crop,
                             'decisions': [{'agent': 'agronomy', 'status': 'ok',
@@ -119,7 +119,7 @@ def sugarcane_guide(advisor, question, context=''):
     status = 'partial' if (general and not guide_found) or (trench and not trench_found) else 'ok'
     return {'answer': '\n\n'.join(parts), 'references': list(dict.fromkeys(references)),
             'retrieved': [], 'topic': 'crop_guide', 'agent_status': status,
-            'translation': {'provider': 'source_renderer', 'status': 'not_needed', 'version': 'sugarcane-source-v1'},
+            'requires_hindi': True,
             'agent_trace': {'plan': ['agronomy'], 'planner': 'source_guide', 'calls': 0,
                             'display_question': question, 'backend_question': 'Sugarcane',
                             'decisions': [{'agent': 'agronomy', 'status': 'ok',
