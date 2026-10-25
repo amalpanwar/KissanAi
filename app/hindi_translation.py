@@ -13,7 +13,7 @@ from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v3'
+TRANSLATION_VERSION = 'sarvam-hindi-v4'
 
 
 class TranslationValidationError(ValueError):
@@ -113,7 +113,7 @@ def _translate(text: str, api_key: str, timeout: float) -> str:
     request = Request(ENDPOINT, data=json.dumps({
         'input': text, 'source_language_code': 'en-IN',
         'target_language_code': 'hi-IN', 'model': MODEL,
-        'mode': 'formal', 'numerals_format': 'international',
+        'mode': 'formal',
     }).encode('utf-8'), headers={
         'Content-Type': 'application/json', 'api-subscription-key': api_key,
     }, method='POST')
@@ -177,7 +177,7 @@ def translate_answer(result: dict) -> dict:
                 calls += 1
                 remaining = deadline - time.monotonic()
                 if calls > 24 or remaining <= 0:
-                    raise TimeoutError('Translation budget exceeded')
+                    raise TranslationValidationError('request_limit' if calls > 24 else 'translation_deadline')
                 translated.append(_translate(chunk, key, min(8.0, remaining)))
             replacements.append((match.start(), match.end(), prefix + ' '.join(translated) + suffix))
         output = protected
@@ -193,3 +193,4 @@ def translate_answer(result: dict) -> dict:
         reason = (f'http_{exc.code}' if isinstance(exc, HTTPError) else
                   str(exc) if isinstance(exc, TranslationValidationError) else type(exc).__name__)
         return finish(original, 'fallback', reason)
+

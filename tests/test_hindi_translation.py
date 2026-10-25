@@ -29,6 +29,7 @@ class TranslationTests(unittest.TestCase):
             self.assertEqual(payload['model'], 'sarvam-translate:v1')
             self.assertEqual(payload['source_language_code'], 'en-IN')
             self.assertEqual(payload['target_language_code'], 'hi-IN')
+            self.assertNotIn('numerals_format', payload)
             self.assertLessEqual(len(payload['input']), 2000)
             self.assertNotIn('private farmer context', payload['input'])
             tokens = TOKEN.findall(payload['input'])
@@ -90,6 +91,7 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(out['translation']['status'], 'fallback')
         self.assertEqual(out['answer'], source['answer'])
         self.assertEqual(call.call_count, 24)
+        self.assertEqual(out['translation']['reason'], 'request_limit')
 
     def test_links_code_and_markdown_list_retained(self):
         with patch('app.hindi_translation.urlopen', side_effect=lambda *a, **kw: self.response('स्रोत')):
@@ -113,3 +115,4 @@ class TranslationTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
