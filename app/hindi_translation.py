@@ -110,6 +110,7 @@ def _chunks(text: str, limit: int = 1800) -> list[str]:
 
 @lru_cache(maxsize=256)
 def _translate(text: str, api_key: str, timeout: float) -> str:
+    deadline = time.monotonic() + timeout
     request = Request(ENDPOINT, data=json.dumps({
         'input': text, 'source_language_code': 'en-IN',
         'target_language_code': 'hi-IN', 'model': MODEL,
@@ -123,7 +124,28 @@ def _translate(text: str, api_key: str, timeout: float) -> str:
         raise TranslationValidationError('empty_response')
     # Each protected item must occur exactly once and stay in source order.
     if TOKEN.findall(output) != TOKEN.findall(text):
-        raise TranslationValidationError('protected_values_changed')
+        if not TOKEN.search(text):
+            raise TranslationValidationError('protected_values_changed')
+        # Some providers translate placeholder spellings. Discard that output
+        # and retry prose only; values and token positions stay entirely local.
+        parts = re.split('(' + TOKEN.pattern + ')', text)
+        prose = [part for part in parts if not TOKEN.fullmatch(part) and re.search('[A-Za-z]', part)]
+        if len(prose) > 12:
+            raise TranslationValidationError('protected_fragment_limit')
+        repaired = []
+        for part in parts:
+            if TOKEN.fullmatch(part) or not re.search('[A-Za-z]', part):
+                repaired.append(part)
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TranslationValidationError('translation_deadline')
+            prefix = re.match(r'^\s*', part).group()
+            suffix = re.search(r'\s*$', part).group()
+            repaired.append(prefix + _translate(part.strip(), api_key, remaining) + suffix)
+        output = ''.join(repaired)
+        if TOKEN.findall(output) != TOKEN.findall(text):
+            raise TranslationValidationError('protected_values_changed')
     residual = TOKEN.sub('', output)
     if re.search(r'\d', residual) or re.search(r'[A-Za-z]', residual):
         raise TranslationValidationError('untranslated_text_or_new_numbers')

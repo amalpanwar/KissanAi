@@ -53,6 +53,32 @@ class TranslationTests(unittest.TestCase):
         call.assert_not_called()
         self.assertEqual(out['translation']['status'], 'not_needed')
 
+    def test_changed_placeholders_retry_prose_without_sending_values(self):
+        inputs = []
+        def server(request, timeout):
+            text = json.loads(request.data)['input']
+            inputs.append(text)
+            if TOKEN.search(text):
+                return self.response('प्रदाता ने प्लेसहोल्डर बदल दिए')
+            return self.response('गोबर की खाद डालें')
+        with patch('app.hindi_translation.urlopen', side_effect=server):
+            out = translate_answer({'answer': 'Apply 750 kg FYM before sowing.', 'references': ['guide.pdf']})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertIn('750 kg FYM', out['answer'])
+        self.assertEqual(out['references'], ['guide.pdf'])
+        self.assertGreater(len(inputs), 1)
+        self.assertTrue(all(not TOKEN.search(text) for text in inputs[1:]))
+        self.assertTrue(all('750' not in text for text in inputs))
+
+    def test_prose_retry_rejects_new_numbers(self):
+        def server(request, timeout):
+            text = json.loads(request.data)['input']
+            return self.response('बदले हुए प्लेसहोल्डर' if TOKEN.search(text) else '999 किग्रा डालें')
+        with patch('app.hindi_translation.urlopen', side_effect=server):
+            out = translate_answer({'answer': 'Apply 750 kg FYM.'})
+        self.assertEqual(out['translation']['status'], 'fallback')
+        self.assertNotIn('999', out['answer'])
+
     def test_lost_changed_reordered_or_duplicated_numbers_rejected(self):
         for text in ['80 किग्रा डालें', 'ZXQBQXZ फिर ZXQAQXZ डालें',
                      'ZXQAQXZ और ZXQAQXZ डालें', 'ZXQAQXZ और ZXQBQXZ 999 डालें']:
