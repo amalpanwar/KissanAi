@@ -88,7 +88,7 @@ class GuideSectionTests(unittest.TestCase):
         advisor.__dict__.update(fixture.advisor.__dict__)
         for question, section in [('गेहूं की खेती कैसे करें?', 'WHEAT'), ('बाजरे की खेती कैसे करें?', 'Cumbu')]:
             with self.subTest(question=question):
-                fixture.generator.generate.return_value = 'Cultivation follows the source guide. [1]'
+                fixture.generator.generate.return_value = 'Cultivation follows the source guide.'
                 model = MagicMock()
                 model.predict.side_effect = lambda pairs, **kw: np.linspace(-1, -5, len(pairs))
                 def query_translation(text, names=(), target='hi-IN'):
@@ -107,5 +107,8 @@ class GuideSectionTests(unittest.TestCase):
                 self.assertGreater(len(result['retrieved']), 3)
                 self.assertTrue(any('HARVEST' in r['text'].upper() for r in result['retrieved']))
                 self.assertEqual(fixture.generator.generate.call_args.kwargs['timeout'], 45)
+                self.assertIn(str(GUIDE), result['references'])
+                self.assertEqual(fixture.generator.generate.call_count, 1)
+                fixture.generator.generate.reset_mock()
                 advisor._ensure_rag_components.assert_not_called()
                 web.assert_not_called()

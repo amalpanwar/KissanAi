@@ -42,11 +42,11 @@ class GenerationValidationError(ValueError):
         self.reason = reason
 
 
-def _validate_answer(answer, evidence):
+def _validate_answer(answer, evidence, *, require_citations=True):
     if answer == 'INSUFFICIENT_EVIDENCE':
         raise GenerationValidationError('insufficient_evidence')
     citations = re.findall(r'\[(\d+)\]', answer)
-    if not answer or not citations:
+    if not answer or (require_citations and not citations):
         raise GenerationValidationError('missing_evidence_citations')
     if any(int(i) not in range(1, len(evidence) + 1) for i in citations):
         raise GenerationValidationError('invalid_evidence_citations')
@@ -61,6 +61,11 @@ def synthesize(advisor, payload, rows, diagnostics=None):
     from app.sarvam_generation import generate_text
     guide_overview = bool(rows) and all(row.get('guide_overview') for row in rows)
     selected = rows if guide_overview else rows[:3]
+    # References for a resolved single-PDF overview are supplied by the app,
+    # independent of the model's optional inline citation formatting.
+    source_scoped = (guide_overview and len({row['source_file'] for row in selected}) == 1
+                     and len({row.get('guide_section') for row in selected}) == 1
+                     and bool(selected[0].get('guide_section')))
     evidence = [dict(id=i, text=row['text'], source=row['source_file'],
                      page=row.get('page')) for i, row in enumerate(selected, 1)]
     query = (payload.get('query_variants') or {}).get('en-IN', payload['question'])
@@ -79,15 +84,18 @@ def synthesize(advisor, payload, rows, diagnostics=None):
         'If only part is supported, answer only that part and state the gaps. '
         'Cite every supported point using evidence IDs such as [1]. '
         'Do not cite IDs outside the supplied evidence.\n'
+        + ('Inline evidence IDs are optional for this single-source crop guide; the app attaches the PDF reference.\n' if source_scoped else '')
         + json.dumps({'question': query, 'evidence': evidence}, ensure_ascii=False)
     )
     diagnostics = diagnostics if diagnostics is not None else {}
     diagnostics.update(attempts=0, validation_failures=[])
+    if source_scoped:
+        diagnostics['reference_mode'] = 'app_attached_pdf_section'
     for attempt in range(2):
         diagnostics['attempts'] += 1
         try:
             answer = (generate_text(prompt, timeout=45) if guide_overview else generate_text(prompt)).strip()
-            _validate_answer(answer, evidence)
+            _validate_answer(answer, evidence, require_citations=not source_scoped)
             return answer
         except ValueError as exc:
             reason = (exc.reason if isinstance(exc, GenerationValidationError) else
