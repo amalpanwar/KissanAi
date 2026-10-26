@@ -114,6 +114,27 @@ class GroundedAnswerTests(unittest.TestCase):
         self.assertNotIn('INSUFFICIENT_EVIDENCE', result.answer)
         self.assertNotIn('Plant', result.answer)
 
+    def test_single_source_guide_without_inline_citations_still_validates_quantities(self):
+        rows = [{**self.rows[0], 'guide_overview': True, 'guide_section': 'Sugarcane'}]
+        self.fixture.generator.generate.return_value = 'Plant cane in trenches 30 cm deep.'
+        diagnostics = {}
+        self.assertEqual(synthesize(self.fixture.advisor, {'question': 'cane?'}, rows, diagnostics),
+                         'Plant cane in trenches 30 cm deep.')
+        self.assertEqual(diagnostics['attempts'], 1)
+        self.assertEqual(diagnostics['reference_mode'], 'app_attached_pdf_section')
+        for invalid in ['Plant cane 999 cm deep.', 'Plant cane 30 cm deep. [4]']:
+            with self.subTest(invalid=invalid):
+                self.fixture.generator.generate.return_value = invalid
+                with self.assertRaises(ValueError):
+                    synthesize(self.fixture.advisor, {'question': 'cane?'}, rows)
+
+    def test_multiple_pdf_sources_still_require_citations(self):
+        rows = [{**self.rows[0], 'guide_overview': True, 'guide_section': 'Sugarcane'},
+                {**self.rows[0], 'source_file': 'other.pdf', 'guide_overview': True, 'guide_section': 'Sugarcane'}]
+        self.fixture.generator.generate.return_value = 'Plant cane 30 cm deep.'
+        with self.assertRaisesRegex(ValueError, 'missing_evidence_citations'):
+            synthesize(self.fixture.advisor, {'question': 'cane?'}, rows)
+
     def test_missing_generator_does_not_dump_excerpts(self):
         self.fixture.generator.generate.side_effect = RuntimeError('remote generation unavailable')
         with patch('app.multilingual_retrieval.translate_query', side_effect=fixtures.translation):
