@@ -53,6 +53,41 @@ class TranslationTests(unittest.TestCase):
         call.assert_not_called()
         self.assertEqual(out['translation']['status'], 'not_needed')
 
+    def test_written_number_equivalents_are_not_invented_quantities(self):
+        for source, output in [('Apply two equal doses.', '२ समान मात्रा में डालें।'),
+                               ('Use half the nitrogen.', '0.5 नाइट्रोजन का उपयोग करें।'),
+                               ('Wait twenty-five days.', '25 दिन प्रतीक्षा करें।')]:
+            with self.subTest(source=source), patch('app.hindi_translation.urlopen', return_value=self.response(output)):
+                out = translate_answer({'answer': source})
+            self.assertEqual(out['translation']['status'], 'translated')
+
+    def test_duplicate_reordered_and_negative_written_quantities_are_rejected(self):
+        for output in ['2 और 2 मात्रा डालें।', '-2 मात्रा डालें।', '3 और 2 मात्रा डालें।']:
+            with self.subTest(output=output), patch('app.hindi_translation.urlopen', return_value=self.response(output)):
+                out = translate_answer({'answer': 'Apply two doses then three doses.'})
+            self.assertEqual(out['translation']['status'], 'fallback')
+            self.assertEqual(out['translation']['reason'], 'new_numbers')
+
+    def test_remaining_english_retries_native_sarvam_model_without_values(self):
+        def server(request, timeout):
+            payload = json.loads(request.data)
+            if payload['model'] == 'sarvam-translate:v1':
+                tokens = TOKEN.findall(payload['input'])
+                return self.response('बुवाई से पहले compost डालें ' + ' '.join(tokens))
+            self.assertEqual(payload['model'], 'mayura:v1')
+            self.assertEqual(payload['output_script'], 'fully-native')
+            self.assertLessEqual(len(payload['input']), 1000)
+            self.assertNotIn('750', payload['input'])
+            self.assertFalse(TOKEN.search(payload['input']))
+            return self.response('गोबर की खाद मिट्टी में मिलाएँ')
+        with patch('app.hindi_translation.urlopen', side_effect=server):
+            out = translate_answer({'answer': 'Apply 750 kg FYM before sowing.', 'references': ['guide.pdf']})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertEqual(out['translation']['retry_model'], 'mayura:v1')
+        self.assertIn('750 kg FYM', out['answer'])
+        self.assertNotIn('compost', out['answer'])
+        self.assertEqual(out['references'], ['guide.pdf'])
+
     def test_changed_placeholders_retry_prose_without_sending_values(self):
         inputs = []
         def server(request, timeout):

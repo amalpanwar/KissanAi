@@ -40,11 +40,16 @@ def render_response_footer(st, item):
                     if evidence.get('reason'):
                         st.write('Search outcome: ' + evidence['reason'])
                 elif sender == 'documents':
-                    st.write(f"Documents: {payload.get('status', 'unavailable')}; relevant passages: {len(evidence.get('records', []))}")
+                    st.write(f"Documents: {payload.get('status', 'unavailable')}; candidate passages: {len(evidence.get('records', []))}")
                     if evidence.get('queries'):
                         st.json(evidence['queries'])
                     if evidence.get('reason'):
                         st.write('Document search outcome: ' + evidence['reason'])
+                elif sender == 'research':
+                    st.write(f"Reranked passages used: {len((payload.get('metadata') or {}).get('retrieved', []))}")
+                    generation = (evidence.get('checks') or {}).get('generation')
+                    if generation:
+                        st.json({'generation': generation})
             st.json(trace.get('decisions', []))
     refs = clean_references(item.get('references', []))
     if refs:

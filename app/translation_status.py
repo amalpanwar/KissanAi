@@ -22,6 +22,8 @@ def render_translation_status(st, info):
         'protected_fragment_limit': 'इस अंश में बहुत अधिक मात्रा या नाम थे; सुरक्षित अनुवाद पूरा नहीं हो सका।',
         'protected_values_lost': 'अनुवाद में मात्रा या नाम खो गए; उत्तर स्वीकार नहीं हुआ।',
         'untranslated_text_or_new_numbers': 'अनुवाद में अंग्रेज़ी पाठ या नई संख्याएँ मिलीं; उत्तर स्वीकार नहीं हुआ।',
+        'untranslated_text': 'दोबारा अनुवाद के बाद भी अंग्रेज़ी पाठ बचा है; उत्तर स्वीकार नहीं हुआ।',
+        'new_numbers': 'अनुवाद की संख्याएँ स्रोत की मात्राओं से मेल नहीं खातीं; उत्तर स्वीकार नहीं हुआ।',
         'hindi_missing': 'अनुवाद सेवा ने हिंदी उत्तर नहीं लौटाया।',
         'empty_response': 'अनुवाद सेवा का उत्तर खाली था।',
     }
@@ -29,4 +31,4 @@ def render_translation_status(st, info):
         st.caption(' '.join(filter(None, [captions[status], reasons.get(info.get('reason'))])))
     with st.expander('हिंदी अनुवाद की स्थिति'):
         # Show only non-sensitive, stable fields, never service bodies or credentials.
-        st.json({k: info[k] for k in ('provider', 'model', 'version', 'status', 'reason') if k in info})
+        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason') if k in info})

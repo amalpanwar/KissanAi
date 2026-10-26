@@ -6,6 +6,16 @@ from app.chat_response import clean_references, render_response_footer
 
 
 class ResponseFooterTests(unittest.TestCase):
+    def test_candidates_are_distinct_from_reranked_evidence(self):
+        st = MagicMock()
+        render_response_footer(st, {'agent_trace': {'messages': [
+            {'kind': 'result', 'sender': 'documents', 'payload': {'status': 'ok', 'evidence': {'records': [{}] * 191}}},
+            {'kind': 'result', 'sender': 'research', 'payload': {'metadata': {'retrieved': [{}, {}, {}]},
+             'evidence': {'checks': {'generation': {'status': 'ok', 'provider': 'sarvam'}}}}}
+        ]}})
+        messages = [call.args[0] for call in st.write.call_args_list]
+        self.assertIn('Documents: ok; candidate passages: 191', messages)
+        self.assertIn('Reranked passages used: 3', messages)
     def test_sources_are_not_empty_markdown_bullets(self):
         self.assertEqual(clean_references(['-', '*', '', None, 'guide.pdf', 'guide.pdf']), ['guide.pdf'])
         st=MagicMock()
