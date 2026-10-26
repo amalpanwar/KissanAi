@@ -31,7 +31,26 @@ def web(payload,advisor=None):
                   'query':query,'results_received':len(response['results']),'relevant_results':len(rows)})
 
 
-def synthesize(advisor, payload, rows):
+class GenerationValidationError(ValueError):
+    """Safe, stable diagnostics without provider bodies or farmer text."""
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _validate_answer(answer, evidence):
+    citations = re.findall(r'\[(\d+)\]', answer)
+    if not answer or not citations:
+        raise GenerationValidationError('missing_evidence_citations')
+    if any(int(i) not in range(1, len(evidence) + 1) for i in citations):
+        raise GenerationValidationError('invalid_evidence_citations')
+    prose = re.sub(r'\[\d+\]', '', answer)
+    numbers = lambda text: set(re.findall(r'\d+(?:[.,]\d+)*', text))
+    if not numbers(prose).issubset(numbers(' '.join(str(row['text']) for row in evidence))):
+        raise GenerationValidationError('unsupported_quantities')
+
+
+def synthesize(advisor, payload, rows, diagnostics=None):
     """Generate an English answer from reranked evidence, before Hindi translation."""
     from app.sarvam_generation import generate_text
     evidence = [dict(id=i, text=row['text'], source=row['source_file'],
@@ -49,17 +68,31 @@ def synthesize(advisor, payload, rows):
         'Do not cite IDs outside the supplied evidence.\n'
         + json.dumps({'question': query, 'evidence': evidence}, ensure_ascii=False)
     )
-    answer = generate_text(prompt).strip()
-    citations = re.findall(r'\[(\d+)\]', answer)
-    if not answer or not citations or any(int(i) not in range(1, len(evidence)+1) for i in citations):
-        raise ValueError('Missing or invalid evidence citations')
-    # A citation is not proof of factual accuracy, but novel quantities are
-    # detectable and must not be introduced into agronomic advice.
-    prose = re.sub(r'\[\d+\]', '', answer)
-    numbers = lambda text: set(re.findall(r'\d+(?:[.,]\d+)*', text))
-    if not numbers(prose).issubset(numbers(' '.join(str(row['text']) for row in rows))):
-        raise ValueError('Unsupported quantities')
-    return answer
+    diagnostics = diagnostics if diagnostics is not None else {}
+    diagnostics.update(attempts=0, validation_failures=[])
+    for attempt in range(2):
+        diagnostics['attempts'] += 1
+        try:
+            answer = generate_text(prompt).strip()
+            _validate_answer(answer, evidence)
+            return answer
+        except ValueError as exc:
+            reason = (exc.reason if isinstance(exc, GenerationValidationError) else
+                      'incomplete_generation' if str(exc) == 'incomplete_generation' else None)
+            if reason is None:
+                raise
+            diagnostics['validation_failures'].append(reason)
+            if attempt:
+                raise
+            # The failed answer is discarded, not used as evidence. The same
+            # source passages and fixed validation feedback drive one retry.
+            prompt += ('\nThe previous attempt was rejected: ' + reason + '. '
+                       'Produce a new complete answer from the SAME evidence. '
+                       'Use only unnumbered bullets, cite each point with [1] style IDs, '
+                       'and copy numeric quantities exactly from the evidence. '
+                       'Omit unsupported details; do not calculate or convert quantities. '
+                       'Keep the answer concise enough to finish within the output limit.')
+    raise AssertionError('Unreachable synthesis state')
 
 
 class ResearchAgent:
@@ -80,16 +113,20 @@ class ResearchAgent:
         if remote:
             checks.update({'web_provider':remote.evidence.get('provider'),'web_reason':remote.evidence.get('reason')})
         if rows:
+            generation = {}
             try:
-                answer = synthesize(self.advisor, payload, rows)
+                answer = synthesize(self.advisor, payload, rows, generation)
             except Exception as exc:
                 known = {'sarvam_not_configured', 'sarvam_generation_disabled', 'incomplete_generation'}
-                reason = f'http_{exc.code}' if isinstance(exc, HTTPError) else str(exc) if str(exc) in known else type(exc).__name__
-                checks['generation'] = {'status': 'unavailable', 'provider': 'sarvam',
+                reason = (exc.reason if isinstance(exc, GenerationValidationError) else
+                          f'http_{exc.code}' if isinstance(exc, HTTPError) else
+                          str(exc) if str(exc) in known else type(exc).__name__)
+                checks['generation'] = {**generation, 'status': 'unavailable', 'provider': 'sarvam',
                                         'error_type': type(exc).__name__, 'reason': reason}
                 return AgentResult('संबंधित स्रोत मिले हैं, लेकिन उनसे उत्तर तैयार नहीं हो सका। कृपया फिर प्रयास करें।',
-                    'unavailable', evidence={'checks': checks}, metadata={'topic': 'research'})
-            checks['generation'] = {'status': 'ok', 'provider': 'sarvam', 'language': 'en-IN'}
+                    'unavailable', references=[r['source_file'] for r in rows[:3]],
+                    evidence={'checks': checks}, metadata={'topic': 'research', 'retrieved': rows[:3]})
+            checks['generation'] = {**generation, 'status': 'ok', 'provider': 'sarvam', 'language': 'en-IN'}
             return AgentResult(answer,'partial' if local.status!='ok' else 'ok',
                                [r['source_file'] for r in rows[:3]], {'checks':checks},
                                {'topic':'research', 'retrieved':rows[:3], 'requires_hindi':True})
