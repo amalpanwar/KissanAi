@@ -145,15 +145,33 @@ class TranslationTests(unittest.TestCase):
 
     def test_long_input_chunks_and_budget(self):
         self.assertTrue(all(len(s) <= 1800 for s in _chunks('word ' * 1000)))
-        with patch('app.hindi_translation.urlopen', side_effect=lambda *a, **kw: self.response('उर्वरक डालें')) as call:
-            source = {'answer': '\n'.join(['Apply fertiliser'] * 25)}
-            # Distinct fragments defeat the success cache, exercising request budget.
-            source['answer'] = '\n'.join('Apply ' + chr(97+i) + ' fertiliser' for i in range(25))
+        with patch('app.hindi_translation.urlopen') as call:
+            source = {'answer': 'Apply fertiliser. ' * 3000}
             out = translate_answer(source)
         self.assertEqual(out['translation']['status'], 'fallback')
         self.assertEqual(out['answer'], source['answer'])
         self.assertEqual(call.call_count, 0)
+        self.assertGreater(out['translation']['request_chunks'], 24)
         self.assertEqual(out['translation']['reason'], 'request_limit')
+
+    def test_many_formatted_lines_are_batched_not_counted_as_requests(self):
+        source = '# Wheat cultivation\n\n' + '\n'.join(f'- Apply {i} kg FYM.' for i in range(1, 36))
+        requests = []
+        def server(request, timeout):
+            text = json.loads(request.data)['input']
+            requests.append(text)
+            self.assertLessEqual(len(text), 1800)
+            return self.response(text.replace('Wheat cultivation', 'गेहूं की खेती').replace('Apply', 'डालें'))
+        with patch('app.hindi_translation.urlopen', side_effect=server):
+            out = translate_answer({'answer': source, 'references': ['guide.pdf']})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertEqual(out['translation']['request_chunks'], len(requests))
+        self.assertLess(len(requests), 4)
+        self.assertNotIn('Apply', out['answer'])
+        self.assertFalse(TOKEN.search(out['answer']))
+        for i in range(1, 36):
+            self.assertIn(f'{i} kg FYM', out['answer'])
+        self.assertEqual(out['references'], ['guide.pdf'])
 
     def test_primary_latency_does_not_consume_native_retry_budget(self):
         clock = [0.0]
@@ -169,7 +187,7 @@ class TranslationTests(unittest.TestCase):
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation._request_translation', side_effect=server):
             out = translate_answer({'answer': 'Apply compost'})
         self.assertEqual(out['translation']['status'], 'translated')
-        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v7')
+        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v8')
         self.assertEqual(out['translation']['retry_model'], 'mayura:v1')
 
     def test_chunks_run_concurrently_and_preserve_source_order(self):
@@ -178,9 +196,9 @@ class TranslationTests(unittest.TestCase):
             barrier.wait(timeout=2)
             return {'Apply compost': 'खाद डालें', 'Irrigate regularly': 'नियमित सिंचाई करें'}[text]
         with patch('app.hindi_translation._request_translation', side_effect=server):
-            out = translate_answer({'answer': '- Apply compost\n- Irrigate regularly'})
+            out = translate_answer({'answer': '- Apply compost\nसिंचाई\n- Irrigate regularly'})
         self.assertEqual(out['translation']['status'], 'translated')
-        self.assertEqual(out['answer'], '- खाद डालें\n- नियमित सिंचाई करें')
+        self.assertEqual(out['answer'], '- खाद डालें\nसिंचाई\n- नियमित सिंचाई करें')
 
     def test_queued_chunks_cannot_start_after_answer_deadline(self):
         clock = [0.0]
@@ -188,10 +206,10 @@ class TranslationTests(unittest.TestCase):
             clock[0] += 61.0
             return 'खाद डालें'
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation.TRANSLATION_WORKERS', 1), patch('app.hindi_translation._request_translation', side_effect=server) as call:
-            out = translate_answer({'answer': 'Apply compost\nIrrigate regularly'})
+            out = translate_answer({'answer': 'Apply compost\nसिंचाई\nIrrigate regularly'})
         self.assertEqual(call.call_count, 1)
         self.assertEqual(out['translation']['reason'], 'translation_deadline')
-        self.assertEqual(out['answer'], 'Apply compost\nIrrigate regularly')
+        self.assertEqual(out['answer'], 'Apply compost\nसिंचाई\nIrrigate regularly')
 
     def test_quantity_rich_guide_uses_one_validated_chat_translation(self):
         source = 'Apply 10 kg before sowing, add 20 kg after sowing, irrigate at 30 days, weed at 40 days, harvest at 50 days.'

@@ -16,7 +16,7 @@ from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v7'
+TRANSLATION_VERSION = 'sarvam-hindi-v8'
 NATIVE_MODEL = 'mayura:v1'
 ANSWER_TIMEOUT = 60.0
 FRAGMENT_TIMEOUT = 30.0
@@ -82,7 +82,8 @@ PROTECTED = re.compile(
     + NUMBER + r'(?:\s*' + UNIT + r'\b)?(?:\s*' + FORMULA + r')?|'
     + FORMULA
 )
-NON_HINDI = re.compile(r'[^\u0900-\u097f\n]+')
+# Line breaks are formatting, not translation-request boundaries.
+NON_HINDI = re.compile(r'[^\u0900-\u097f]+')
 TOKEN = re.compile(r'ZXQ[A-Z]+QXZ')
 
 
@@ -317,6 +318,7 @@ def translate_answer(result: dict) -> dict:
             chunks = _chunks(core)
             fragments.append((match, prefix, suffix, len(chunks)))
             jobs.extend(chunks)
+        info['request_chunks'] = len(jobs)
         if len(jobs) > MAX_CHUNKS:
             raise TranslationValidationError('request_limit')
 

@@ -58,3 +58,7 @@ Selected village/town, tehsil, district, and state names, resolved weather-heade
 ## Quantity-rich guide translation
 
 In v7, a failed primary fragment that would require more than four prose-only native requests uses one masked Sarvam chat translation request instead. The fallback model follows `KISAANAI_SARVAM_CHAT_MODEL` (default `sarvam-105b`) and is reported in `retry_model` on success. It receives only the final English fragment with protected values masked, not retrieval evidence or the farmer question. All existing placeholder order, supported-number, Hindi and residual-English checks remain in force. Invalid or timed-out output still fails atomically.
+
+## Formatted answers (v8)
+
+Newlines no longer split English prose into separate requests. A formatted answer with many bullet lines is grouped into character-bounded chunks (at most 1,800 masked characters each). The existing 24-chunk, per-call and answer deadline limits remain; Hindi spans remain local and protected values are still validated. `request_chunks` reports the planned chunk count without exposing answer text. This fixes `request_limit` caused by ordinary formatting; genuinely oversized answers can still hit that limit.
