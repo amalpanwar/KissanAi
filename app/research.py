@@ -1,5 +1,6 @@
 """Evidence-first research agents using language-aware semantic retrieval."""
 from urllib.parse import urlparse
+from urllib.error import HTTPError
 import json
 import re
 from app.agent_system import AgentResult
@@ -32,9 +33,7 @@ def web(payload,advisor=None):
 
 def synthesize(advisor, payload, rows):
     """Generate an English answer from reranked evidence, before Hindi translation."""
-    generator = advisor._get_generator_for_model(advisor.cfg.generator_model)
-    if generator is None:
-        raise RuntimeError('Answer model unavailable')
+    from app.sarvam_generation import generate_text
     evidence = [dict(id=i, text=row['text'], source=row['source_file'],
                      page=row.get('page')) for i, row in enumerate(rows[:3], 1)]
     query = (payload.get('query_variants') or {}).get('en-IN', payload['question'])
@@ -50,7 +49,7 @@ def synthesize(advisor, payload, rows):
         'Do not cite IDs outside the supplied evidence.\n'
         + json.dumps({'question': query, 'evidence': evidence}, ensure_ascii=False)
     )
-    answer = generator.generate(prompt).strip()
+    answer = generate_text(prompt).strip()
     citations = re.findall(r'\[(\d+)\]', answer)
     if not answer or not citations or any(int(i) not in range(1, len(evidence)+1) for i in citations):
         raise ValueError('Missing or invalid evidence citations')
@@ -84,10 +83,13 @@ class ResearchAgent:
             try:
                 answer = synthesize(self.advisor, payload, rows)
             except Exception as exc:
-                checks['generation'] = {'status': 'unavailable', 'error_type': type(exc).__name__}
+                known = {'sarvam_not_configured', 'sarvam_generation_disabled', 'incomplete_generation'}
+                reason = f'http_{exc.code}' if isinstance(exc, HTTPError) else str(exc) if str(exc) in known else type(exc).__name__
+                checks['generation'] = {'status': 'unavailable', 'provider': 'sarvam',
+                                        'error_type': type(exc).__name__, 'reason': reason}
                 return AgentResult('संबंधित स्रोत मिले हैं, लेकिन उनसे उत्तर तैयार नहीं हो सका। कृपया फिर प्रयास करें।',
                     'unavailable', evidence={'checks': checks}, metadata={'topic': 'research'})
-            checks['generation'] = {'status': 'ok'}
+            checks['generation'] = {'status': 'ok', 'provider': 'sarvam', 'language': 'en-IN'}
             return AgentResult(answer,'partial' if local.status!='ok' else 'ok',
                                [r['source_file'] for r in rows[:3]], {'checks':checks},
                                {'topic':'research', 'retrieved':rows[:3], 'requires_hindi':True})

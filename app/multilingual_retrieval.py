@@ -53,7 +53,8 @@ def prepare_query(advisor, question, context):
         en=translate_query(hindi,names=names,target='en-IN')
         statuses['en-IN']=en['status']
         if en['status'] in {'ok','unchanged'}:
-            variants['en-IN']=en['text']
+            from app.commodity_lookup import expand_english_query
+            variants['en-IN']=expand_english_query(en['text'], question)
     # English is for the backend, not a replacement of the submitted Hindi text.
     routed=variants.get('en-IN',hindi)
     return routed, {'query_variants':variants,'display_question':hindi,

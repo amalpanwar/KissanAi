@@ -39,6 +39,8 @@ class ResearchTests(unittest.TestCase):
         self.generator = MagicMock()
         self.generator.generate.return_value = 'Cultivar A matures early; cultivar B needs a longer season. [1]'
         self.advisor._get_generator_for_model = MagicMock(return_value=self.generator)
+        remote = patch('app.sarvam_generation.generate_text', side_effect=self.generator.generate)
+        remote.start(); self.addCleanup(remote.stop)
 
     def test_language_specific_semantic_queries_not_word_overlap(self):
         with patch('app.multilingual_retrieval.translate_query',side_effect=translation):

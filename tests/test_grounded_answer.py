@@ -29,7 +29,7 @@ class GroundedAnswerTests(unittest.TestCase):
                     synthesize(self.fixture.advisor, {'question': 'cane?'}, self.rows)
 
     def test_missing_generator_does_not_dump_excerpts(self):
-        self.fixture.advisor._get_generator_for_model.return_value = None
+        self.fixture.generator.generate.side_effect = RuntimeError('remote generation unavailable')
         with patch('app.multilingual_retrieval.translate_query', side_effect=fixtures.translation):
             result = build_coordinator(self.fixture.advisor).answer('किस्म बताएं', 'Rice')
         self.assertEqual(result['agent_status'], 'unavailable')

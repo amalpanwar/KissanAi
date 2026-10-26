@@ -30,4 +30,3 @@ def render_translation_status(st, info):
     with st.expander('हिंदी अनुवाद की स्थिति'):
         # Show only non-sensitive, stable fields, never service bodies or credentials.
         st.json({k: info[k] for k in ('provider', 'model', 'version', 'status', 'reason') if k in info})
-

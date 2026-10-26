@@ -1,15 +1,13 @@
 import json
 import unittest
 from unittest.mock import patch, MagicMock
-from app.sarvam_generation import generate_guide
+from app.sarvam_generation import generate_text
 
 
 class SarvamGenerationTests(unittest.TestCase):
     def setUp(self):
-        self.source = {'answer': 'Apply 750 kg FYM before sowing.', 'references': ['guide.pdf'],
-                       'agent_status': 'ok', 'requires_hindi': True}
-        self.settings = patch('app.sarvam_generation._setting', side_effect=lambda name, default='': 'test-secret' if name == 'SARVAM_API_KEY' else default)
-        self.settings.start(); self.addCleanup(self.settings.stop)
+        settings = patch('app.sarvam_generation._setting', side_effect=lambda name, default='': 'test-secret' if name == 'SARVAM_API_KEY' else default)
+        settings.start(); self.addCleanup(settings.stop)
 
     def reply(self, content, finish='stop'):
         response = MagicMock()
@@ -17,38 +15,28 @@ class SarvamGenerationTests(unittest.TestCase):
             {'finish_reason': finish, 'message': {'content': content}}]}).encode()
         return response
 
-    def test_hindi_generation_uses_selected_evidence_and_preserves_references(self):
-        answer = 'बुवाई से पहले 750 kg गोबर की खाद मिट्टी में मिलाएँ।'
-        with patch('app.sarvam_generation.urlopen', return_value=self.reply(answer)) as call:
-            result = generate_guide(self.source, 'Bajra ki kheti kaise kare')
-        self.assertEqual(result['answer'], answer)
-        self.assertEqual(result['references'], ['guide.pdf'])
-        self.assertEqual(result['generation']['status'], 'generated')
-        request = call.call_args.args[0]
-        payload = json.loads(request.data)
+    def test_generates_english_from_evidence_prompt(self):
+        prompt = 'Answer in English using evidence: Plant in trenches 30 cm deep. [1]'
+        with patch('app.sarvam_generation.urlopen', return_value=self.reply('Plant 30 cm deep. [1]')) as call:
+            answer = generate_text(prompt)
+        self.assertEqual(answer, 'Plant 30 cm deep. [1]')
+        payload = json.loads(call.call_args.args[0].data)
+        self.assertEqual(payload['messages'][0]['content'], prompt)
         self.assertEqual(payload['model'], 'sarvam-105b')
-        self.assertIn('Apply 750 kg FYM', payload['messages'][0]['content'])
         self.assertEqual(call.call_args.kwargs['timeout'], 25)
 
-    def test_invalid_or_truncated_generation_falls_back_to_translation_input(self):
-        for answer, finish in [('Apply 750 kg FYM.', 'stop'), ('खाद की मात्रा 999 किग्रा रखें।', 'stop'),
-                               ('खाद का उपयोग करें।', 'length'), ('', 'stop')]:
-            with self.subTest(answer=answer), patch('app.sarvam_generation.urlopen', return_value=self.reply(answer, finish)):
-                result = generate_guide(self.source, 'Bajra')
-            self.assertEqual(result['answer'], self.source['answer'])
-            self.assertEqual(result['generation']['status'], 'fallback')
-            self.assertNotIn('test-secret', str(result))
+    def test_empty_or_truncated_generation_is_rejected(self):
+        for text, finish in [('', 'stop'), ('partial answer', 'length')]:
+            with self.subTest(text=text), patch('app.sarvam_generation.urlopen', return_value=self.reply(text, finish)):
+                with self.assertRaises(ValueError): generate_text('evidence')
 
-    def test_timeout_falls_back_without_exposing_exception(self):
-        with patch('app.sarvam_generation.urlopen', side_effect=TimeoutError('test-secret')):
-            result = generate_guide(self.source, 'Bajra')
-        self.assertEqual(result['generation']['reason'], 'TimeoutError')
-        self.assertNotIn('test-secret', str(result))
-
-    def test_missing_key_skips_network(self):
+    def test_missing_key_never_attempts_network(self):
         with patch('app.sarvam_generation._setting', side_effect=lambda name, default='': '' if name == 'SARVAM_API_KEY' else default), patch('app.sarvam_generation.urlopen') as call:
-            result = generate_guide(self.source, 'Bajra')
+            with self.assertRaises(RuntimeError): generate_text('evidence')
         call.assert_not_called()
-        self.assertEqual(result['generation']['reason'], 'not_configured')
+
+    def test_timeout_does_not_fall_back_to_local_model(self):
+        with patch('app.sarvam_generation.urlopen', side_effect=TimeoutError):
+            with self.assertRaises(TimeoutError): generate_text('evidence')
 
 if __name__ == '__main__': unittest.main()

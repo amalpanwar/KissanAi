@@ -215,4 +215,3 @@ def translate_answer(result: dict) -> dict:
         reason = (f'http_{exc.code}' if isinstance(exc, HTTPError) else
                   str(exc) if isinstance(exc, TranslationValidationError) else type(exc).__name__)
         return finish(original, 'fallback', reason)
-
