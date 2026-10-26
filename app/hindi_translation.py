@@ -16,8 +16,13 @@ from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v5'
+TRANSLATION_VERSION = 'sarvam-hindi-v6'
 NATIVE_MODEL = 'mayura:v1'
+ANSWER_TIMEOUT = 60.0
+FRAGMENT_TIMEOUT = 30.0
+REQUEST_TIMEOUT = 15.0
+MAX_CHUNKS = 24
+TRANSLATION_WORKERS = 4
 
 
 class TranslationValidationError(ValueError):
@@ -186,7 +191,7 @@ def _native_prose_retry(text, api_key, deadline):
     def translate(task):
         remaining = deadline - time.monotonic()
         if remaining <= 0: raise TranslationValidationError('translation_deadline')
-        value = _request_translation(task[1], api_key, remaining, NATIVE_MODEL)
+        value = _request_translation(task[1], api_key, min(REQUEST_TIMEOUT, remaining), NATIVE_MODEL)
         if TOKEN.search(value): raise TranslationValidationError('protected_values_changed')
         if not _valid_written_numbers(task[1], value): raise TranslationValidationError('new_numbers')
         if re.search('[A-Za-z]', value): raise TranslationValidationError('untranslated_text')
@@ -209,34 +214,16 @@ def _native_prose_retry(text, api_key, deadline):
 @lru_cache(maxsize=256)
 def _translate(text: str, api_key: str, timeout: float) -> str:
     deadline = time.monotonic() + timeout
-    output = _request_translation(text, api_key, timeout)
+    output = _request_translation(text, api_key, min(REQUEST_TIMEOUT, timeout))
     native_retry = False
     # Each protected item must occur exactly once and stay in source order.
     if TOKEN.findall(output) != TOKEN.findall(text):
         if not TOKEN.search(text):
             raise TranslationValidationError('protected_values_changed')
-        # Some providers translate placeholder spellings. Discard that output
-        # and retry prose only; values and token positions stay entirely local.
-        parts = re.split('(' + TOKEN.pattern + ')', text)
-        prose = [part for part in parts if not TOKEN.fullmatch(part) and re.search('[A-Za-z]', part)]
-        if len(prose) > 12:
-            raise TranslationValidationError('protected_fragment_limit')
-        repaired = []
-        for part in parts:
-            if TOKEN.fullmatch(part) or not re.search('[A-Za-z]', part):
-                repaired.append(part)
-                continue
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TranslationValidationError('translation_deadline')
-            prefix = re.match(r'^\s*', part).group()
-            suffix = re.search(r'\s*$', part).group()
-            value = _translate(part.strip(), api_key, remaining)
-            native_retry |= bool(getattr(value, 'native_retry', False))
-            repaired.append(prefix + value + suffix)
-        output = ''.join(repaired)
-        if TOKEN.findall(output) != TOKEN.findall(text):
-            raise TranslationValidationError('protected_values_changed')
+        # Retry only original prose concurrently. Values stay local, and the
+        # native model avoids another primary call for every protected gap.
+        output = _native_prose_retry(text, api_key, deadline)
+        native_retry = True
     residual = TOKEN.sub('', output)
     if not _valid_written_numbers(text, output):
         raise TranslationValidationError('new_numbers')
@@ -282,26 +269,39 @@ def translate_answer(result: dict) -> dict:
     key = _setting('SARVAM_API_KEY')
     if not key:
         return finish(original, 'not_configured')
-    deadline = time.monotonic() + 20
-    calls = 0
+    deadline = time.monotonic() + ANSWER_TIMEOUT
     replacements = []
     try:
+        jobs = []
+        fragments = []
         for match in pending:
             segment = match.group()
-            # Keep Markdown list/header markers and surrounding whitespace local.
             prefix = re.match(r'^[\s#>*+\-]*', segment).group()
             suffix = re.search(r'\s*$', segment).group()
             core = segment[len(prefix):len(segment) - len(suffix) if suffix else None]
-            translated = []
-            for chunk in _chunks(core):
-                calls += 1
-                remaining = deadline - time.monotonic()
-                if calls > 24 or remaining <= 0:
-                    raise TranslationValidationError('request_limit' if calls > 24 else 'translation_deadline')
-                value = _translate(chunk, key, min(8.0, remaining))
-                native_retry_used |= bool(getattr(value, 'native_retry', False))
-                translated.append(value)
-            replacements.append((match.start(), match.end(), prefix + ' '.join(translated) + suffix))
+            chunks = _chunks(core)
+            fragments.append((match, prefix, suffix, len(chunks)))
+            jobs.extend(chunks)
+        if len(jobs) > MAX_CHUNKS:
+            raise TranslationValidationError('request_limit')
+
+        def translate_chunk(chunk):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TranslationValidationError('translation_deadline')
+            return _translate(chunk, key, min(FRAGMENT_TIMEOUT, remaining))
+
+        # map preserves source order even when requests finish out of order.
+        with ThreadPoolExecutor(max_workers=min(TRANSLATION_WORKERS, len(jobs))) as pool:
+            translated = list(pool.map(translate_chunk, jobs))
+        if time.monotonic() > deadline:
+            raise TranslationValidationError('translation_deadline')
+        native_retry_used = any(getattr(value, 'native_retry', False) for value in translated)
+        offset = 0
+        for match, prefix, suffix, count in fragments:
+            replacement = prefix + ' '.join(translated[offset:offset + count]) + suffix
+            replacements.append((match.start(), match.end(), replacement))
+            offset += count
         output = protected
         for start, end, replacement in reversed(replacements):
             output = output[:start] + replacement + output[end:]

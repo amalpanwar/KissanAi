@@ -22,7 +22,7 @@ A GitHub Actions secret is available only to workflows that explicitly use it. I
 - Only English fragments of the final answer are submitted; Hindi, question/context, structured references and agent traces are kept local. English names in the answer can be sent.
 - Numbers together with adjacent recognized units/formulae, URLs and inline/fenced code are masked. Scientific notation such as `NPK`, `ZnSO4`, and `kg` within quantities intentionally remains unchanged.
 - The provider must return every mask exactly once in its original order, without introducing numbers or leaving English prose. Failed checks retain the complete original answer; no partly translated answer is published.
-- Each request stays below the API's 2,000-character limit. A response allows at most 24 chunks and a 20-second request budget, with an 8-second timeout per call. Up to 256 successful chunk translations are cached in process memory; failures are not cached.
+- Each request stays below the API's 2,000-character limit. A response allows at most 24 chunks, submitted with up to four workers under a 60-second total budget. Each chunk has up to 30 seconds across primary and native retry stages; individual HTTP calls have a 15-second timeout. Queued chunks check the remaining total budget before starting. Protected prose retries use at most four workers per active chunk. Oversized answers are rejected before any requests. Up to 256 successful chunk translations are cached in process memory; failures are not cached.
 - `result.translation` records `translated`, `not_needed`, `not_configured`, `disabled`, or `fallback`. The UI displays a Hindi fallback notice when translation is unconfigured or fails. Source answer status and references remain intact.
 - Set `KISAANAI_HINDI_TRANSLATION=0` to disable external translation.
 - Numeric/formula validation cannot prove semantic correctness (including negation, timing or applicability). Review representative agricultural answers with a Hindi speaker before relying on translation quality. This feature does not repair incorrect source facts or crop-phase headings.
@@ -37,7 +37,7 @@ Streamlit secret setup: https://docs.streamlit.io/deploy/streamlit-community-clo
 
 ## Troubleshooting a mixed-language answer
 
-For each newly generated answer, expand **हिंदी अनुवाद की स्थिति**. This diagnostic is stored with chat history, so it survives Streamlit reruns. `version: sarvam-hindi-v2` identifies this implementation. Existing chat replies are not rewritten; ask the question again after deployment.
+For each newly generated answer, expand **हिंदी अनुवाद की स्थिति**. This diagnostic is stored with chat history, so it survives Streamlit reruns. `version: sarvam-hindi-v6` identifies the current timeout implementation. Existing chat replies are not rewritten; ask the question again after deployment.
 
 - `not_configured`: the running app cannot read SARVAM_API_KEY. Put it at the top level of Streamlit Secrets, then restart. A GitHub Actions secret does not configure the app.
 - `disabled`: KISAANAI_HINDI_TRANSLATION disables translation.
