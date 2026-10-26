@@ -39,6 +39,8 @@ class GenerationValidationError(ValueError):
 
 
 def _validate_answer(answer, evidence):
+    if answer == 'INSUFFICIENT_EVIDENCE':
+        raise GenerationValidationError('insufficient_evidence')
     citations = re.findall(r'\[(\d+)\]', answer)
     if not answer or not citations:
         raise GenerationValidationError('missing_evidence_citations')
@@ -63,7 +65,9 @@ def synthesize(advisor, payload, rows, diagnostics=None):
         'For cultivation questions organize supported advice into cultivation steps. '
         'Keep quantities, units, region, season, and source limitations exactly as given. '
         'Do not infer dosages, varieties, or missing cultivation steps. '
-        'Say when the evidence does not cover part of the question. '
+        'Check that evidence directly addresses the crop and topic asked about. '
+        'If none does, reply exactly INSUFFICIENT_EVIDENCE and give no advice. '
+        'If only part is supported, answer only that part and state the gaps. '
         'Cite every supported point using evidence IDs such as [1]. '
         'Do not cite IDs outside the supplied evidence.\n'
         + json.dumps({'question': query, 'evidence': evidence}, ensure_ascii=False)
@@ -82,7 +86,7 @@ def synthesize(advisor, payload, rows, diagnostics=None):
             if reason is None:
                 raise
             diagnostics['validation_failures'].append(reason)
-            if attempt:
+            if attempt or reason == 'insufficient_evidence':
                 raise
             # The failed answer is discarded, not used as evidence. The same
             # source passages and fixed validation feedback drive one retry.
@@ -116,16 +120,25 @@ class ResearchAgent:
             generation = {}
             try:
                 answer = synthesize(self.advisor, payload, rows, generation)
+            except GenerationValidationError as exc:
+                if exc.reason == 'insufficient_evidence' and remote is None:
+                    checks['document_generation'] = {**generation, 'status': 'unavailable', 'reason': exc.reason}
+                    remote = bus.ask('research', 'web_search', 'Search official web sources after insufficient document evidence', payload)
+                    rows, web_verification = verify(payload, remote.evidence.get('records', []))
+                    checks.update(web_relevance=web_verification, web_search=remote.status,
+                                  web_provider=remote.evidence.get('provider'), web_reason=remote.evidence.get('reason'))
+                    if rows:
+                        generation = {}
+                        try:
+                            answer = synthesize(self.advisor, payload, rows, generation)
+                        except Exception as web_exc:
+                            return self._generation_failure(web_exc, checks, generation, rows)
+                        checks['generation'] = {**generation, 'status': 'ok', 'provider': 'sarvam', 'language': 'en-IN'}
+                        return AgentResult(answer, 'partial', [r['source_file'] for r in rows], {'checks': checks},
+                                           {'topic': 'research', 'retrieved': rows, 'requires_hindi': True})
+                return self._generation_failure(exc, checks, generation, rows)
             except Exception as exc:
-                known = {'sarvam_not_configured', 'sarvam_generation_disabled', 'incomplete_generation'}
-                reason = (exc.reason if isinstance(exc, GenerationValidationError) else
-                          f'http_{exc.code}' if isinstance(exc, HTTPError) else
-                          str(exc) if str(exc) in known else type(exc).__name__)
-                checks['generation'] = {**generation, 'status': 'unavailable', 'provider': 'sarvam',
-                                        'error_type': type(exc).__name__, 'reason': reason}
-                return AgentResult('संबंधित स्रोत मिले हैं, लेकिन उनसे उत्तर तैयार नहीं हो सका। कृपया फिर प्रयास करें।',
-                    'unavailable', references=[r['source_file'] for r in rows[:3]],
-                    evidence={'checks': checks}, metadata={'topic': 'research', 'retrieved': rows[:3]})
+                return self._generation_failure(exc, checks, generation, rows)
             checks['generation'] = {**generation, 'status': 'ok', 'provider': 'sarvam', 'language': 'en-IN'}
             return AgentResult(answer,'partial' if local.status!='ok' else 'ok',
                                [r['source_file'] for r in rows[:3]], {'checks':checks},
@@ -137,6 +150,20 @@ class ResearchAgent:
             answer+=' वेब खोज या उसके परिणामों की जाँच भी उपलब्ध नहीं हुई।'
         answer+=' कृपया सवाल स्पष्ट करें या संबंधित दस्तावेज़ की उपलब्धता जाँचें।'
         return AgentResult(answer,'unavailable',evidence={'checks':checks},metadata={'topic':'research'})
+
+    @staticmethod
+    def _generation_failure(exc, checks, generation, rows):
+        known = {'sarvam_not_configured', 'sarvam_generation_disabled', 'incomplete_generation'}
+        reason = (exc.reason if isinstance(exc, GenerationValidationError) else
+                  f'http_{exc.code}' if isinstance(exc, HTTPError) else
+                  str(exc) if str(exc) in known else type(exc).__name__)
+        checks['generation'] = {**generation, 'status': 'unavailable', 'provider': 'sarvam',
+                                'error_type': type(exc).__name__, 'reason': reason}
+        answer = ('इस सवाल का उत्तर देने के लिए पर्याप्त संबंधित जानकारी नहीं मिली।'
+                  if reason == 'insufficient_evidence' else
+                  'संबंधित स्रोत मिले हैं, लेकिन उनसे उत्तर तैयार नहीं हो सका। कृपया फिर प्रयास करें।')
+        return AgentResult(answer, 'unavailable', references=[r['source_file'] for r in rows[:3]],
+                           evidence={'checks': checks}, metadata={'topic': 'research', 'retrieved': rows[:3]})
 
 
 def answer_with_research_followup(advisor,query,state):

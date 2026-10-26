@@ -1,7 +1,8 @@
 """Second-stage query/passage relevance, independent of embedding similarity.
 
 Cosine similarity selects candidates, never proves that they answer a question.
-The multilingual cross-encoder runs locally and fails closed if unavailable.
+The multilingual cross-encoder ranks locally and fails closed if unavailable.
+Its raw logits order passages; they are not calibrated relevance probabilities.
 """
 from functools import lru_cache
 import re
@@ -26,6 +27,19 @@ def bibliography(text):
     return len(years) >= 3 and len(citations) >= 2
 
 
+def ranking_query(payload, row):
+    """Keep search expansion out of the cross-encoder's natural question."""
+    variants = payload.get('query_variants') or {}
+    search = row.get('search_query') or variants.get(row.get('language'), payload['question'])
+    lines = search.splitlines()
+    crop = next((line.split(':', 1)[1].strip() for line in lines
+                 if line.startswith('Crop context:')), '')
+    question = '\n'.join(line for line in lines if not line.startswith(('Crop synonyms:', 'Crop context:'))).strip()
+    if crop and crop.casefold() not in question.casefold():
+        question += '\nCrop: ' + crop
+    return question
+
+
 def verify(payload, records):
     candidates = []
     seen = set()
@@ -38,8 +52,7 @@ def verify(payload, records):
         candidates.append(row)
     if not candidates:
         return [], 'ok'
-    variants = payload.get('query_variants') or {}
-    pairs = [(row.get('search_query') or variants.get(row.get('language'), payload['question']), row['text']) for row in candidates]
+    pairs = [(ranking_query(payload, row), row['text']) for row in candidates]
     try:
         # Explicit Identity avoids treating sigmoid probabilities as logit scores.
         import torch
@@ -48,6 +61,9 @@ def verify(payload, records):
             raise ValueError('Invalid relevance scores')
     except Exception:
         return [], 'unavailable'
-    accepted = [dict(row, relevance_score=float(score)) for row, score in zip(candidates, scores) if score >= 0.0]
+    # Ranking logits can be negative for useful broad cultivation passages.
+    # Do not treat zero as a universal relevance threshold. Synthesis must
+    # explicitly abstain when selected evidence does not answer the question.
+    accepted = [dict(row, relevance_score=float(score)) for row, score in zip(candidates, scores)]
     accepted.sort(key=lambda row: row['relevance_score'], reverse=True)
     return accepted[:3], 'ok'
