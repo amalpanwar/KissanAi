@@ -31,4 +31,4 @@ def render_translation_status(st, info):
         st.caption(' '.join(filter(None, [captions[status], reasons.get(info.get('reason'))])))
     with st.expander('हिंदी अनुवाद की स्थिति'):
         # Show only non-sensitive, stable fields, never service bodies or credentials.
-        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason') if k in info})
+        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason', 'request_chunks') if k in info})
