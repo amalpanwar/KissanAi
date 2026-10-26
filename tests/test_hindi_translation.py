@@ -1,5 +1,6 @@
 import json
 import unittest
+import threading
 from unittest.mock import patch, MagicMock
 
 from app.hindi_translation import translate_answer, _translate, TOKEN, _chunks
@@ -151,8 +152,46 @@ class TranslationTests(unittest.TestCase):
             out = translate_answer(source)
         self.assertEqual(out['translation']['status'], 'fallback')
         self.assertEqual(out['answer'], source['answer'])
-        self.assertEqual(call.call_count, 24)
+        self.assertEqual(call.call_count, 0)
         self.assertEqual(out['translation']['reason'], 'request_limit')
+
+    def test_primary_latency_does_not_consume_native_retry_budget(self):
+        clock = [0.0]
+        def server(text, key, timeout, model='sarvam-translate:v1'):
+            if model == 'sarvam-translate:v1':
+                self.assertEqual(timeout, 15.0)
+                clock[0] += 12.0
+                return 'खाद compost डालें'
+            self.assertEqual(model, 'mayura:v1')
+            self.assertEqual(timeout, 15.0)
+            clock[0] += 10.0
+            return 'खाद डालें'
+        with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation._request_translation', side_effect=server):
+            out = translate_answer({'answer': 'Apply compost'})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v6')
+        self.assertEqual(out['translation']['retry_model'], 'mayura:v1')
+
+    def test_chunks_run_concurrently_and_preserve_source_order(self):
+        barrier = threading.Barrier(2)
+        def server(text, key, timeout, model='sarvam-translate:v1'):
+            barrier.wait(timeout=2)
+            return {'Apply compost': 'खाद डालें', 'Irrigate regularly': 'नियमित सिंचाई करें'}[text]
+        with patch('app.hindi_translation._request_translation', side_effect=server):
+            out = translate_answer({'answer': '- Apply compost\n- Irrigate regularly'})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertEqual(out['answer'], '- खाद डालें\n- नियमित सिंचाई करें')
+
+    def test_queued_chunks_cannot_start_after_answer_deadline(self):
+        clock = [0.0]
+        def server(text, key, timeout, model='sarvam-translate:v1'):
+            clock[0] += 61.0
+            return 'खाद डालें'
+        with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation.TRANSLATION_WORKERS', 1), patch('app.hindi_translation._request_translation', side_effect=server) as call:
+            out = translate_answer({'answer': 'Apply compost\nIrrigate regularly'})
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(out['translation']['reason'], 'translation_deadline')
+        self.assertEqual(out['answer'], 'Apply compost\nIrrigate regularly')
 
     def test_links_code_and_markdown_list_retained(self):
         with patch('app.hindi_translation.urlopen', side_effect=lambda *a, **kw: self.response('स्रोत')):
