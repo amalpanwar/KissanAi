@@ -41,6 +41,8 @@ def render_response_footer(st, item):
                         st.write('Search outcome: ' + evidence['reason'])
                 elif sender == 'documents':
                     st.write(f"Documents: {payload.get('status', 'unavailable')}; candidate passages: {len(evidence.get('records', []))}")
+                    if evidence.get('guide_scope'):
+                        st.json({'production_guide': evidence['guide_scope']})
                     if evidence.get('queries'):
                         st.json(evidence['queries'])
                     if evidence.get('reason'):

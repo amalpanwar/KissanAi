@@ -6,7 +6,7 @@ from app.hindi_translation import _setting
 ENDPOINT = 'https://api.sarvam.ai/v1/chat/completions'
 
 
-def generate_text(prompt):
+def generate_text(prompt, *, timeout=25):
     """Synthesize reranked evidence remotely; final Hindi comes from translation."""
     key = _setting('SARVAM_API_KEY')
     if not key:
@@ -18,7 +18,7 @@ def generate_text(prompt):
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': 0, 'reasoning_effort': None, 'max_tokens': 1800,
     }).encode(), headers={'Content-Type': 'application/json', 'api-subscription-key': key}, method='POST')
-    with urlopen(request, timeout=25) as response:
+    with urlopen(request, timeout=timeout) as response:
         choice = json.loads(response.read().decode())['choices'][0]
     answer = choice['message']['content']
     if choice.get('finish_reason') != 'stop' or not isinstance(answer, str) or not answer.strip():

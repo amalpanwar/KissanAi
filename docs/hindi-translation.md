@@ -37,7 +37,7 @@ Streamlit secret setup: https://docs.streamlit.io/deploy/streamlit-community-clo
 
 ## Troubleshooting a mixed-language answer
 
-For each newly generated answer, expand **हिंदी अनुवाद की स्थिति**. This diagnostic is stored with chat history, so it survives Streamlit reruns. `version: sarvam-hindi-v6` identifies the current timeout implementation. Existing chat replies are not rewritten; ask the question again after deployment.
+For each newly generated answer, expand **हिंदी अनुवाद की स्थिति**. This diagnostic is stored with chat history, so it survives Streamlit reruns. `version: sarvam-hindi-v7` identifies the current timeout implementation. Existing chat replies are not rewritten; ask the question again after deployment.
 
 - `not_configured`: the running app cannot read SARVAM_API_KEY. Put it at the top level of Streamlit Secrets, then restart. A GitHub Actions secret does not configure the app.
 - `disabled`: KISAANAI_HINDI_TRANSLATION disables translation.
@@ -54,3 +54,7 @@ The known wheat zinc/sulphur basal-fertilizer sentence is now rendered completel
 
 Selected village/town, tehsil, district, and state names, resolved weather-header locations, and explicit `protected_names` are masked before translation and restored with their exact source spelling. For example, `Doghat Rural, Baghpat, Uttar Pradesh` stays unchanged while weather descriptions remain Hindi. Recognized names are not submitted in plaintext to Sarvam. Other agents can supply person or organization names through `protected_names`; this is not general named-entity recognition for arbitrary prose. Existing chat replies are unchanged; ask again after deployment. Version: `sarvam-hindi-v3`.
 
+
+## Quantity-rich guide translation
+
+In v7, a failed primary fragment that would require more than four prose-only native requests uses one masked Sarvam chat translation request instead. The fallback model follows `KISAANAI_SARVAM_CHAT_MODEL` (default `sarvam-105b`) and is reported in `retry_model` on success. It receives only the final English fragment with protected values masked, not retrieval evidence or the farmer question. All existing placeholder order, supported-number, Hindi and residual-English checks remain in force. Invalid or timed-out output still fails atomically.

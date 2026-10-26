@@ -17,6 +17,8 @@ def translation(text,names=(),target='hi-IN'):
 
 class ResearchTests(unittest.TestCase):
     def setUp(self):
+        guide = patch('app.production_guide_evidence.lookup', return_value=None)
+        self.guide_lookup = guide.start(); self.addCleanup(guide.stop)
         missing=patch('app.supplemental_documents.missing_pdfs',return_value=())
         missing.start();self.addCleanup(missing.stop)
         supplementary=patch('app.supplemental_documents.candidates',return_value=([],{'files':0,'failures':[]}))
