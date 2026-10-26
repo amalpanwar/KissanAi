@@ -2,22 +2,70 @@
 from __future__ import annotations
 
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 import json
 import os
 import re
 import sys
 import time
+import unicodedata
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v4'
+TRANSLATION_VERSION = 'sarvam-hindi-v5'
+NATIVE_MODEL = 'mayura:v1'
 
 
 class TranslationValidationError(ValueError):
     pass
+
+
+class TranslatedText(str):
+    def __new__(cls, text, native_retry=False):
+        result = super().__new__(cls, text)
+        result.native_retry = native_retry
+        return result
+
+
+_SMALL = dict(zip('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split(), range(20)))
+_TENS = dict(zip('twenty thirty forty fifty sixty seventy eighty ninety'.split(), range(20, 100, 10)))
+_ONES_PATTERN = '|'.join(list(_SMALL)[1:10])
+_UNDER_HUNDRED = '(?:' + '|'.join(_TENS) + ')(?:[ -]+(?:' + _ONES_PATTERN + '))?|' + '|'.join(_SMALL)
+_WORD_NUMBER = re.compile(r'\b(?:(?:' + _ONES_PATTERN + r')[ -]+hundred(?:[ -]+and)?(?:[ -]+(?:' + _UNDER_HUNDRED + r'))?|(?:' + _UNDER_HUNDRED + r')|half|quarter)\b', re.I)
+
+
+def _numeric_value(text):
+    text = ''.join(str(unicodedata.digit(c)) if c.isdigit() else c for c in text).replace('−', '-')
+    try:
+        return Decimal(text.replace(',', ''))
+    except InvalidOperation:
+        return None
+
+
+def _valid_written_numbers(source, output):
+    """Only source-spelled quantities may become unprotected numeric digits."""
+    expected = []
+    for match in _WORD_NUMBER.finditer(TOKEN.sub('', source)):
+        words = match.group().lower().replace('-', ' ').split()
+        value = Decimal(0)
+        for word in words:
+            if word == 'hundred': value *= 100
+            elif word == 'half': value += Decimal('0.5')
+            elif word == 'quarter': value += Decimal('0.25')
+            elif word != 'and': value += _SMALL.get(word, _TENS.get(word, 0))
+        expected.append(value)
+    cursor = 0
+    for number in re.findall(r'[+\-−]?\d+(?:[.,]\d+)*', TOKEN.sub('', output)):
+        value = _numeric_value(number)
+        while cursor < len(expected) and expected[cursor] != value:
+            cursor += 1
+        if value is None or cursor == len(expected): return False
+        cursor += 1
+    return True
 
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
 FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
@@ -108,20 +156,61 @@ def _chunks(text: str, limit: int = 1800) -> list[str]:
     return chunks
 
 
-@lru_cache(maxsize=256)
-def _translate(text: str, api_key: str, timeout: float) -> str:
-    deadline = time.monotonic() + timeout
-    request = Request(ENDPOINT, data=json.dumps({
+def _request_translation(text, api_key, timeout, model=MODEL):
+    payload = {
         'input': text, 'source_language_code': 'en-IN',
-        'target_language_code': 'hi-IN', 'model': MODEL,
+        'target_language_code': 'hi-IN', 'model': model,
         'mode': 'formal',
-    }).encode('utf-8'), headers={
+    }
+    if model == NATIVE_MODEL:
+        payload.update(output_script='fully-native', numerals_format='international')
+    request = Request(ENDPOINT, data=json.dumps(payload).encode('utf-8'), headers={
         'Content-Type': 'application/json', 'api-subscription-key': api_key,
     }, method='POST')
     with urlopen(request, timeout=timeout) as response:
         output = json.loads(response.read().decode('utf-8')).get('translated_text')
     if not isinstance(output, str) or not output.strip():
         raise TranslationValidationError('empty_response')
+    return output
+
+
+def _native_prose_retry(text, api_key, deadline):
+    parts = re.split('(' + TOKEN.pattern + ')', text)
+    tasks = []
+    for i, part in enumerate(parts):
+        if not TOKEN.fullmatch(part) and re.search('[A-Za-z]', part):
+            for chunk in _chunks(part.strip(), limit=900):
+                tasks.append((i, chunk))
+    if len(tasks) > 12:
+        raise TranslationValidationError('protected_fragment_limit')
+    def translate(task):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0: raise TranslationValidationError('translation_deadline')
+        value = _request_translation(task[1], api_key, remaining, NATIVE_MODEL)
+        if TOKEN.search(value): raise TranslationValidationError('protected_values_changed')
+        if not _valid_written_numbers(task[1], value): raise TranslationValidationError('new_numbers')
+        if re.search('[A-Za-z]', value): raise TranslationValidationError('untranslated_text')
+        if not re.search(r'[\u0900-\u097f]', value): raise TranslationValidationError('hindi_missing')
+        return task[0], value.strip()
+    translated = {}
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(tasks)))) as pool:
+        for index, value in pool.map(translate, tasks):
+            translated.setdefault(index, []).append(value)
+    for index, values in translated.items():
+        prefix = re.match(r'^\s*', parts[index]).group()
+        suffix = re.search(r'\s*$', parts[index]).group()
+        parts[index] = prefix + ' '.join(values) + suffix
+    output = ''.join(parts)
+    if TOKEN.findall(output) != TOKEN.findall(text):
+        raise TranslationValidationError('protected_values_changed')
+    return output
+
+
+@lru_cache(maxsize=256)
+def _translate(text: str, api_key: str, timeout: float) -> str:
+    deadline = time.monotonic() + timeout
+    output = _request_translation(text, api_key, timeout)
+    native_retry = False
     # Each protected item must occur exactly once and stay in source order.
     if TOKEN.findall(output) != TOKEN.findall(text):
         if not TOKEN.search(text):
@@ -142,16 +231,22 @@ def _translate(text: str, api_key: str, timeout: float) -> str:
                 raise TranslationValidationError('translation_deadline')
             prefix = re.match(r'^\s*', part).group()
             suffix = re.search(r'\s*$', part).group()
-            repaired.append(prefix + _translate(part.strip(), api_key, remaining) + suffix)
+            value = _translate(part.strip(), api_key, remaining)
+            native_retry |= bool(getattr(value, 'native_retry', False))
+            repaired.append(prefix + value + suffix)
         output = ''.join(repaired)
         if TOKEN.findall(output) != TOKEN.findall(text):
             raise TranslationValidationError('protected_values_changed')
     residual = TOKEN.sub('', output)
-    if re.search(r'\d', residual) or re.search(r'[A-Za-z]', residual):
-        raise TranslationValidationError('untranslated_text_or_new_numbers')
+    if not _valid_written_numbers(text, output):
+        raise TranslationValidationError('new_numbers')
+    if re.search(r'[A-Za-z]', residual):
+        output = _native_prose_retry(text, api_key, deadline)
+        residual = TOKEN.sub('', output)
+        native_retry = True
     if not re.search(r'[\u0900-\u097f]', residual):
         raise TranslationValidationError('hindi_missing')
-    return output.strip()
+    return TranslatedText(output.strip(), native_retry)
 
 
 def translate_answer(result: dict) -> dict:
@@ -166,10 +261,13 @@ def translate_answer(result: dict) -> dict:
     original = str(result.get('answer', ''))
     info = {'provider': 'sarvam', 'model': MODEL, 'target_language': 'hi-IN',
             'version': TRANSLATION_VERSION}
+    native_retry_used = False
     def finish(answer, status, reason=None):
         metadata = {**info, 'status': status}
         if reason:
             metadata['reason'] = reason
+        if native_retry_used:
+            metadata['retry_model'] = NATIVE_MODEL
         return {**result, 'answer': answer, 'translation': metadata}
     if _setting('KISAANAI_HINDI_TRANSLATION', '1').lower() in {'0', 'false', 'no'}:
         return finish(original, 'disabled')
@@ -200,7 +298,9 @@ def translate_answer(result: dict) -> dict:
                 remaining = deadline - time.monotonic()
                 if calls > 24 or remaining <= 0:
                     raise TranslationValidationError('request_limit' if calls > 24 else 'translation_deadline')
-                translated.append(_translate(chunk, key, min(8.0, remaining)))
+                value = _translate(chunk, key, min(8.0, remaining))
+                native_retry_used |= bool(getattr(value, 'native_retry', False))
+                translated.append(value)
             replacements.append((match.start(), match.end(), prefix + ' '.join(translated) + suffix))
         output = protected
         for start, end, replacement in reversed(replacements):
