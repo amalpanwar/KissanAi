@@ -62,3 +62,9 @@ In v7, a failed primary fragment that would require more than four prose-only na
 ## Formatted answers (v8)
 
 Newlines no longer split English prose into separate requests. A formatted answer with many bullet lines is grouped into character-bounded chunks (at most 1,800 masked characters each). The existing 24-chunk, per-call and answer deadline limits remain; Hindi spans remain local and protected values are still validated. `request_chunks` reports the planned chunk count without exposing answer text. This fixes `request_limit` caused by ordinary formatting; genuinely oversized answers can still hit that limit.
+
+## Hindi sentences with English technical names (v9)
+
+Fertilizer, pesticide, chemical and biological names, formulation abbreviations, units and source-attested variety codes may remain in English while sentence prose is translated into Hindi. `data/raw/translation_technical_terms.json` is the maintainable glossary. The repository pesticide-name registry supplies additional ingredient names, filtering prose-like cells. Explicit `protected_terms` metadata supports other technical names. Variety identifiers are matched against retrieved source text, not guessed from any capitalized phrase. Only terms present in the original answer are protected and restored with their original spelling/case. Recognition for translation does not establish that a pesticide is currently approved or suitable.
+
+Recognized names are masked before Sarvam translation and restored afterward. Untranslated English instructions and newly introduced unprotected English chemical names are still rejected. Quantity/order checks remain; percentages and g/kg-style doses are protected as complete quantities. No crop-specific response template is added. If an unfamiliar legitimate name is missing, extend the glossary or explicit metadata rather than permitting arbitrary English sentences.

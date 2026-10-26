@@ -32,3 +32,5 @@ Version `sarvam-hindi-v7` uses the existing Sarvam translation endpoint first. W
 ## References for single-source cultivation overviews
 
 When all selected overview records belong to one resolved guide section in one PDF, the app supplies the reference and section/page scope. Missing model-written inline citation markers do not invalidate that English answer or block Hindi translation. Empty answers, explicit insufficient evidence, invalid supplied citation IDs, and unsupported numeric quantities still fail validation. Focused and multiple-source answers still require inline evidence IDs. Generation diagnostics identify `reference_mode: app_attached_pdf_section`.
+
+Final answer language policy is Hindi sentence prose with recognized technical names optionally retained in English (`sarvam-hindi-v9`). Name recognition uses a separate glossary, repository pesticide-name data, explicit metadata and source-attested variety identifiers; generic English sentences are not whitelisted. See `docs/hindi-translation.md` for the policy and limitations.
