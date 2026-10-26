@@ -22,9 +22,30 @@ class EvidenceVerificationTests(unittest.TestCase):
         with patch('app.evidence_reranker.model',return_value=model):
             accepted,status=verify({'question':'Which rice variety is better?'},rows)
         self.assertEqual(status,'ok')
-        self.assertEqual([r['text'] for r in accepted],['cultivar description'])
+        self.assertEqual([r['text'] for r in accepted],['cultivar description', 'herbicide dosage'])
         self.assertEqual(len(model.predict.call_args.args[0]),2)
         self.assertIs(model.predict.call_args.kwargs['activation_fct'], self.identity)
+
+    def test_negative_logits_are_ranked_not_discarded(self):
+        model = MagicMock()
+        model.predict.return_value = [-3.44, -8.77, -3.47, -5.51]
+        rows = [{'text': text} for text in ['wheat field preparation', 'onion prices', 'wheat irrigation', 'rice nursery']]
+        with patch('app.evidence_reranker.model', return_value=model):
+            accepted, status = verify({'question': 'How to do wheat farming?'}, rows)
+        self.assertEqual(status, 'ok')
+        self.assertEqual([r['text'] for r in accepted], ['wheat field preparation', 'wheat irrigation', 'rice nursery'])
+        self.assertEqual(accepted[0]['relevance_score'], -3.44)
+
+    def test_ranking_excludes_alias_annotations_but_preserves_followup_crop(self):
+        model = MagicMock(); model.predict.return_value = [-1.0]
+        rows = [{'text': 'wheat field preparation', 'search_query': 'How to do wheat farming?\nCrop synonyms: Wheat; gehoo; gehu; gehun\nCrop context: Wheat'}]
+        with patch('app.evidence_reranker.model', return_value=model):
+            verify({'question': 'गेहूं की खेती कैसे करें?'}, rows)
+        self.assertEqual(model.predict.call_args.args[0][0][0], 'How to do wheat farming?')
+        rows[0]['search_query'] = 'When should I irrigate?\nCrop context: Wheat'
+        with patch('app.evidence_reranker.model', return_value=model):
+            verify({'question': 'When should I irrigate?'}, rows)
+        self.assertEqual(model.predict.call_args.args[0][0][0], 'When should I irrigate?\nCrop: Wheat')
 
     def test_unavailable_or_invalid_model_fails_closed(self):
         for value in [None, [float('nan')], []]:

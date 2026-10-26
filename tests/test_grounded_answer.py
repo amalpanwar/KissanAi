@@ -76,6 +76,44 @@ class GroundedAnswerTests(unittest.TestCase):
                          'Plant 30 cm deep. [1]')
         self.assertEqual(diagnostics['validation_failures'], ['incomplete_generation'])
 
+    def test_insufficient_evidence_abstains_without_corrective_retry(self):
+        self.fixture.generator.generate.return_value = 'INSUFFICIENT_EVIDENCE'
+        with self.assertRaisesRegex(ValueError, 'insufficient_evidence'):
+            synthesize(self.fixture.advisor, {'question': 'unrelated question?'}, self.rows)
+        self.assertEqual(self.fixture.generator.generate.call_count, 1)
+
+    def test_insufficient_documents_fall_back_to_web_once(self):
+        from app.research import ResearchAgent
+        from app.agent_system import AgentResult
+        from unittest.mock import MagicMock
+        bus = MagicMock()
+        web_rows = [{'text': 'Plant wheat in prepared fields.', 'source_file': 'https://tnau.ac.in/guide'}]
+        bus.ask.side_effect = [AgentResult('', 'ok', evidence={'records': self.rows}),
+                               AgentResult('', 'ok', evidence={'records': web_rows})]
+        self.fixture.generator.generate.side_effect = ['INSUFFICIENT_EVIDENCE', 'Plant wheat in prepared fields. [1]']
+        with patch('app.evidence_reranker.verify', side_effect=[(self.rows, 'ok'), (web_rows, 'ok')]):
+            result = ResearchAgent().run(None, {'question': 'wheat?'}, bus)
+        self.assertEqual(bus.ask.call_count, 2)
+        self.assertEqual(result.status, 'partial')
+        self.assertEqual(result.references, ['https://tnau.ac.in/guide'])
+        self.assertEqual(result.evidence['checks']['document_generation']['reason'], 'insufficient_evidence')
+
+    def test_insufficient_web_evidence_never_publishes_advice(self):
+        from app.research import ResearchAgent
+        from app.agent_system import AgentResult
+        from unittest.mock import MagicMock
+        bus = MagicMock()
+        bus.ask.side_effect = [AgentResult('', 'ok', evidence={'records': self.rows}),
+                               AgentResult('', 'ok', evidence={'records': self.rows})]
+        self.fixture.generator.generate.return_value = 'INSUFFICIENT_EVIDENCE'
+        with patch('app.evidence_reranker.verify', return_value=(self.rows, 'ok')):
+            result = ResearchAgent().run(None, {'question': 'unrelated?'}, bus)
+        self.assertEqual(bus.ask.call_count, 2)
+        self.assertEqual(self.fixture.generator.generate.call_count, 2)
+        self.assertEqual(result.status, 'unavailable')
+        self.assertNotIn('INSUFFICIENT_EVIDENCE', result.answer)
+        self.assertNotIn('Plant', result.answer)
+
     def test_missing_generator_does_not_dump_excerpts(self):
         self.fixture.generator.generate.side_effect = RuntimeError('remote generation unavailable')
         with patch('app.multilingual_retrieval.translate_query', side_effect=fixtures.translation):
