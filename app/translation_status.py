@@ -25,6 +25,7 @@ def render_translation_status(st, info):
         'untranslated_text': 'मान्य तकनीकी नामों के अलावा अंग्रेज़ी वाक्य या पाठ बचा है; अनुवाद पूरा नहीं हुआ।',
         'new_numbers': 'अनुवाद की संख्याएँ स्रोत की मात्राओं से मेल नहीं खातीं; उत्तर स्वीकार नहीं हुआ।',
         'hindi_missing': 'अनुवाद सेवा ने हिंदी उत्तर नहीं लौटाया।',
+        'invalid_translation_structure': 'अनुवाद सेवा ने सभी पाठ-अंश सही प्रारूप में नहीं लौटाए।',
         'empty_response': 'अनुवाद सेवा का उत्तर खाली था।',
     }
     if status in captions:
