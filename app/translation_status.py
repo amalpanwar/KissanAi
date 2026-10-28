@@ -24,7 +24,7 @@ def render_translation_status(st, info):
         'untranslated_text_or_new_numbers': 'अनुवाद में अंग्रेज़ी पाठ या नई संख्याएँ मिलीं; उत्तर स्वीकार नहीं हुआ।',
         'untranslated_text': 'मान्य तकनीकी नामों के अलावा अंग्रेज़ी वाक्य या पाठ बचा है; अनुवाद पूरा नहीं हुआ।',
         'new_numbers': 'अनुवाद की संख्याएँ स्रोत की मात्राओं से मेल नहीं खातीं; उत्तर स्वीकार नहीं हुआ।',
-        'hindi_missing': 'अनुवाद सेवा ने हिंदी उत्तर नहीं लौटाया।',
+        'hindi_missing': 'अनुवाद के अपेक्षित पाठ में हिंदी वाक्य नहीं मिले।',
         'invalid_translation_structure': 'अनुवाद सेवा ने सभी पाठ-अंश सही प्रारूप में नहीं लौटाए।',
         'empty_response': 'अनुवाद सेवा का उत्तर खाली था।',
     }
@@ -32,4 +32,4 @@ def render_translation_status(st, info):
         st.caption(' '.join(filter(None, [captions[status], reasons.get(info.get('reason'))])))
     with st.expander('हिंदी अनुवाद की स्थिति'):
         # Show only non-sensitive, stable fields, never service bodies or credentials.
-        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason', 'request_chunks') if k in info})
+        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason', 'request_chunks', 'failure_scope', 'source_fragment_kind') if k in info})

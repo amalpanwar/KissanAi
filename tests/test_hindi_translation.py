@@ -187,7 +187,7 @@ class TranslationTests(unittest.TestCase):
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation._request_translation', side_effect=server):
             out = translate_answer({'answer': 'Apply compost'})
         self.assertEqual(out['translation']['status'], 'translated')
-        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v10')
+        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v11')
         self.assertEqual(out['translation']['retry_model'], 'mayura:v1')
 
     def test_chunks_run_concurrently_and_preserve_source_order(self):
@@ -291,6 +291,67 @@ class TranslationTests(unittest.TestCase):
             self.assertEqual(out['translation']['status'], 'fallback')
             self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
             self.assertEqual(out['answer'], source)
+
+    def test_protected_only_chunks_skip_api_without_needing_hindi(self):
+        with patch('app.hindi_translation._request_translation') as call:
+            value = _translate('ZXQAQXZ, ZXQBQXZ.', 'test-key', 30)
+        self.assertEqual(value, 'ZXQAQXZ, ZXQBQXZ.')
+        call.assert_not_called()
+
+    def test_long_technical_tail_does_not_block_hindi_prose(self):
+        source = 'Apply compost. ' + ' '.join(f'{i} kg FYM' for i in range(1, 401))
+        def server(request, timeout):
+            text = json.loads(request.data)['input']
+            return self.response('खाद डालें। ' + ' '.join(TOKEN.findall(text)))
+        with patch('app.hindi_translation.urlopen', side_effect=server) as call:
+            out = translate_answer({'answer': source})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertGreater(out['translation']['request_chunks'], 1)
+        self.assertEqual(call.call_count, 1)
+        self.assertIn('400 kg FYM', out['answer'])
+
+    def test_native_connector_symbol_does_not_need_its_own_hindi_letters(self):
+        def server(request, timeout):
+            payload = json.loads(request.data)
+            if payload['model'] == 'sarvam-translate:v1':
+                return self.response('बदले हुए प्लेसहोल्डर')
+            return self.response('&' if payload['input'].strip() == 'and' else 'उपयोग करें')
+        with patch('app.hindi_translation.urlopen', side_effect=server):
+            out = translate_answer({'answer': 'Apply Urea and DAP.'})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertIn('Urea & DAP', out['answer'])
+
+    def test_structured_connector_and_written_number_fragments_can_be_non_hindi(self):
+        source = 'Apply Urea two DAP and SSP before sowing ZnSO4 after mixing FYM.'
+        def chat(prompt, **kwargs):
+            fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
+            return json.dumps({'translations': {key: '2' if text.strip() == 'two' else '&' if text.strip() == 'and' else 'स्रोत के अनुसार डालें' for key, text in fragments.items()}})
+        with patch('app.hindi_translation._request_translation', return_value='बदले हुए प्लेसहोल्डर'), patch(
+                'app.sarvam_generation.generate_text', side_effect=chat):
+            out = translate_answer({'answer': source})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertIn('Urea 2 DAP & SSP', out['answer'])
+
+    def test_punctuation_cannot_replace_a_meaningful_instruction(self):
+        with patch('app.hindi_translation.urlopen', return_value=self.response('।')):
+            out = translate_answer({'answer': 'Apply fertiliser before sowing.'})
+        self.assertEqual(out['translation']['status'], 'fallback')
+        self.assertEqual(out['translation']['reason'], 'hindi_missing')
+        self.assertEqual(out['translation']['failure_scope'], 'chunk')
+        self.assertEqual(out['translation']['source_fragment_kind'], 'prose')
+
+    def test_numeric_fragment_may_include_sentence_punctuation(self):
+        with patch('app.hindi_translation.urlopen', return_value=self.response('2.')):
+            out = translate_answer({'answer': 'दो मात्रा में से two.'})
+        self.assertEqual(out['translation']['status'], 'translated')
+        self.assertEqual(out['answer'], 'दो मात्रा में से 2.')
+
+    def test_connector_only_output_cannot_be_a_complete_hindi_answer(self):
+        with patch('app.hindi_translation.urlopen', return_value=self.response('&')):
+            out = translate_answer({'answer': 'and'})
+        self.assertEqual(out['translation']['status'], 'fallback')
+        self.assertEqual(out['translation']['reason'], 'hindi_missing')
+        self.assertEqual(out['translation']['failure_scope'], 'answer')
 
     def test_links_code_and_markdown_list_retained(self):
         with patch('app.hindi_translation.urlopen', side_effect=lambda *a, **kw: self.response('स्रोत')):
