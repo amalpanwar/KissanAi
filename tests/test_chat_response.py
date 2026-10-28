@@ -33,6 +33,18 @@ class ResponseFooterTests(unittest.TestCase):
         self.assertIn('Web search: tavily — unavailable',displayed)
         self.assertIn('Search outcome: search_request_failed',displayed)
 
+    def test_bilingual_cache_and_pdf_pages_are_visible(self):
+        st = MagicMock()
+        render_response_footer(st, {'english_answer': 'Prepare the field.',
+            'guide_cache': {'status': 'hit'}, 'references': ['guide.pdf'],
+            'source_pages': [{'source_file': 'guide.pdf', 'pages': [134, 135, 136]}]})
+        st.write.assert_called_with('Prepare the field.')
+        self.assertIn('English source-grounded answer', [call.args[0] for call in st.expander.call_args_list])
+        self.assertIn('PDF pages: 134, 135, 136', [call.args[0] for call in st.caption.call_args_list])
+        source = Path('streamlit_app.py').read_text()
+        self.assertIn('"english_answer": (None if intent_price else result.get("english_answer"))', source)
+        self.assertIn('"source_pages": ([] if intent_price else result.get("source_pages", []))', source)
+
     def test_history_and_live_use_same_footer_after_answer(self):
         tree=ast.parse(Path('streamlit_app.py').read_text())
         calls=[n for n in ast.walk(tree) if isinstance(n,ast.Call)

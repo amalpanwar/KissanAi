@@ -26,10 +26,11 @@ TRANSLATION_WORKERS = 4
 
 
 class TranslationValidationError(ValueError):
-    def __init__(self, reason, *, scope=None, source_kind=None):
+    def __init__(self, reason, *, scope=None, source_kind=None, latin_words=()):
         super().__init__(reason)
         self.scope = scope
         self.source_kind = source_kind
+        self.latin_words = latin_words
 
 
 class TranslatedText(str):
@@ -75,6 +76,12 @@ def _valid_written_numbers(source, output):
         if value is None or cursor == len(expected): return False
         cursor += 1
     return True
+
+
+def _untranslated_error(text, scope):
+    words = tuple(re.findall(r'[A-Za-z]+', TOKEN.sub('', text)))
+    return TranslationValidationError('untranslated_text', scope=scope,
+                                      source_kind='prose', latin_words=words)
 
 
 def _has_hindi_letters(text):
@@ -258,7 +265,7 @@ def _chat_translation(text, deadline):
         if not _valid_written_numbers(source, value):
             raise TranslationValidationError('new_numbers')
         if re.search('[A-Za-z]', value):
-            raise TranslationValidationError('untranslated_text')
+            raise _untranslated_error(value, 'structured_fragment')
         _validate_hindi_content(source, value, 'structured_fragment')
         translated.setdefault(index, []).append(value.strip())
     for index, values in translated.items():
@@ -287,7 +294,7 @@ def _native_prose_retry(text, api_key, deadline):
         value = _request_translation(task[1], api_key, min(REQUEST_TIMEOUT, remaining), NATIVE_MODEL)
         if TOKEN.search(value): raise TranslationValidationError('protected_values_changed')
         if not _valid_written_numbers(task[1], value): raise TranslationValidationError('new_numbers')
-        if re.search('[A-Za-z]', value): raise TranslationValidationError('untranslated_text')
+        if re.search('[A-Za-z]', value): raise _untranslated_error(value, 'native_fragment')
         _validate_hindi_content(task[1], value, 'native_fragment')
         return task[0], value.strip()
     translated = {}
@@ -418,6 +425,14 @@ def translate_answer(result: dict) -> dict:
         if isinstance(exc, TranslationValidationError) and exc.scope:
             info['failure_scope'] = exc.scope
             info['source_fragment_kind'] = exc.source_kind
+        if isinstance(exc, TranslationValidationError) and exc.latin_words:
+            from app.production_guide_evidence import GUIDE
+            public_source = ' '.join(str(row.get('text', '')) for row in result.get('retrieved', [])
+                                     if isinstance(row, dict) and row.get('source_file') == str(GUIDE))
+            vocabulary = {word.casefold() for word in re.findall(r'[A-Za-z]+', public_source)}
+            info['remaining_latin_count'] = len(exc.latin_words)
+            info['remaining_latin_words'] = list(dict.fromkeys(word for word in exc.latin_words
+                if 0 < len(word) <= 30 and word.casefold() in vocabulary))[:12]
         reason = (f'http_{exc.code}' if isinstance(exc, HTTPError) else
                   str(exc) if isinstance(exc, TranslationValidationError) else type(exc).__name__)
         return finish(original, 'fallback', reason)

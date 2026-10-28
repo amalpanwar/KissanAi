@@ -353,6 +353,17 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(out['translation']['reason'], 'hindi_missing')
         self.assertEqual(out['translation']['failure_scope'], 'answer')
 
+    def test_untranslated_diagnostics_only_show_public_guide_words(self):
+        from app.production_guide_evidence import GUIDE
+        with patch('app.hindi_translation.urlopen', return_value=self.response('rabi PrivateFarmerName')):
+            out = translate_answer({'answer': 'Prepare the field.',
+                'retrieved': [{'source_file': str(GUIDE), 'text': 'rabi sowing irrigation'}]})
+        self.assertEqual(out['translation']['reason'], 'untranslated_text')
+        self.assertEqual(out['translation']['failure_scope'], 'native_fragment')
+        self.assertEqual(out['translation']['remaining_latin_count'], 2)
+        self.assertEqual(out['translation']['remaining_latin_words'], ['rabi'])
+        self.assertNotIn('PrivateFarmerName', str(out['translation']))
+
     def test_links_code_and_markdown_list_retained(self):
         with patch('app.hindi_translation.urlopen', side_effect=lambda *a, **kw: self.response('स्रोत')):
             out = translate_answer({'answer': '- Source\nhttps://example.org/123\n`abc123`'})

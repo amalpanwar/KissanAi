@@ -451,8 +451,12 @@ class RAGAdvisor:
         )
 
     def answer(self, user_query: str) -> dict:
+        from app.guide_response_cache import answer_with_cache
+        return answer_with_cache(self, user_query, self._answer_without_guide_cache)
+
+    def _answer_without_guide_cache(self, user_query: str) -> dict:
         import os
-        from app.hindi_translation import translate_answer
+        from app.guide_response_cache import finalize_response
         from app.agriculture_news import NEWS_INTENT
         context, question = self._split_context_and_question(user_query)
         if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"} and NEWS_INTENT.search(question):
@@ -465,11 +469,7 @@ class RAGAdvisor:
             from app.agent_system import build_coordinator
             context, question = self._split_context_and_question(user_query)
             result = build_coordinator(self).answer(question, context)
-        translated = translate_answer(result)
-        if result.get('requires_hindi') and translated.get('translation', {}).get('status') not in {'translated', 'not_needed'}:
-            translated = {**translated, 'answer': 'स्रोतों से उत्तर तैयार हुआ, लेकिन हिंदी अनुवाद पूरा नहीं हो सका। कृपया फिर प्रयास करें।',
-                          'agent_status': 'unavailable'}
-        return translated
+        return finalize_response(result)
 
     def _answer_legacy(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)

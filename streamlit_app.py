@@ -4100,6 +4100,9 @@ if user_query:
                     "weather_action": (None if intent_price else result.get("weather_action")),
                     "agent_trace": (None if intent_price else result.get("agent_trace")),
                     "translation": (None if intent_price else result.get("translation")),
+                    "english_answer": (None if intent_price else result.get("english_answer")),
+                    "source_pages": ([] if intent_price else result.get("source_pages", [])),
+                    "guide_cache": (None if intent_price else result.get("guide_cache")),
                 }
             )
 
