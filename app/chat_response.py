@@ -13,7 +13,7 @@ def clean_references(values):
 def render_response_footer(st, item):
     from app.translation_status import render_translation_status
     if item.get('translation'):
-        render_translation_status(st, item['translation'])
+        render_translation_status(st, item['translation'], probe_key=item.get('query_log_id') or id(item))
     cache_status = (item.get('guide_cache') or {}).get('status')
     if cache_status == 'hit':
         st.caption('सहेजा गया हिंदी उत्तर दिखाया गया है; दोबारा अनुवाद नहीं किया गया।')

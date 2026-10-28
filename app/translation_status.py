@@ -1,5 +1,5 @@
 """Render the same translation diagnostics for fresh and replayed chat answers."""
-def render_translation_status(st, info):
+def render_translation_status(st, info, *, probe_key=None):
     if not info:
         st.caption('इस पुराने उत्तर का अनुवाद रिकॉर्ड उपलब्ध नहीं है। जाँच के लिए सवाल दोबारा पूछें।')
         return
@@ -31,5 +31,14 @@ def render_translation_status(st, info):
     if status in captions:
         st.caption(' '.join(filter(None, [captions[status], reasons.get(info.get('reason'))])))
     with st.expander('हिंदी अनुवाद की स्थिति'):
-        # Show only non-sensitive, stable fields, never service bodies or credentials.
-        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason', 'request_chunks', 'failure_scope', 'source_fragment_kind') if k in info})
+        # Safe status fields and words attested in the public guide; no provider bodies or credentials.
+        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason', 'request_chunks', 'failure_scope', 'source_fragment_kind', 'remaining_latin_count', 'remaining_latin_words') if k in info})
+        if status == 'fallback' and probe_key is not None:
+            st.caption('यह स्थिर नमूने की सेवा-जाँच है, खेती की सलाह नहीं। नतीजे पाँच मिनट तक दोबारा उपयोग हो सकते हैं।')
+            if st.button('Test Sarvam Hindi services', key='sarvam_probe_' + str(probe_key)) is True:
+                from app.sarvam_diagnostics import run_diagnostics
+                with st.spinner('Sarvam सेवा की जाँच हो रही है…'):
+                    st.session_state['kisaanai_sarvam_probe'] = run_diagnostics()
+            diagnostic = st.session_state.get('kisaanai_sarvam_probe')
+            if isinstance(diagnostic, dict):
+                st.json(diagnostic)

@@ -35,3 +35,9 @@ Disk storage survives reruns and process restarts only while that filesystem is 
 ## Verification
 
 Regression tests cover real-guide alias/section keys, bilingual replay with no repeated model calls, page references and English display, focused/context separation, source and language invalidation, translation-only retry, dynamic-route exclusion, corrupt/unwritable storage, concurrent requests/writes, bounded size and matching English/Hindi digests. Provider outputs are mocked; the Sarvam key is configured only in Streamlit Cloud, so live first-fill output remains unverified.
+
+## Cloud-side provider check
+
+After a translation failure, expand **हिंदी अनुवाद की स्थिति** and select **Test Sarvam Hindi services**. This explicitly runs two small fixed-sample checks against Sarvam's `/translate` and `/v1/chat/completions` endpoints using the existing Cloud key. The sample is a test label, not farming advice. No farmer question, actual answer or retrieved evidence is sent in these probes. Results include the raw fixed-sample output, Hindi-presence flag, status and elapsed time; error bodies/headers/credentials are not displayed. Identical checks are reused for up to five minutes per process to limit extra calls. These probes can consume API quota.
+
+A successful sample test does not prove that a longer crop answer will translate correctly. It distinguishes basic endpoint/key availability from the application's masking and validation behavior. The regular failure diagnostic can also show a bounded set of remaining English words only when those words are attested in the public production-guide evidence; other output text and farmer-specific words are not exposed. This diagnostic change does not bypass translation validation or claim to resolve live Hindi output.
