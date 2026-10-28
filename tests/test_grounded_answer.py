@@ -158,7 +158,7 @@ class GroundedAnswerTests(unittest.TestCase):
         final.assert_called_once()
         self.assertEqual(result['answer'], hindi)
 
-    def test_translation_failure_never_displays_english_answer(self):
+    def test_translation_failure_keeps_english_answer_visible(self):
         advisor = RAGAdvisor.__new__(RAGAdvisor)
         advisor.__dict__.update(self.fixture.advisor.__dict__)
         for status in ['not_configured', 'disabled', 'fallback']:
@@ -167,9 +167,9 @@ class GroundedAnswerTests(unittest.TestCase):
                     'app.hindi_translation.translate_answer',
                     side_effect=lambda result: {**result, 'translation': {'status': status}}):
                 result = advisor.answer('किस प्रकार का चावल बेहतर है?')
-            self.assertEqual(result['agent_status'], 'unavailable')
-            self.assertNotIn('Cultivar A', result['answer'])
-            self.assertIn('हिंदी अनुवाद', result['answer'])
+            self.assertEqual(result['agent_status'], 'partial')
+            self.assertIn('Cultivar A', result['answer'])
+            self.assertEqual(result['translation']['status'], status)
 
 
 if __name__ == '__main__': unittest.main()

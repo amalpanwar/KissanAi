@@ -187,7 +187,7 @@ class TranslationTests(unittest.TestCase):
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation._request_translation', side_effect=server):
             out = translate_answer({'answer': 'Apply compost'})
         self.assertEqual(out['translation']['status'], 'translated')
-        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v12')
+        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v13')
         self.assertEqual(out['translation']['retry_model'], 'mayura:v1')
 
     def test_chunks_run_concurrently_and_preserve_source_order(self):
@@ -208,8 +208,10 @@ class TranslationTests(unittest.TestCase):
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation.TRANSLATION_WORKERS', 1), patch('app.hindi_translation._request_translation', side_effect=server) as call:
             out = translate_answer({'answer': 'Apply compost\nसिंचाई\nIrrigate regularly'})
         self.assertEqual(call.call_count, 1)
-        self.assertEqual(out['translation']['reason'], 'translation_deadline')
-        self.assertEqual(out['answer'], 'Apply compost\nसिंचाई\nIrrigate regularly')
+        self.assertEqual(out['translation']['status'], 'partial')
+        self.assertEqual(out['translation']['reason'], 'partial_translation')
+        self.assertEqual(out['translation']['failed_chunks'], 1)
+        self.assertEqual(out['answer'], 'खाद डालें\nसिंचाई\nIrrigate regularly')
 
     def test_quantity_rich_guide_uses_one_validated_chat_translation(self):
         source = 'Apply 10 kg before sowing, add 20 kg after sowing, irrigate at 30 days, weed at 40 days, harvest at 50 days.'
@@ -271,26 +273,35 @@ class TranslationTests(unittest.TestCase):
             self.assertGreater(position, last)
             last = position
 
-    def test_structured_fallback_rejects_missing_unknown_duplicate_and_empty_fragments(self):
+    def test_structured_fallback_isolates_invalid_ids_and_ignores_irrelevant_extras(self):
         source = 'Apply 10 kg then 20 kg then 30 kg then 40 kg then 50 kg.'
-        for kind in ['missing', 'unknown', 'duplicate', 'empty', 'extra_field', 'malformed']:
+        for kind in ['missing', 'unknown', 'duplicate', 'empty', 'extra_field', 'malformed', 'unrecoverable']:
+            _translate.cache_clear()
             def chat(prompt, **kwargs):
                 fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
                 values = {key: 'खाद डालें' for key in fragments}
-                if kind == 'missing': values.pop(next(iter(values)))
+                if kind == 'missing' and len(fragments) > 1: values.pop(next(iter(values)))
                 if kind == 'unknown': values['unknown'] = 'खाद डालें'
-                if kind == 'empty': values[next(iter(values))] = ''
-                if kind == 'duplicate': return '{"translations":{"0":"खाद", "0":"खाद"}}'
-                if kind == 'malformed': return 'खाद डालें'
+                if kind == 'empty' and len(fragments) > 1: values[next(iter(values))] = ''
+                if kind == 'duplicate' and len(fragments) > 1:
+                    return '{"translations":{"0":"खाद", "0":"खाद"}}'
+                if kind == 'malformed' and len(fragments) > 1: return 'खाद डालें'
+                if kind == 'unrecoverable': return 'खाद डालें'
                 data = {'translations': values}
                 if kind == 'extra_field': data['notes'] = 'खाद'
                 return json.dumps(data)
             with self.subTest(kind=kind), patch('app.hindi_translation._request_translation', return_value='बदले हुए टोकन'), patch(
                     'app.sarvam_generation.generate_text', side_effect=chat):
                 out = translate_answer({'answer': source})
-            self.assertEqual(out['translation']['status'], 'fallback')
-            self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
-            self.assertEqual(out['answer'], source)
+            if kind == 'unrecoverable':
+                self.assertEqual(out['translation']['status'], 'fallback')
+                self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
+                self.assertEqual(out['answer'], source)
+            else:
+                self.assertEqual(out['translation']['status'], 'translated')
+                self.assertIn('खाद डालें', out['answer'])
+                for amount in ['10 kg', '20 kg', '30 kg', '40 kg', '50 kg']:
+                    self.assertIn(amount, out['answer'])
 
     def test_protected_only_chunks_skip_api_without_needing_hindi(self):
         with patch('app.hindi_translation._request_translation') as call:
@@ -363,6 +374,25 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(out['translation']['remaining_latin_count'], 2)
         self.assertEqual(out['translation']['remaining_latin_words'], ['rabi'])
         self.assertNotIn('PrivateFarmerName', str(out['translation']))
+
+    def test_partial_translation_streams_validated_chunks_and_keeps_failed_source(self):
+        from app.hindi_translation import TranslationValidationError, translation_stream_callback
+        source = 'Apply compost.\nसिंचाई करें।\nIrrigate regularly.'
+        updates = []
+        def translate(text, key, timeout, model='sarvam-translate:v1'):
+            if 'Apply compost' in text:
+                raise TranslationValidationError('invalid_translation_structure')
+            return 'नियमित सिंचाई करें।'
+        with patch('app.hindi_translation._translate', side_effect=translate):
+            with translation_stream_callback(updates.append):
+                out = translate_answer({'answer': source})
+        self.assertEqual(out['translation']['status'], 'partial')
+        self.assertEqual(out['translation']['failed_chunks'], 1)
+        self.assertEqual(out['translation']['translated_chunks'], 1)
+        self.assertIn('Apply compost.', out['answer'])
+        self.assertIn('नियमित सिंचाई करें।', out['answer'])
+        self.assertTrue(updates)
+        self.assertEqual(updates[-1], out['answer'])
 
     def test_links_code_and_markdown_list_retained(self):
         with patch('app.hindi_translation.urlopen', side_effect=lambda *a, **kw: self.response('स्रोत')):
