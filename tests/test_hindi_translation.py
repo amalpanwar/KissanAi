@@ -276,6 +276,7 @@ class TranslationTests(unittest.TestCase):
     def test_structured_fallback_isolates_invalid_ids_and_ignores_irrelevant_extras(self):
         source = 'Apply 10 kg then 20 kg then 30 kg then 40 kg then 50 kg.'
         for kind in ['missing', 'unknown', 'duplicate', 'empty', 'extra_field', 'malformed', 'unrecoverable']:
+            _translate.cache_clear()
             def chat(prompt, **kwargs):
                 fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
                 values = {key: 'खाद डालें' for key in fragments}
