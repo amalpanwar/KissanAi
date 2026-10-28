@@ -23,7 +23,18 @@ class SarvamGenerationTests(unittest.TestCase):
         payload = json.loads(call.call_args.args[0].data)
         self.assertEqual(payload['messages'][0]['content'], prompt)
         self.assertEqual(payload['model'], 'sarvam-105b')
+        self.assertEqual(payload['max_tokens'], 1800)
+        self.assertNotIn('response_format', payload)
         self.assertEqual(call.call_args.kwargs['timeout'], 25)
+
+    def test_structured_translation_options_are_sent_only_when_requested(self):
+        with patch('app.sarvam_generation.urlopen', return_value=self.reply('{"translations": {"0": "खाद"}}')) as call:
+            generate_text('Translate fragments as JSON', timeout=15, max_tokens=3500,
+                          response_format={'type': 'json_object'})
+        payload = json.loads(call.call_args.args[0].data)
+        self.assertEqual(payload['response_format'], {'type': 'json_object'})
+        self.assertEqual(payload['max_tokens'], 3500)
+        self.assertEqual(call.call_args.kwargs['timeout'], 15)
 
     def test_empty_or_truncated_generation_is_rejected(self):
         for text, finish in [('', 'stop'), ('partial answer', 'length')]:

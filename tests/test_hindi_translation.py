@@ -187,7 +187,7 @@ class TranslationTests(unittest.TestCase):
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation._request_translation', side_effect=server):
             out = translate_answer({'answer': 'Apply compost'})
         self.assertEqual(out['translation']['status'], 'translated')
-        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v9')
+        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v10')
         self.assertEqual(out['translation']['retry_model'], 'mayura:v1')
 
     def test_chunks_run_concurrently_and_preserve_source_order(self):
@@ -214,9 +214,11 @@ class TranslationTests(unittest.TestCase):
     def test_quantity_rich_guide_uses_one_validated_chat_translation(self):
         source = 'Apply 10 kg before sowing, add 20 kg after sowing, irrigate at 30 days, weed at 40 days, harvest at 50 days.'
         def chat(prompt, **kwargs):
-            text = json.loads(prompt.split('\n', 1)[1])['text']
-            self.assertNotIn('10 kg', text)
-            return 'खाद डालें ' + ' '.join(TOKEN.findall(text))
+            fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
+            self.assertNotIn('10 kg', prompt)
+            self.assertFalse(TOKEN.search(prompt))
+            self.assertEqual(kwargs['response_format'], {'type': 'json_object'})
+            return json.dumps({'translations': {key: 'खाद डालें' for key in fragments}})
         with patch('app.hindi_translation._request_translation', return_value='प्रदाता ने प्लेसहोल्डर बदल दिए') as primary, patch(
                 'app.sarvam_generation.generate_text', side_effect=chat) as fallback:
             out = translate_answer({'answer': source, 'references': ['guide.pdf']})
@@ -234,20 +236,60 @@ class TranslationTests(unittest.TestCase):
                 'app.sarvam_generation.generate_text', return_value='999 किग्रा डालें'):
             out = translate_answer({'answer': source})
         self.assertEqual(out['translation']['status'], 'fallback')
-        self.assertEqual(out['translation']['reason'], 'protected_values_changed')
+        self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
         self.assertEqual(out['answer'], source)
 
     def test_chat_retry_rejects_new_numbers_and_remaining_english(self):
         source = 'Apply 10 kg then 20 kg then 30 kg then 40 kg then 50 kg.'
         for extra, reason in [('999', 'new_numbers'), ('compost', 'untranslated_text')]:
             def chat(prompt, **kwargs):
-                text = json.loads(prompt.split('\n', 1)[1])['text']
-                return 'खाद डालें ' + ' '.join(TOKEN.findall(text)) + ' ' + extra
+                fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
+                return json.dumps({'translations': {key: 'खाद डालें ' + extra for key in fragments}})
             with self.subTest(reason=reason), patch('app.hindi_translation._request_translation', return_value='बदले हुए टोकन'), patch(
                     'app.sarvam_generation.generate_text', side_effect=chat):
                 out = translate_answer({'answer': source})
             self.assertEqual(out['translation']['status'], 'fallback')
             self.assertEqual(out['translation']['reason'], reason)
+            self.assertEqual(out['answer'], source)
+
+    def test_structured_fallback_keeps_names_and_values_entirely_local(self):
+        source = 'Apply Urea at 50 kg/ha before sowing, use Carbendazim 50% WP at 2 g/kg seed, and select COW(W)1.'
+        def chat(prompt, **kwargs):
+            fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
+            for value in ['Urea', 'Carbendazim', '50 kg/ha', '2 g/kg', 'COW(W)1']:
+                self.assertNotIn(value, prompt)
+            self.assertFalse(TOKEN.search(prompt))
+            # JSON key ordering must not change original name/dose associations.
+            return json.dumps({'translations': {key: 'स्रोत के अनुसार उपयोग करें' for key in reversed(fragments)}})
+        with patch('app.hindi_translation._request_translation', return_value='सभी प्लेसहोल्डर बदल गए'), patch(
+                'app.sarvam_generation.generate_text', side_effect=chat):
+            out = translate_answer({'answer': source, 'retrieved': [{'text': 'Variety COW(W)1'}]})
+        self.assertEqual(out['translation']['status'], 'translated')
+        last = -1
+        for value in ['Urea', '50 kg/ha', 'Carbendazim', '50%', 'WP', '2 g/kg', 'COW(W)1']:
+            position = out['answer'].index(value, last + 1)
+            self.assertGreater(position, last)
+            last = position
+
+    def test_structured_fallback_rejects_missing_unknown_duplicate_and_empty_fragments(self):
+        source = 'Apply 10 kg then 20 kg then 30 kg then 40 kg then 50 kg.'
+        for kind in ['missing', 'unknown', 'duplicate', 'empty', 'extra_field', 'malformed']:
+            def chat(prompt, **kwargs):
+                fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
+                values = {key: 'खाद डालें' for key in fragments}
+                if kind == 'missing': values.pop(next(iter(values)))
+                if kind == 'unknown': values['unknown'] = 'खाद डालें'
+                if kind == 'empty': values[next(iter(values))] = ''
+                if kind == 'duplicate': return '{"translations":{"0":"खाद", "0":"खाद"}}'
+                if kind == 'malformed': return 'खाद डालें'
+                data = {'translations': values}
+                if kind == 'extra_field': data['notes'] = 'खाद'
+                return json.dumps(data)
+            with self.subTest(kind=kind), patch('app.hindi_translation._request_translation', return_value='बदले हुए टोकन'), patch(
+                    'app.sarvam_generation.generate_text', side_effect=chat):
+                out = translate_answer({'answer': source})
+            self.assertEqual(out['translation']['status'], 'fallback')
+            self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
             self.assertEqual(out['answer'], source)
 
     def test_links_code_and_markdown_list_retained(self):
