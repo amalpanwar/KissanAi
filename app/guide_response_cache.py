@@ -191,8 +191,9 @@ def finalize_response(result):
                       'english_agent_status': result.get('agent_status'),
                       'source_pages': source_pages(result.get('retrieved', []))}
         if translated.get('translation', {}).get('status') not in {'translated', 'not_needed'}:
-            translated = {**translated, 'answer': 'स्रोतों से उत्तर तैयार हुआ, लेकिन हिंदी अनुवाद पूरा नहीं हो सका। कृपया फिर प्रयास करें।',
-                          'agent_status': 'unavailable'}
+            # Keep the source-grounded answer visible. translate_answer returns
+            # validated Hindi chunks and leaves only failed chunks in English.
+            translated = {**translated, 'agent_status': 'partial'}
     return translated
 
 

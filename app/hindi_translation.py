@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 import json
@@ -24,6 +26,31 @@ REQUEST_TIMEOUT = 15.0
 MAX_CHUNKS = 24
 TRANSLATION_WORKERS = 4
 
+_STREAM_UPDATE = ContextVar('kisaanai_translation_stream_update', default=None)
+
+
+@contextmanager
+def translation_stream_callback(callback):
+    token = _STREAM_UPDATE.set(callback)
+    try:
+        yield
+    finally:
+        _STREAM_UPDATE.reset(token)
+
+
+def _emit_translation_update(text, values):
+    callback = _STREAM_UPDATE.get()
+    if not callable(callback):
+        return
+    visible = text
+    for token, value in values.items():
+        visible = visible.replace(token, value)
+    try:
+        callback(visible)
+    except Exception:
+        # Rendering progress must never affect answer generation.
+        pass
+
 
 class TranslationValidationError(ValueError):
     def __init__(self, reason, *, scope=None, source_kind=None, latin_words=(), structure_error=None):
@@ -31,6 +58,7 @@ class TranslationValidationError(ValueError):
         self.scope = scope
         self.source_kind = source_kind
         self.latin_words = latin_words
+        self.structure_error = structure_error
         self.structure_error = structure_error
 
 
@@ -242,7 +270,7 @@ def _chat_translation(text, deadline):
             'Names, quantities and formatting between fragments are kept by the app. '
             'Return only a JSON object with one field translations, mapping '
             'each original fragment ID to its Hindi translation. Preserve every ID, '
-            'translate fragments separately, and do not merge or omit any fragment.\\n'
+            'translate fragments separately, and do not merge or omit any fragment.\n'
             + json.dumps({'fragments': fragments}, ensure_ascii=False)
         )
         response = generate_text(prompt, timeout=min(REQUEST_TIMEOUT, remaining),
@@ -313,8 +341,8 @@ def _chat_translation(text, deadline):
                 translated.setdefault(index, []).extend(values)
 
     for index, values in translated.items():
-        prefix = re.match(r'^\\s*', parts[index]).group()
-        suffix = re.search(r'\\s*$', parts[index]).group()
+        prefix = re.match(r'^\s*', parts[index]).group()
+        suffix = re.search(r'\s*$', parts[index]).group()
         parts[index] = prefix + ' '.join(values) + suffix
     return TranslatedText(''.join(parts), chat_retry=True)
 
@@ -441,27 +469,89 @@ def translate_answer(result: dict) -> dict:
                 raise TranslationValidationError('translation_deadline')
             return _translate(chunk, key, min(FRAGMENT_TIMEOUT, remaining))
 
-        # map preserves source order even when requests finish out of order.
-        with ThreadPoolExecutor(max_workers=min(TRANSLATION_WORKERS, len(jobs))) as pool:
-            translated = list(pool.map(translate_chunk, jobs))
-        if time.monotonic() > deadline:
-            raise TranslationValidationError('translation_deadline')
-        native_retry_used = any(getattr(value, 'native_retry', False) for value in translated)
-        chat_retry_used = any(getattr(value, 'chat_retry', False) for value in translated)
-        offset = 0
+        # Keep fragment order visible while streaming each individually
+        # validated translation as soon as it is ready.
+        events = []
+        cursor = 0
+        job_index = 0
         for match, prefix, suffix, count in fragments:
-            replacement = prefix + ' '.join(translated[offset:offset + count]) + suffix
-            replacements.append((match.start(), match.end(), replacement))
-            offset += count
-        output = protected
-        for start, end, replacement in reversed(replacements):
-            output = output[:start] + replacement + output[end:]
+            events.append(('text', protected[cursor:match.start()] + prefix))
+            for part_index in range(count):
+                events.append(('job', job_index))
+                job_index += 1
+                if part_index + 1 < count:
+                    events.append(('text', ' '))
+            events.append(('text', suffix))
+            cursor = match.end()
+        events.append(('text', protected[cursor:]))
+
+        translated = [None] * len(jobs)
+        failures = []
+        structure_errors = []
+        ready_jobs = set()
+        output_parts = []
+        next_event = 0
+
+        def flush_ready():
+            nonlocal next_event
+            changed = False
+            while next_event < len(events):
+                kind, value = events[next_event]
+                if kind == 'job' and value not in ready_jobs:
+                    break
+                output_parts.append(translated[value] if kind == 'job' else value)
+                changed = True
+                next_event += 1
+            if changed:
+                _emit_translation_update(''.join(output_parts), values)
+
+        future_indices = {}
+        with ThreadPoolExecutor(max_workers=min(TRANSLATION_WORKERS, len(jobs))) as pool:
+            for index, chunk in enumerate(jobs):
+                future_indices[pool.submit(translate_chunk, chunk)] = index
+            for future in as_completed(future_indices):
+                index = future_indices[future]
+                try:
+                    value = future.result()
+                    translated[index] = str(value)
+                    native_retry_used |= bool(getattr(value, 'native_retry', False))
+                    chat_retry_used |= bool(getattr(value, 'chat_retry', False))
+                except Exception as exc:
+                    # Keep only this original source fragment; neighboring
+                    # validated Hindi fragments remain useful to the farmer.
+                    translated[index] = jobs[index]
+                    reason = (f'http_{exc.code}' if isinstance(exc, HTTPError) else
+                              str(exc) if isinstance(exc, TranslationValidationError) else
+                              type(exc).__name__)
+                    failures.append(reason)
+                    if isinstance(exc, TranslationValidationError) and exc.structure_error:
+                        structure_errors.append(exc.structure_error)
+                ready_jobs.add(index)
+                flush_ready()
+
+        output = ''.join(output_parts)
         if Counter(TOKEN.findall(output)) != Counter(values.keys()):
             raise TranslationValidationError('protected_values_lost')
-        _validate_hindi_content(protected, TOKEN.sub('', output), 'answer')
+        if not failures:
+            _validate_hindi_content(protected, TOKEN.sub('', output), 'answer')
         for token, value in values.items():
             output = output.replace(token, value)
+        _emit_translation_update(output, {})
+        if failures:
+            from collections import Counter as _ReasonCounter
+            info['translated_chunks'] = len(jobs) - len(failures)
+            info['failed_chunks'] = len(failures)
+            info['failure_reason_counts'] = dict(_ReasonCounter(failures))
+            if structure_errors:
+                info['structure_error_counts'] = dict(_ReasonCounter(structure_errors))
+                info['failure_scope'] = 'structured_fragment'
+                info['source_fragment_kind'] = 'prose'
+                info['retry_model'] = _setting('KISAANAI_SARVAM_CHAT_MODEL', 'sarvam-105b')
+            if len(failures) == len(jobs):
+                return finish(output, 'fallback', failures[0])
+            return finish(output, 'partial', 'partial_translation')
         return finish(output, 'translated')
+
     except Exception as exc:
         # Never expose provider bodies, API keys, or farmer text in diagnostics.
         if isinstance(exc, TranslationValidationError) and exc.scope:

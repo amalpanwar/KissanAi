@@ -3985,9 +3985,15 @@ if user_query:
                             "retrieved": pesticide_result.get("retrieved", []),
                             "topic": "pesticide",
                         }
+                live_translation_slot = st.empty()
+                from app.hindi_translation import translation_stream_callback
+                def _streamed_advisor_answer():
+                    with translation_stream_callback(live_translation_slot.markdown):
+                        return answer_with_research_followup(advisor, composed_query, st.session_state)
+
                 if agentic_enabled:
                     with st.spinner("Checking sources and coordinating specialists..."):
-                        result = answer_with_research_followup(advisor, composed_query, st.session_state)
+                        result = _streamed_advisor_answer()
                 elif direct_crop_followup is not None:
                     result = direct_crop_followup
                 elif direct_crop_protection_followup is not None:
@@ -3995,7 +4001,7 @@ if user_query:
                 else:
                     with st.spinner("Generating recommendation..."):
                         try:
-                            result = answer_with_research_followup(advisor, composed_query, st.session_state)
+                            result = _streamed_advisor_answer()
                         except Exception as exc:
                             import traceback as _traceback
 
@@ -4049,8 +4055,10 @@ if user_query:
                             "topic": "pesticide",
                         }
                 from app.hindi_translation import translate_answer
-                result = translate_answer(result)
+                with translation_stream_callback(live_translation_slot.markdown):
+                    result = translate_answer(result)
                 final_answer = result["answer"]
+                live_translation_slot.empty()
                 topic = result.get("topic") or "rag"
                 query_log_id = log_query_answer(
                     user_query=user_query,

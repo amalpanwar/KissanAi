@@ -364,6 +364,25 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(out['translation']['remaining_latin_words'], ['rabi'])
         self.assertNotIn('PrivateFarmerName', str(out['translation']))
 
+    def test_partial_translation_streams_validated_chunks_and_keeps_failed_source(self):
+        from app.hindi_translation import TranslationValidationError, translation_stream_callback
+        source = 'Apply compost.\nसिंचाई करें।\nIrrigate regularly.'
+        updates = []
+        def translate(text, key, timeout, model='sarvam-translate:v1'):
+            if 'Apply compost' in text:
+                raise TranslationValidationError('invalid_translation_structure')
+            return 'नियमित सिंचाई करें।'
+        with patch('app.hindi_translation._translate', side_effect=translate):
+            with translation_stream_callback(updates.append):
+                out = translate_answer({'answer': source})
+        self.assertEqual(out['translation']['status'], 'partial')
+        self.assertEqual(out['translation']['failed_chunks'], 1)
+        self.assertEqual(out['translation']['translated_chunks'], 1)
+        self.assertIn('Apply compost.', out['answer'])
+        self.assertIn('नियमित सिंचाई करें।', out['answer'])
+        self.assertTrue(updates)
+        self.assertEqual(updates[-1], out['answer'])
+
     def test_links_code_and_markdown_list_retained(self):
         with patch('app.hindi_translation.urlopen', side_effect=lambda *a, **kw: self.response('स्रोत')):
             out = translate_answer({'answer': '- Source\nhttps://example.org/123\n`abc123`'})
