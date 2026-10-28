@@ -32,7 +32,7 @@ def render_translation_status(st, info, *, probe_key=None):
         st.caption(' '.join(filter(None, [captions[status], reasons.get(info.get('reason'))])))
     with st.expander('हिंदी अनुवाद की स्थिति'):
         # Safe status fields and words attested in the public guide; no provider bodies or credentials.
-        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason', 'request_chunks', 'failure_scope', 'source_fragment_kind', 'remaining_latin_count', 'remaining_latin_words') if k in info})
+        st.json({k: info[k] for k in ('provider', 'model', 'retry_model', 'version', 'status', 'reason', 'request_chunks', 'failure_scope', 'source_fragment_kind', 'structure_error', 'remaining_latin_count', 'remaining_latin_words') if k in info})
         if status == 'fallback' and probe_key is not None:
             st.caption('यह स्थिर नमूने की सेवा-जाँच है, खेती की सलाह नहीं। नतीजे पाँच मिनट तक दोबारा उपयोग हो सकते हैं।')
             if st.button('Test Sarvam Hindi services', key='sarvam_probe_' + str(probe_key)) is True:

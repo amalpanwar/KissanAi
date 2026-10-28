@@ -187,7 +187,7 @@ class TranslationTests(unittest.TestCase):
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation._request_translation', side_effect=server):
             out = translate_answer({'answer': 'Apply compost'})
         self.assertEqual(out['translation']['status'], 'translated')
-        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v12')
+        self.assertEqual(out['translation']['version'], 'sarvam-hindi-v13')
         self.assertEqual(out['translation']['retry_model'], 'mayura:v1')
 
     def test_chunks_run_concurrently_and_preserve_source_order(self):
