@@ -16,7 +16,7 @@ from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v11'
+TRANSLATION_VERSION = 'sarvam-hindi-v12'
 NATIVE_MODEL = 'mayura:v1'
 ANSWER_TIMEOUT = 60.0
 FRAGMENT_TIMEOUT = 30.0
@@ -112,7 +112,7 @@ def _validate_hindi_content(source, output, scope):
     raise TranslationValidationError('hindi_missing', scope=scope, source_kind=kind)
 
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
-FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
+FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K|O)\b'
 UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C)(?:\s*/\s*(?:ha|hectare|acre|kg|g|L|litre|liter))?'
 NUMBER = r'\d+(?:[.,:/–-]\d+)*'
 PROTECTED = re.compile(
