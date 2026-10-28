@@ -211,7 +211,7 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(out['translation']['status'], 'partial')
         self.assertEqual(out['translation']['reason'], 'partial_translation')
         self.assertEqual(out['translation']['failed_chunks'], 1)
-        self.assertEqual(out['answer'], 'Apply compost\nसिंचाई\nIrrigate regularly')
+        self.assertEqual(out['answer'], 'खाद डालें\nसिंचाई\nIrrigate regularly')
 
     def test_quantity_rich_guide_uses_one_validated_chat_translation(self):
         source = 'Apply 10 kg before sowing, add 20 kg after sowing, irrigate at 30 days, weed at 40 days, harvest at 50 days.'
@@ -275,28 +275,32 @@ class TranslationTests(unittest.TestCase):
 
     def test_structured_fallback_isolates_invalid_ids_and_ignores_irrelevant_extras(self):
         source = 'Apply 10 kg then 20 kg then 30 kg then 40 kg then 50 kg.'
-        for kind in ['missing', 'unknown', 'duplicate', 'empty', 'extra_field', 'malformed']:
+        for kind in ['missing', 'unknown', 'duplicate', 'empty', 'extra_field', 'malformed', 'unrecoverable']:
             def chat(prompt, **kwargs):
                 fragments = json.loads(prompt.split('\n', 1)[1])['fragments']
                 values = {key: 'खाद डालें' for key in fragments}
-                if kind == 'missing': values.pop(next(iter(values)))
+                if kind == 'missing' and len(fragments) > 1: values.pop(next(iter(values)))
                 if kind == 'unknown': values['unknown'] = 'खाद डालें'
-                if kind == 'empty': values[next(iter(values))] = ''
-                if kind == 'duplicate': return '{"translations":{"0":"खाद", "0":"खाद"}}'
-                if kind == 'malformed': return 'खाद डालें'
+                if kind == 'empty' and len(fragments) > 1: values[next(iter(values))] = ''
+                if kind == 'duplicate' and len(fragments) > 1:
+                    return '{"translations":{"0":"खाद", "0":"खाद"}}'
+                if kind == 'malformed' and len(fragments) > 1: return 'खाद डालें'
+                if kind == 'unrecoverable': return 'खाद डालें'
                 data = {'translations': values}
                 if kind == 'extra_field': data['notes'] = 'खाद'
                 return json.dumps(data)
             with self.subTest(kind=kind), patch('app.hindi_translation._request_translation', return_value='बदले हुए टोकन'), patch(
                     'app.sarvam_generation.generate_text', side_effect=chat):
                 out = translate_answer({'answer': source})
-            if kind in {'unknown', 'extra_field'}:
-                self.assertEqual(out['translation']['status'], 'translated')
-                self.assertIn('खाद डालें', out['answer'])
-            else:
+            if kind == 'unrecoverable':
                 self.assertEqual(out['translation']['status'], 'fallback')
                 self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
                 self.assertEqual(out['answer'], source)
+            else:
+                self.assertEqual(out['translation']['status'], 'translated')
+                self.assertIn('खाद डालें', out['answer'])
+                for amount in ['10 kg', '20 kg', '30 kg', '40 kg', '50 kg']:
+                    self.assertIn(amount, out['answer'])
 
     def test_protected_only_chunks_skip_api_without_needing_hindi(self):
         with patch('app.hindi_translation._request_translation') as call:
