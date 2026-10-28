@@ -76,3 +76,9 @@ The quantity-rich recovery request no longer sends placeholder-filled text to Sa
 The primary `/translate` request remains unchanged; this replaces the unreliable masked-text chat fallback used after primary failure. Small native prose retries also retain their existing behavior. JSON recovery allows up to 3,500 output tokens within the existing request/fragment/answer deadlines. It does not prove semantic translation quality or remove provider latency/availability risks.
 
 Sarvam's documented JSON mode: https://docs.sarvam.ai/api-reference/chat/chat-completions-v1 . Local tests mock provider responses; the app's key is configured only in Streamlit Cloud, so live output must be checked there.
+
+## Fragment versus answer language checks (v11)
+
+Protected-only chunks bypass the provider and retain their text locally. Numeric translations of supported written numbers and a small explicit set of connector-symbol equivalents (for example `and` → `&`) do not need their own Hindi letters. Ordinary prose fragments still must translate meaningfully into Hindi; punctuation alone cannot replace an instruction. The assembled answer is checked as well, before protected English names/values are restored. Devanagari digits and punctuation no longer count as Hindi prose letters.
+
+For `hindi_missing`, diagnostics report a safe `failure_scope` (native fragment, structured fragment, chunk, or answer) and `source_fragment_kind`, without exposing provider/farmer text. This distinguishes fragment-validation failures from a genuinely non-Hindi answer. Provider responses remain mocked locally because the API key is available only in Streamlit Cloud.

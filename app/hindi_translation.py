@@ -16,7 +16,7 @@ from urllib.error import HTTPError
 
 ENDPOINT = 'https://api.sarvam.ai/translate'
 MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v10'
+TRANSLATION_VERSION = 'sarvam-hindi-v11'
 NATIVE_MODEL = 'mayura:v1'
 ANSWER_TIMEOUT = 60.0
 FRAGMENT_TIMEOUT = 30.0
@@ -26,7 +26,10 @@ TRANSLATION_WORKERS = 4
 
 
 class TranslationValidationError(ValueError):
-    pass
+    def __init__(self, reason, *, scope=None, source_kind=None):
+        super().__init__(reason)
+        self.scope = scope
+        self.source_kind = source_kind
 
 
 class TranslatedText(str):
@@ -72,6 +75,34 @@ def _valid_written_numbers(source, output):
         if value is None or cursor == len(expected): return False
         cursor += 1
     return True
+
+
+def _has_hindi_letters(text):
+    return any('\u0900' <= char <= '\u097f' and unicodedata.category(char).startswith('L') for char in text)
+
+
+_CONNECTOR_SYMBOLS = {'and': {'&', '+'}, 'or': {'/'}, 'per': {'/'},
+                      'at': {'@', ':'}, 'to': {'-', '–', '→'}}
+
+
+def _validate_hindi_content(source, output, scope):
+    """Grammar/math fragments need not each contain Hindi sentence letters."""
+    if _has_hindi_letters(output):
+        return
+    prose = TOKEN.sub('', source)
+    if not re.search('[A-Za-z]', prose):
+        return  # Protected-only chunks never needed linguistic translation.
+    source_words = ' '.join(re.findall('[A-Za-z]+', prose)).lower()
+    if scope != 'answer' and source_words in _CONNECTOR_SYMBOLS and output.strip() in _CONNECTOR_SYMBOLS[source_words]:
+        return
+    number_residue = _WORD_NUMBER.sub('', prose)
+    numeric_output = output.strip().strip('()[]{} .,:;।॥')
+    if (not re.search('[A-Za-z]', number_residue)
+            and re.fullmatch(r'[+\-−]?\d+(?:[.,]\d+)*', numeric_output)
+            and _valid_written_numbers(source, output)):
+        return
+    kind = 'connector' if source_words in _CONNECTOR_SYMBOLS else 'prose'
+    raise TranslationValidationError('hindi_missing', scope=scope, source_kind=kind)
 
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
 FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
@@ -228,8 +259,7 @@ def _chat_translation(text, deadline):
             raise TranslationValidationError('new_numbers')
         if re.search('[A-Za-z]', value):
             raise TranslationValidationError('untranslated_text')
-        if not re.search(r'[\u0900-\u097f]', value):
-            raise TranslationValidationError('hindi_missing')
+        _validate_hindi_content(source, value, 'structured_fragment')
         translated.setdefault(index, []).append(value.strip())
     for index, values in translated.items():
         prefix = re.match(r'^\s*', parts[index]).group()
@@ -258,7 +288,7 @@ def _native_prose_retry(text, api_key, deadline):
         if TOKEN.search(value): raise TranslationValidationError('protected_values_changed')
         if not _valid_written_numbers(task[1], value): raise TranslationValidationError('new_numbers')
         if re.search('[A-Za-z]', value): raise TranslationValidationError('untranslated_text')
-        if not re.search(r'[\u0900-\u097f]', value): raise TranslationValidationError('hindi_missing')
+        _validate_hindi_content(task[1], value, 'native_fragment')
         return task[0], value.strip()
     translated = {}
     with ThreadPoolExecutor(max_workers=min(4, max(1, len(tasks)))) as pool:
@@ -276,6 +306,8 @@ def _native_prose_retry(text, api_key, deadline):
 
 @lru_cache(maxsize=256)
 def _translate(text: str, api_key: str, timeout: float) -> str:
+    if not re.search('[A-Za-z]', TOKEN.sub('', text)):
+        return TranslatedText(text)
     deadline = time.monotonic() + timeout
     output = _request_translation(text, api_key, min(REQUEST_TIMEOUT, timeout))
     native_retry = False
@@ -297,8 +329,7 @@ def _translate(text: str, api_key: str, timeout: float) -> str:
         chat_retry |= bool(getattr(output, 'chat_retry', False))
         residual = TOKEN.sub('', output)
         native_retry = True
-    if not re.search(r'[\u0900-\u097f]', residual):
-        raise TranslationValidationError('hindi_missing')
+    _validate_hindi_content(text, residual, 'chunk')
     return TranslatedText(output.strip(), native_retry, chat_retry)
 
 
@@ -378,11 +409,15 @@ def translate_answer(result: dict) -> dict:
             output = output[:start] + replacement + output[end:]
         if Counter(TOKEN.findall(output)) != Counter(values.keys()):
             raise TranslationValidationError('protected_values_lost')
+        _validate_hindi_content(protected, TOKEN.sub('', output), 'answer')
         for token, value in values.items():
             output = output.replace(token, value)
         return finish(output, 'translated')
     except Exception as exc:
         # Never expose provider bodies, API keys, or farmer text in diagnostics.
+        if isinstance(exc, TranslationValidationError) and exc.scope:
+            info['failure_scope'] = exc.scope
+            info['source_fragment_kind'] = exc.source_kind
         reason = (f'http_{exc.code}' if isinstance(exc, HTTPError) else
                   str(exc) if isinstance(exc, TranslationValidationError) else type(exc).__name__)
         return finish(original, 'fallback', reason)
