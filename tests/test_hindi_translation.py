@@ -208,7 +208,9 @@ class TranslationTests(unittest.TestCase):
         with patch('app.hindi_translation.time.monotonic', side_effect=lambda: clock[0]), patch('app.hindi_translation.TRANSLATION_WORKERS', 1), patch('app.hindi_translation._request_translation', side_effect=server) as call:
             out = translate_answer({'answer': 'Apply compost\nसिंचाई\nIrrigate regularly'})
         self.assertEqual(call.call_count, 1)
-        self.assertEqual(out['translation']['reason'], 'translation_deadline')
+        self.assertEqual(out['translation']['status'], 'partial')
+        self.assertEqual(out['translation']['reason'], 'partial_translation')
+        self.assertEqual(out['translation']['failed_chunks'], 1)
         self.assertEqual(out['answer'], 'Apply compost\nसिंचाई\nIrrigate regularly')
 
     def test_quantity_rich_guide_uses_one_validated_chat_translation(self):
@@ -271,7 +273,7 @@ class TranslationTests(unittest.TestCase):
             self.assertGreater(position, last)
             last = position
 
-    def test_structured_fallback_rejects_missing_unknown_duplicate_and_empty_fragments(self):
+    def test_structured_fallback_isolates_invalid_ids_and_ignores_irrelevant_extras(self):
         source = 'Apply 10 kg then 20 kg then 30 kg then 40 kg then 50 kg.'
         for kind in ['missing', 'unknown', 'duplicate', 'empty', 'extra_field', 'malformed']:
             def chat(prompt, **kwargs):
@@ -288,9 +290,13 @@ class TranslationTests(unittest.TestCase):
             with self.subTest(kind=kind), patch('app.hindi_translation._request_translation', return_value='बदले हुए टोकन'), patch(
                     'app.sarvam_generation.generate_text', side_effect=chat):
                 out = translate_answer({'answer': source})
-            self.assertEqual(out['translation']['status'], 'fallback')
-            self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
-            self.assertEqual(out['answer'], source)
+            if kind in {'unknown', 'extra_field'}:
+                self.assertEqual(out['translation']['status'], 'translated')
+                self.assertIn('खाद डालें', out['answer'])
+            else:
+                self.assertEqual(out['translation']['status'], 'fallback')
+                self.assertEqual(out['translation']['reason'], 'invalid_translation_structure')
+                self.assertEqual(out['answer'], source)
 
     def test_protected_only_chunks_skip_api_without_needing_hindi(self):
         with patch('app.hindi_translation._request_translation') as call:

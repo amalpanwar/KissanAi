@@ -487,6 +487,7 @@ def translate_answer(result: dict) -> dict:
 
         translated = [None] * len(jobs)
         failures = []
+        chunk_errors = []
         structure_errors = []
         ready_jobs = set()
         output_parts = []
@@ -524,6 +525,7 @@ def translate_answer(result: dict) -> dict:
                               str(exc) if isinstance(exc, TranslationValidationError) else
                               type(exc).__name__)
                     failures.append(reason)
+                    chunk_errors.append(exc)
                     if isinstance(exc, TranslationValidationError) and exc.structure_error:
                         structure_errors.append(exc.structure_error)
                 ready_jobs.add(index)
@@ -539,6 +541,18 @@ def translate_answer(result: dict) -> dict:
         _emit_translation_update(output, {})
         if failures:
             from collections import Counter as _ReasonCounter
+            first_error = chunk_errors[0]
+            if isinstance(first_error, TranslationValidationError) and first_error.scope:
+                info['failure_scope'] = first_error.scope
+                info['source_fragment_kind'] = first_error.source_kind
+            if isinstance(first_error, TranslationValidationError) and first_error.latin_words:
+                from app.production_guide_evidence import GUIDE
+                public_source = ' '.join(str(row.get('text', '')) for row in result.get('retrieved', [])
+                                         if isinstance(row, dict) and row.get('source_file') == str(GUIDE))
+                vocabulary = {word.casefold() for word in re.findall(r'[A-Za-z]+', public_source)}
+                info['remaining_latin_count'] = len(first_error.latin_words)
+                info['remaining_latin_words'] = list(dict.fromkeys(word for word in first_error.latin_words
+                    if 0 < len(word) <= 30 and word.casefold() in vocabulary))[:12]
             info['translated_chunks'] = len(jobs) - len(failures)
             info['failed_chunks'] = len(failures)
             info['failure_reason_counts'] = dict(_ReasonCounter(failures))
