@@ -163,7 +163,7 @@ def translate_answer(result: dict) -> dict:
     """
     existing = result.get('translation')
     if (isinstance(existing, dict) and existing.get('provider') == 'local'
-            and existing.get('status') in {'translated', 'partial', 'not_needed'}):
+            and existing.get('status') in {'translated', 'partial', 'not_needed', 'source_answer_fallback'}):
         return result
     original = str(result.get('answer', ''))
     info = {'provider': 'local', 'model': MODEL, 'target_language': 'hi-IN',
