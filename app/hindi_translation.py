@@ -271,7 +271,7 @@ def _native_prose_retry(text, api_key, deadline):
         _validate_hindi_content(task[1], value, 'native_fragment')
         return task[0], value.strip()
     translated = {}
-    with ThreadPoolExecutor(max_workers=min(4, max(1, len(tasks)))) as pool:
+    with ThreadPoolExecutor(max_workers=1) as pool:
         for index, value in pool.map(translate, tasks):
             translated.setdefault(index, []).append(value)
     for index, values in translated.items():
@@ -471,7 +471,7 @@ def translate_answer(result: dict) -> dict:
             info['source_fragment_kind'] = exc.source_kind
         if isinstance(exc, TranslationValidationError) and getattr(exc, 'structure_error', None):
             info['structure_error'] = exc.structure_error
-            info['retry_model'] = _setting('KISAANAI_SARVAM_CHAT_MODEL', 'sarvam-105b')
+            info['retry_model'] = MODEL
         if isinstance(exc, TranslationValidationError) and exc.latin_words:
             from app.production_guide_evidence import GUIDE
             public_source = ' '.join(str(row.get('text', '')) for row in result.get('retrieved', [])
