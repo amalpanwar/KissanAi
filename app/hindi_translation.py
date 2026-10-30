@@ -23,7 +23,7 @@ ANSWER_TIMEOUT = 60.0
 FRAGMENT_TIMEOUT = 30.0
 REQUEST_TIMEOUT = 15.0
 MAX_CHUNKS = 24
-TRANSLATION_WORKERS = 4
+TRANSLATION_WORKERS = 1
 
 _STREAM_UPDATE = ContextVar('kisaanai_translation_stream_update', default=None)
 
@@ -264,7 +264,7 @@ def _native_prose_retry(text, api_key, deadline):
     def translate(task):
         remaining = deadline - time.monotonic()
         if remaining <= 0: raise TranslationValidationError('translation_deadline')
-        value = _request_translation(task[1], api_key, min(REQUEST_TIMEOUT, remaining), NATIVE_MODEL)
+        value = _request_translation(task[1], api_key, min(REQUEST_TIMEOUT, remaining), MODEL)
         if TOKEN.search(value): raise TranslationValidationError('protected_values_changed')
         if not _valid_written_numbers(task[1], value): raise TranslationValidationError('new_numbers')
         if re.search('[A-Za-z]', value): raise _untranslated_error(value, 'native_fragment')
