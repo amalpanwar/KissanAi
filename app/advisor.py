@@ -514,8 +514,12 @@ class RAGAdvisor:
                 candidate = str(generator.generate(prompt) or "").strip()
                 allowed_pages = {str(item.get("page")) for item in passages}
                 cited_pages = set(re.findall(r"\[PDF page\s+(\d+)\]", candidate, re.I))
+                source_values = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", evidence))
+                uncited_numbers = re.sub(r"\[PDF page\s+\d+\]", "", candidate, flags=re.I)
+                answer_values = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", uncited_numbers))
                 if (candidate and len(candidate) <= 6000 and cited_pages
-                        and cited_pages.issubset(allowed_pages)):
+                        and cited_pages.issubset(allowed_pages)
+                        and answer_values.issubset(source_values)):
                     answer = candidate
                     generation_status = "generated"
             except Exception:
