@@ -226,6 +226,7 @@ def translate_answer(result: dict) -> dict:
     if failures:
         # Do not show a mixed-language answer. Keep translation all-or-nothing at
         # the user-visible answer level while retaining failure details in metadata.
-        return failed_translation('fragment_translation_failed',
-                                  failed_fragments=len(failures), failure_reason=failures[0])
+        return failed_translation(failures[0],
+                                  failure_scope='fragment',
+                                  failed_fragments=len(failures))
     return finish(output, 'translated', translated_fragments=len(pending))
