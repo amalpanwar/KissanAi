@@ -1,6 +1,5 @@
-import json
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from app.hindi_translation import translate_answer, _translate, _protect, TOKEN
 
 
@@ -13,7 +12,7 @@ class NamePreservationTests(unittest.TestCase):
 
     def test_doghat_weather_heading_never_sent_to_translation(self):
         answer = 'आज का मौसम (Doghat Rural, Baghpat, Uttar Pradesh):\n- तापमान: 32.3°C\n- स्थिति: आसमान साफ'
-        with patch('app.hindi_translation.urlopen') as call:
+        with patch('app.hindi_translation._request_translation') as call:
             result = translate_answer({'answer': answer, 'topic': 'weather'})
         self.assertEqual(result['answer'], answer)
         self.assertEqual(result['translation']['status'], 'not_needed')
@@ -24,17 +23,12 @@ class NamePreservationTests(unittest.TestCase):
                   'protected_names': ['Ram Singh'],
                   'agent_trace': {'messages': [{'payload': {'evidence': {'location': {
                       'place': 'Doghat Rural', 'district': 'Baghpat', 'state': 'Uttar Pradesh'}}}}]}}
-        def server(request, timeout):
-            text = json.loads(request.data)['input']
+        def local(text, *args):
             for name in ['Ram Singh', 'Doghat Rural', 'Baghpat', 'Uttar Pradesh']:
                 self.assertNotIn(name, text)
             tokens = TOKEN.findall(text)
-            response = MagicMock()
-            response.__enter__.return_value.read.return_value = json.dumps({
-                'translated_text': f'{tokens[0]}: {tokens[1]}, {tokens[2]}, {tokens[3]} में आसमान साफ है।'
-            }).encode()
-            return response
-        with patch('app.hindi_translation.urlopen', side_effect=server):
+            return f'{tokens[0]}: {tokens[1]}, {tokens[2]}, {tokens[3]} में आसमान साफ है।'
+        with patch('app.hindi_translation._request_translation', side_effect=local):
             result = translate_answer(source)
         self.assertEqual(result['translation']['status'], 'translated')
         for name in ['Ram Singh', 'Doghat Rural', 'Baghpat', 'Uttar Pradesh']:

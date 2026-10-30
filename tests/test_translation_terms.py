@@ -3,7 +3,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from app.hindi_translation import translate_answer, _translate, TOKEN, _protect, _protected_names
 from app.translation_terms import _glossary, _pesticides
@@ -15,21 +15,17 @@ class TechnicalTranslationTests(unittest.TestCase):
         settings = patch('app.hindi_translation._setting', side_effect=lambda k, d='': 'test-key' if k == 'SARVAM_API_KEY' else d)
         settings.start(); self.addCleanup(settings.stop)
 
-    def response(self, text):
-        reply = MagicMock()
-        reply.__enter__.return_value.read.return_value = json.dumps({'translated_text': text}).encode()
-        return reply
+
 
     def test_hindi_sentences_keep_english_names_varieties_and_quantities(self):
         source = 'Use Urea at 50 kg/ha and Carbendazim 50% WP at 2 g/kg seed for COW(W)1.'
         result = {'answer': source, 'retrieved': [{'text': 'Variety: COW(W)1'}], 'references': ['guide.pdf']}
-        def server(request, timeout):
-            text = json.loads(request.data)['input']
+        def local(text, *args):
             self.assertNotIn('Carbendazim', text)
             self.assertNotIn('Urea', text)
             self.assertNotIn('COW(W)1', text)
-            return self.response('इनका उपयोग करें: ' + ' '.join(TOKEN.findall(text)) + '। बीज उपचार स्रोत के अनुसार करें।')
-        with patch('app.hindi_translation.urlopen', side_effect=server) as call:
+            return 'इनका उपयोग करें: ' + ' '.join(TOKEN.findall(text)) + '। बीज उपचार स्रोत के अनुसार करें।'
+        with patch('app.hindi_translation._request_translation', side_effect=local) as call:
             out = translate_answer(result)
         self.assertEqual(out['translation']['status'], 'translated')
         self.assertEqual(call.call_count, 1)
@@ -61,34 +57,34 @@ class TechnicalTranslationTests(unittest.TestCase):
         self.assertNotIn('Samba', masked)
 
     def test_technical_names_do_not_allow_english_instructions(self):
-        def server(request, timeout):
-            text = json.loads(request.data)['input']
-            return self.response('Apply ' + ' '.join(TOKEN.findall(text)) + ' before sowing')
-        with patch('app.hindi_translation.urlopen', side_effect=server):
+        def local(text, *args):
+            if TOKEN.search(text):
+                return 'Apply ' + ' '.join(TOKEN.findall(text)) + ' before sowing'
+            return text
+        with patch('app.hindi_translation._request_translation', side_effect=local):
             out = translate_answer({'answer': 'Apply Urea before sowing.'})
         self.assertEqual(out['translation']['status'], 'fallback')
         self.assertEqual(out['translation']['reason'], 'untranslated_text')
 
     def test_new_english_chemical_not_in_original_still_rejected(self):
-        with patch('app.hindi_translation.urlopen', return_value=self.response('Carbendazim डालें')):
+        with patch('app.hindi_translation._request_translation', return_value='Carbendazim डालें'):
             out = translate_answer({'answer': 'Prepare the field.'})
         self.assertEqual(out['translation']['status'], 'fallback')
 
     def test_explicit_technical_metadata_and_case_are_preserved(self):
         result = {'answer': 'Use customBIO material.', 'protected_terms': ['CustomBio']}
-        def server(request, timeout):
-            text = json.loads(request.data)['input']
-            return self.response('इसका उपयोग करें ' + ' '.join(TOKEN.findall(text)))
-        with patch('app.hindi_translation.urlopen', side_effect=server):
+        def local(text, *args):
+            return 'इसका उपयोग करें ' + ' '.join(TOKEN.findall(text))
+        with patch('app.hindi_translation._request_translation', side_effect=local):
             out = translate_answer(result)
         self.assertEqual(out['translation']['status'], 'translated')
         self.assertIn('customBIO', out['answer'])
 
     def test_changed_quantity_is_rejected_even_with_chemical_names(self):
-        def server(request, timeout):
-            tokens = TOKEN.findall(json.loads(request.data)['input'])
-            return self.response('डालें ' + ' '.join(tokens) + ' 999')
-        with patch('app.hindi_translation.urlopen', side_effect=server):
+        def local(text, *args):
+            tokens = TOKEN.findall(text)
+            return 'डालें ' + ' '.join(tokens) + ' 999'
+        with patch('app.hindi_translation._request_translation', side_effect=local):
             out = translate_answer({'answer': 'Apply Urea at 50 kg/ha.'})
         self.assertEqual(out['translation']['status'], 'fallback')
         self.assertEqual(out['translation']['reason'], 'new_numbers')
