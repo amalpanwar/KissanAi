@@ -81,7 +81,7 @@ class ChatSuggestionsTests(unittest.TestCase):
     def test_component_submits_once_across_streamlit_reruns(self):
         from app.chat_controls import consume_submission
         state = {}
-        value = {"kind": "submit", "id": "session-1", "text": " आज मौसम? "}
+        value = {"id": "session-1", "text": " आज मौसम? "}
         self.assertEqual(consume_submission(value, state), "आज मौसम?")
         self.assertIsNone(consume_submission(value, state))
         self.assertEqual(consume_submission(dict(value, id="session-2"), state), "आज मौसम?")

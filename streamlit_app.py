@@ -1,7 +1,6 @@
 from __future__ import annotations
 from app.location_query import strip_relative_location
 from app.chat_session import sync_chat_location
-from app.research import answer_with_research_followup
 from app.agriculture_news import NEWS_INTENT
 
 from app.location_controls import render_place_selector
@@ -561,9 +560,15 @@ def render_market_panel(meta: dict | None = None, auto_chart: pd.DataFrame | Non
 
 def check_ready() -> tuple[bool, str]:
     db_exists = os.path.exists(cfg.paths["sqlite_db"])
+    idx_exists = os.path.exists(cfg.paths["vector_store"])
+    md_exists = os.path.exists(cfg.paths["metadata_store"])
+
     if not db_exists:
         return False, f"Missing SQLite DB: {cfg.paths['sqlite_db']}"
-    # Missing document/vector files must not block the web research fallback.
+    if not idx_exists:
+        return False, f"Missing vector index: {cfg.paths['vector_store']}"
+    if not md_exists:
+        return False, f"Missing metadata store: {cfg.paths['metadata_store']}"
     return True, "System ready"
 
 
@@ -1420,11 +1425,114 @@ def _match_place_from_lookup(
 
 
 def extract_place_from_query(query: str, lookup: pd.DataFrame | None = None) -> str | None:
-    from app.location_query import explicit_named_place
+    # Prefer a direct lookup match from the known location table before falling
+    # back to token filtering. This keeps place parsing stable even when the
+    # query contains extra words like commodity names or question words.
+    q = strip_relative_location(query)
+    if not q:
+        return None
+
+    stop = {
+        "like", "kya", "ky", "what", "which", "kitna", "kitne", "kitni",
+        "and", "or", "also", "please", "tell", "my", "for", "in", "at", "of", "to", "a", "an", "on", "with", "और", "होगा", "the", "is", "are", "will", "it", "be", "how", "today", "tomorrow", "tonight", "forecast", "next", "week", "day", "days", "rain", "rainfall", "temperature", "kal", "parso", "आज", "कल", "बारिश", "तापमान", "रहेगा", "कैसा", "है",
+        "aaj", "aj", "abhi", "ka", "ki", "ke", "ko", "se", "par",
+        "me", "mein", "में", "kesa", "kaisa", "hai", "h",
+        "pani", "paani", "water", "sinchai", "sichai", "sinchaai", "irrigation",
+        "lagta", "lagti", "lagte", "lata", "leti", "chahiye",
+        "price", "rate", "mandi", "bhav", "bhaav", "bhao", "daam", "dam",
+        "भाव", "कीमत", "मंडी", "मौसम", "mausam", "mosam", "weather",
+        "btaye", "bataye", "bataiye", "btao", "batao", "boliye", "bolo",
+        "do", "de", "dijiye", "dijie", "batayiye", "btaiye", "liye", "liyee",
+        "बताएं", "बताये", "बताइए", "बताओ", "दीजिए", "दो",
+    }
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
+    commodity_tokens = set()
+    for alias_list in aliases.values():
+        for alias in alias_list:
+            for t in re.findall(r"[a-z0-9]+", alias.lower()):
+                commodity_tokens.add(t)
+
     if lookup is None:
         lookup_path = Path("data/processed/location_lookup.csv")
-        lookup = load_location_lookup(lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0)
-    return explicit_named_place(query, lookup)
+        lookup_mtime = lookup_path.stat().st_mtime_ns if lookup_path.exists() else 0
+        lookup = load_location_lookup(lookup_mtime)
+    q_norm = _normalize_text(q)
+    q_tokens = re.findall(r"[a-z0-9]+", q.lower())
+    if q_norm and not lookup.empty:
+        candidates: list[tuple[int, int, str]] = []
+        for col in ["place", "sub_district", "district"]:
+            if col not in lookup.columns:
+                continue
+            for raw in lookup[col].dropna().astype(str).unique().tolist():
+                raw = raw.strip()
+                if not raw or raw.lower() == "nan":
+                    continue
+                raw_tokens = re.findall(r"[a-z0-9]+", raw.lower())
+                if not raw_tokens:
+                    continue
+                matched = False
+                token_hits = 0
+                if len(raw_tokens) == 1:
+                    token = raw_tokens[0]
+                    if len(token) >= 3 and token in q_tokens and token not in stop and token not in commodity_tokens:
+                        matched = True
+                        token_hits = 1
+                else:
+                    joined = " ".join(raw_tokens)
+                    q_joined = " ".join(q_tokens)
+                    if joined in q_joined:
+                        useful = [t for t in raw_tokens if t not in stop and t not in commodity_tokens]
+                        if useful:
+                            matched = True
+                            token_hits = len(useful)
+                    else:
+                        hits = [
+                            t for t in raw_tokens
+                            if len(t) >= 3 and t in q_tokens and t not in stop and t not in commodity_tokens
+                        ]
+                        if hits:
+                            matched = True
+                            token_hits = len(hits)
+                if matched:
+                    candidates.append((token_hits, len("".join(raw_tokens)), raw))
+        if candidates:
+            candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+            return candidates[0][2]
+
+    lookup_match = _match_place_from_lookup(q, lookup, stop, commodity_tokens)
+    if lookup_match:
+        return lookup_match
+
+    tokens = [t.strip(" ?!.,") for t in q.split() if t.strip()]
+    if not tokens:
+        return None
+
+    filtered = []
+    for tok in tokens:
+        t = re.sub(r"[^a-zA-Z0-9ऀ-ॿ]+", "", tok).lower()
+        if not t or t in stop or t in commodity_tokens:
+            continue
+        filtered.append(tok)
+
+    while filtered:
+        last = re.sub(r"[^a-zA-Z0-9ऀ-ॿ]+", "", filtered[-1]).lower()
+        if not last or last in stop or last in commodity_tokens or len(re.sub(r"[^a-z0-9]+", "", last)) <= 1:
+            filtered.pop()
+        else:
+            break
+    if not filtered:
+        return None
+    candidate = " ".join(filtered)
+    if not lookup.empty:
+        matched_candidate = _match_place_from_lookup(candidate, lookup, stop, commodity_tokens)
+        if matched_candidate:
+            return matched_candidate
+        district_guess, state_guess = _lookup_district_from_location(candidate, lookup)
+        if district_guess or state_guess:
+            return candidate
+    return None
 
 
 
@@ -1728,7 +1836,7 @@ def _resolve_query_location_with_selection(
         }
 
     hint = _extract_location_search_hint(query)
-    if hint and strict_on_hint:
+    if hint:
         suggestions = _suggest_locations_within_scope(hint, scoped_lookup)
         if suggestions or strict_on_hint:
             return {
@@ -2010,9 +2118,66 @@ def save_location_correction(place: str, district: str) -> None:
 
 
 def resolve_commodity_from_query(query: str, commodity_list: list[str]) -> str | None:
-    from app.commodity_lookup import resolve_commodities
-    matches = resolve_commodities(query, commodity_list)
-    return matches[0] if len(matches) == 1 else None
+    if not query or not commodity_list:
+        return None
+    q = query.lower()
+    q_tokens = re.findall(r"[a-z0-9]+", q)
+    q_norm = " ".join(q_tokens)
+    q_hi = query
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
+
+    best_fuzzy: tuple[float, str] | None = None
+    for eng_name, alias_list in aliases.items():
+        for alias in alias_list:
+            alias_text = str(alias).strip()
+            if not alias_text:
+                continue
+            a_tokens = re.findall(r"[a-z0-9]+", alias_text.lower())
+            matched = False
+            if a_tokens:
+                if len(a_tokens) == 1:
+                    matched = a_tokens[0] in q_tokens
+                    if not matched:
+                        close = difflib.get_close_matches(a_tokens[0], q_tokens, n=1, cutoff=0.84)
+                        if close:
+                            score = difflib.SequenceMatcher(None, a_tokens[0], close[0]).ratio()
+                            if best_fuzzy is None or score > best_fuzzy[0]:
+                                best_fuzzy = (score, eng_name)
+                else:
+                    matched = " ".join(a_tokens) in q_norm
+            else:
+                matched = alias_text in q_hi
+            if matched:
+                for name in commodity_list:
+                    if name.lower() == eng_name.lower():
+                        return name
+                return eng_name.title()
+
+    if best_fuzzy is not None:
+        eng_name = best_fuzzy[1]
+        for name in commodity_list:
+            if name.lower() == eng_name.lower():
+                return name
+        return eng_name.title()
+
+    for name in commodity_list:
+        n_tokens = re.findall(r"[a-z0-9]+", name.lower())
+        if not n_tokens:
+            continue
+        if len(n_tokens) == 1:
+            if n_tokens[0] in q_tokens:
+                return name
+        else:
+            n_norm = " ".join(n_tokens)
+            if n_norm in q_norm:
+                return name
+    qn = _normalize_text(q)
+    for name in commodity_list:
+        if _normalize_text(name) in qn:
+            return name
+    return None
 
 
 def extract_entities_ner(query: str, districts: list[str], commodities: list[str]) -> tuple[str | None, str | None]:
@@ -2032,8 +2197,19 @@ def extract_entities_ner(query: str, districts: list[str], commodities: list[str
         if matches:
             district = matches[0]
 
-    # Share the agent's token-safe catalog resolver.
-    commodity = resolve_commodity_from_query(query, commodities)
+    # Commodity NER: alias map
+    alias_path = Path("data/raw/commodity_aliases.json")
+    mtime_ns = alias_path.stat().st_mtime_ns if alias_path.exists() else 0
+    aliases = load_commodity_aliases(mtime_ns)
+    for eng_name, alias_list in aliases.items():
+        for alias in sorted(alias_list, key=len, reverse=True):
+            if alias and alias.lower() in q:
+                for name in commodities:
+                    if name.lower() == eng_name.lower():
+                        commodity = name
+                        return district, commodity
+                commodity = eng_name.title()
+                return district, commodity
 
     return district, commodity
 
@@ -2607,7 +2783,7 @@ def render_auth_sidebar(db_path: str) -> None:
                     username=(username or "").strip(),
                     display_name=(display_name or "").strip() or (username or "").strip(),
                 )
-                st.session_state["auth_mode_state"] = "Sign In" if ok else "Create Account"
+                st.session_state["auth_mode_state"] = "Sign In"
                 if ok:
                     st.session_state["auth_notice"] = (
                         "success",
@@ -2616,7 +2792,7 @@ def render_auth_sidebar(db_path: str) -> None:
                     st.session_state.pop("auth_verification_link", None)
                 else:
                     st.session_state["auth_notice"] = (
-                        "warning" if payload.get("code") == "client_timeout" else "error",
+                        "error",
                         str(payload.get("msg") or payload.get("error_description") or payload.get("message") or "Could not create account in Supabase."),
                     )
                 st.rerun()
@@ -3238,10 +3414,16 @@ except Exception as exc:
         st.exception(exc)
     st.stop()
 
-from app.chat_response import render_response_footer
-
 for item in st.session_state.chat_history:
     with st.chat_message(item["role"]):
+        if item["role"] == "assistant" and item.get("type") != "market_panel":
+            from app.translation_status import render_translation_status
+            render_translation_status(st, item.get("translation"))
+        if item.get("agent_trace"):
+            with st.expander("Plan and agent activity"):
+                st.write(item["agent_trace"]["goal"])
+                st.write(" → ".join(item["agent_trace"]["plan"]))
+                st.json(item["agent_trace"]["decisions"])
         if item.get("type") == "market_panel":
             render_market_panel(
                 meta=item.get("market_meta") or {},
@@ -3250,10 +3432,18 @@ for item in st.session_state.chat_history:
             )
         elif item.get("role") == "assistant" and str(item.get("topic") or "").strip().lower() == "weather":
             render_weather_chat_card(item["text"], action=item.get("weather_action"))
+            refs = item.get("references", [])
+            if refs:
+                with st.expander("Sources Used"):
+                    for src in refs:
+                        st.write(f"- {src}")
         else:
             st.write(item["text"])
-        if item["role"] == "assistant" and item.get("type") != "market_panel":
-            render_response_footer(st, item)
+            refs = item.get("references", [])
+            if refs:
+                with st.expander("Sources Used"):
+                    for src in refs:
+                        st.write(f"- {src}")
         render_feedback_widget(item, advisor)
 
 from app.chat_controls import render_chat_composer
@@ -3490,7 +3680,7 @@ if user_query:
                 or (last_ctx.get("season", season) if (followup_profit or followup_crop_care or followup_crop_guide) else season)
             )
             preferred_crop_for_query = (
-                last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else (preferred_crop or last_ctx.get("preferred_crop", ""))
+                last_ctx.get("preferred_crop", preferred_crop) if (followup_profit or followup_crop_care or followup_crop_guide) else preferred_crop
             )
 
             question_for_advisor = user_query.strip()
@@ -3985,15 +4175,9 @@ if user_query:
                             "retrieved": pesticide_result.get("retrieved", []),
                             "topic": "pesticide",
                         }
-                live_translation_slot = st.empty()
-                from app.hindi_translation import translation_stream_callback
-                def _streamed_advisor_answer():
-                    with translation_stream_callback(live_translation_slot.markdown):
-                        return answer_with_research_followup(advisor, composed_query, st.session_state)
-
                 if agentic_enabled:
                     with st.spinner("Checking sources and coordinating specialists..."):
-                        result = _streamed_advisor_answer()
+                        result = advisor.answer(composed_query)
                 elif direct_crop_followup is not None:
                     result = direct_crop_followup
                 elif direct_crop_protection_followup is not None:
@@ -4001,7 +4185,7 @@ if user_query:
                 else:
                     with st.spinner("Generating recommendation..."):
                         try:
-                            result = _streamed_advisor_answer()
+                            result = advisor.answer(composed_query)
                         except Exception as exc:
                             import traceback as _traceback
 
@@ -4055,10 +4239,8 @@ if user_query:
                             "topic": "pesticide",
                         }
                 from app.hindi_translation import translate_answer
-                with translation_stream_callback(live_translation_slot.markdown):
-                    result = translate_answer(result)
+                result = translate_answer(result)
                 final_answer = result["answer"]
-                live_translation_slot.empty()
                 topic = result.get("topic") or "rag"
                 query_log_id = log_query_answer(
                     user_query=user_query,
@@ -4072,7 +4254,7 @@ if user_query:
                 )
                 if topic == "weather" and ("मौसम के लिए स्थान" in final_answer or "कृपया स्थान लिखें" in final_answer):
                     st.session_state["pending_weather_location"] = {"original_query": user_query}
-                if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide", "crop_guide_followup", "research"}:
+                if topic in {"crop_profitability", "crop_profitability_followup", "crop_guide", "crop_guide_followup"}:
                     st.session_state["last_structured_topic"] = topic
                     st.session_state["last_structured_context"] = {
                         "district": resolved_district,
@@ -4108,9 +4290,6 @@ if user_query:
                     "weather_action": (None if intent_price else result.get("weather_action")),
                     "agent_trace": (None if intent_price else result.get("agent_trace")),
                     "translation": (None if intent_price else result.get("translation")),
-                    "english_answer": (None if intent_price else result.get("english_answer")),
-                    "source_pages": ([] if intent_price else result.get("source_pages", [])),
-                    "guide_cache": (None if intent_price else result.get("guide_cache")),
                 }
             )
 
@@ -4120,7 +4299,17 @@ if user_query:
                 else:
                     st.write(final_answer)
                 if not intent_price:
-                    render_response_footer(st, st.session_state.chat_history[-1])
+                    from app.translation_status import render_translation_status
+                    render_translation_status(st, result.get("translation"))
+                    if result.get("agent_trace"):
+                        with st.expander("Plan and agent activity"):
+                            trace = result["agent_trace"]
+                            st.write(trace["goal"])
+                            st.write(" → ".join(trace["plan"]))
+                            st.json(trace["decisions"])
+                    with st.expander("Sources Used"):
+                        for src in result.get("references", []):
+                            st.write(f"- {src}")
                     render_feedback_widget(st.session_state.chat_history[-1], advisor)
 
             # Correction form only when auto-mapping failed
@@ -4172,4 +4361,3 @@ if user_query:
                     st.exception(exc)
 
 _flush_pending_auth_cookie_write()
-

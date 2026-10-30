@@ -110,11 +110,6 @@ class PesticideAgent:
 class AgronomyAgent(ToolAgent):
     def run(self, goal, payload, bus):
         result = super().run(goal, payload, bus)
-        if result.metadata.get("research_question"):
-            crop = result.metadata.get("crop")
-            result = bus.ask("agronomy", "research", "Find evidence for the crop follow-up",
-                             dict(payload, question=result.metadata["research_question"]))
-            result.metadata.update({"topic": "crop_guide_followup", "crop": crop})
         if result.status == "ok" and "news" in bus.agents:
             news = bus.ask("agronomy", "news", "Find recent related crop news", dict(payload, related_only=True))
             if news.evidence.get("articles"):
@@ -125,10 +120,9 @@ class AgronomyAgent(ToolAgent):
 
 
 class Coordinator:
-    def __init__(self, agents: dict, planner: Callable | None = None, preprocessor=None):
+    def __init__(self, agents: dict, planner: Callable | None = None):
         self.agents = agents
         self.planner = planner
-        self.preprocessor = preprocessor
 
     @staticmethod
     def domains(question: str) -> list[str]:
@@ -137,7 +131,7 @@ class Coordinator:
             return ["news"]
         patterns = {
             "weather": r"\b(weather|mausam|mosam|rain|barish|temperature)\b|मौसम|बारिश|तापमान|वर्षा",
-            "prices": r"\b(price|prices|rate|mandi|bhav|bhaav|daam|msp)\b|भाव|कीमत|दाम|मंडी|मूल्य",
+            "prices": r"\b(price|prices|rate|mandi|bhav|bhaav|daam|msp)\b|भाव|कीमत|दाम|मंडी|समर्थन मूल्य",
             "pesticides": r"\b(pesticide|pesticides|insecticide|fungicide|herbicide|spray|dawai|keet|rog|disease|pest)\b|दवा|दवाई|कीट|रोग|छिड़क|फफूंद|लक्षण",
         }
         selected = [name for name, pattern in patterns.items() if re.search(pattern, question, re.I)]
@@ -145,31 +139,27 @@ class Coordinator:
             r"\b(profit(?:able|ability)?|la?bhdayak|laabhdayak|munafa)\b|लाभ|मुनाफा|लाभदायक",
             question, re.I,
         )
-        crop_detail = re.search(
-            r"\b(variety|varieties|kism|kisam|fertilizer|irrigation|sinchai|harvest|katai)\b|किस्म|प्रजाति|बीज दर|खाद|उर्वरक|सिंचाई|कटाई|रोपाई|बुवाई",
-            question, re.I,
-        )
-        if profitability or (not selected and crop_detail) or (not selected and re.search(
+        if profitability or (not selected and re.search(
                 r"\b(kheti|cultivation)\b|खेती|how to (grow|cultivate)", question, re.I)):
             selected.append("agronomy")
         return selected
 
     def plan(self, question: str) -> tuple[list[str], str]:
         required = self.domains(question)
-        selected, source = required or ["research"], "rules"
+        selected, source = required or ["agronomy"], "rules"
         # Straightforward tool queries do not need an LLM round trip.
-        if self.planner and len(required) > 1:
+        if self.planner and (not required or len(required) > 1):
             try:
                 raw = self.planner(
                     'Return only JSON {"agents": [names]}. Select specialists needed for this farmer question. '
-                    'Allowed names: weather, prices, pesticides, agronomy, news, research. '
-                    'Use agronomy for crop planning; research checks sources for unfamiliar questions. Do not answer the question.\n'
+                    'Allowed names: weather, prices, pesticides, agronomy, news. '
+                    'Use agronomy for crop planning or general agriculture. Do not answer the question.\n'
                     + json.dumps({"question": question}, ensure_ascii=False)
                 )
                 proposed = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())["agents"]
-                if not isinstance(proposed, list) or not proposed or len(proposed) > 6:
+                if not isinstance(proposed, list) or not proposed or len(proposed) > 5:
                     raise ValueError("Invalid plan")
-                if any(not isinstance(n, str) or n not in {"weather", "prices", "pesticides", "agronomy", "news", "research"} for n in proposed):
+                if any(not isinstance(n, str) or n not in {"weather", "prices", "pesticides", "agronomy", "news"} for n in proposed):
                     raise ValueError("Unknown specialist")
                 selected, source = list(dict.fromkeys(required + proposed)), "model"
             except Exception:
@@ -181,16 +171,9 @@ class Coordinator:
 
     def answer(self, question: str, context: str = "") -> dict:
         goal = f"Answer the farmer's question using dated evidence: {question}"
-        original_question = question
-        language_info = {}
-        if self.preprocessor:
-            question, language_info = self.preprocessor(question, context)
-        # Translation wording must not erase an explicit specialist intent.
-        intent_question = original_question if self.domains(original_question) else question
-        names, source = self.plan(intent_question)
+        names, source = self.plan(question)
         bus = MessageBus(self.agents)
-        payload = {"question": question, "context": context, **language_info,
-                   "original_question": original_question}
+        payload = {"question": question, "context": context}
         results = []
         decisions = []
         for name in names:
@@ -206,35 +189,26 @@ class Coordinator:
         topic = {"prices": "price", "pesticides": "pesticide", "weather": "weather", "agronomy": "rag", "news": "news"}.get(names[0]) if len(names) == 1 else "multi_agent"
         return {"answer": text, "references": refs, "retrieved": [], "topic": topic,
                 **metadata, "agent_status": status,
-                "requires_hindi": any(r.metadata.get("requires_hindi", False) for _, r in results),
                 "agent_trace": {"goal": goal, "plan": names, "planner": source,
                                 "decisions": decisions, "messages": [asdict(m) for m in bus.messages],
-                                "calls": bus.calls, "query_translation": language_info.get("query_translation", {}),
-                                "display_question": language_info.get("display_question", original_question),
-                                "backend_question": question}}
+                                "calls": bus.calls}}
 
 
 def build_coordinator(advisor):
     from app.agent_tools import AdvisorTools
     handlers = AdvisorTools(advisor)
-    from app.research import ResearchAgent, documents, web
-    from app.multilingual_retrieval import prepare_query
 
     def plan_with_model(prompt):
-        if os.getenv("KISAANAI_LLM_PLANNER", "0").lower() in {"0", "false", "no"}:
+        if os.getenv("KISAANAI_LLM_PLANNER", "1").lower() in {"0", "false", "no"}:
             raise RuntimeError("Model planning disabled")
         generator = advisor._get_generator_for_model(advisor.cfg.complex_generator_model or advisor.cfg.generator_model)
         if generator is None:
             raise RuntimeError("Planner model unavailable")
         return generator.generate(prompt)
 
-    return Coordinator({"research": ResearchAgent(advisor),
-                        "documents": ToolAgent(lambda g,p: documents(advisor,p)),
-                        "web_search": ToolAgent(lambda g,p: web(p,advisor)),
-                        "weather": ToolAgent(handlers.weather),
+    return Coordinator({"weather": ToolAgent(handlers.weather),
                         "market_data": ToolAgent(handlers.refresh_market),
                         "prices": PriceAgent(handlers.prices),
                         "pesticides": PesticideAgent(handlers.pesticides),
                         "agronomy": AgronomyAgent(handlers.agronomy),
-                        "news": ToolAgent(handlers.news)}, planner=plan_with_model,
-                       preprocessor=lambda q,c: prepare_query(advisor,q,c))
+                        "news": ToolAgent(handlers.news)}, planner=plan_with_model)
