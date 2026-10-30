@@ -172,5 +172,8 @@ class AdvisorTools:
     def agronomy(self, goal, payload):
         text = f"{payload['context']} किसान का प्रश्न: {payload['question']}" if payload.get("context") else payload["question"]
         result = self.advisor._answer_legacy(text)
+        metadata = {"topic": result.get("topic", "rag")}
+        if result.get("english_source_chunks"):
+            metadata["english_source_chunks"] = result["english_source_chunks"]
         return AgentResult(result["answer"], status=result.get("status", "ok"), references=result.get("references", []),
-                           metadata={"topic": result.get("topic", "rag")})
+                           metadata=metadata)

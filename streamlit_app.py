@@ -3414,6 +3414,17 @@ except Exception as exc:
         st.exception(exc)
     st.stop()
 
+def render_english_source_chunks(chunks):
+    if not chunks:
+        return
+    with st.expander("English source chunks — Crop Production Guide"):
+        st.caption("Verbatim English text extracted from the guide; each passage includes its PDF page.")
+        for index, chunk in enumerate(chunks, 1):
+            page = chunk.get("page")
+            st.markdown(f"**Passage {index} · PDF page {page}**")
+            st.text(str(chunk.get("text", "")))
+
+
 for item in st.session_state.chat_history:
     with st.chat_message(item["role"]):
         if item["role"] == "assistant" and item.get("type") != "market_panel":
@@ -3444,6 +3455,7 @@ for item in st.session_state.chat_history:
                 with st.expander("Sources Used"):
                     for src in refs:
                         st.write(f"- {src}")
+        render_english_source_chunks(item.get("english_source_chunks"))
         render_feedback_widget(item, advisor)
 
 from app.chat_controls import render_chat_composer
@@ -4290,6 +4302,7 @@ if user_query:
                     "weather_action": (None if intent_price else result.get("weather_action")),
                     "agent_trace": (None if intent_price else result.get("agent_trace")),
                     "translation": (None if intent_price else result.get("translation")),
+                    "english_source_chunks": ([] if intent_price else result.get("english_source_chunks", [])),
                 }
             )
 
@@ -4299,6 +4312,7 @@ if user_query:
                 else:
                     st.write(final_answer)
                 if not intent_price:
+                    render_english_source_chunks(result.get("english_source_chunks"))
                     from app.translation_status import render_translation_status
                     render_translation_status(st, result.get("translation"))
                     if result.get("agent_trace"):

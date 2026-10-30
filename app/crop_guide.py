@@ -1288,9 +1288,30 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         var = _extract_first(r"Variety\s*:\s*(.*?)(?:Morphological|$)", text)
         parts = []
         if sow:
-            parts.append(f"बुवाई का सही समय: {_translate_terms(sow.strip())}.")
+            sow_text = sow.strip()
+            if crop.lower() == "wheat":
+                sow_text = re.sub(
+                    r"15th\s+October\s+to\s+1st\s+week\s+of\s+November",
+                    "15 अक्टूबर से नवंबर के पहले सप्ताह तक",
+                    sow_text,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                sow_text = _translate_terms(sow_text)
+            parts.append(f"बुवाई का सही समय: {sow_text}.")
         if var:
-            parts.append(f"उपयुक्त किस्में: {var.strip().rstrip('.')}.")
+            variety_text = var.strip().rstrip(".")
+            if crop.lower() == "wheat":
+                # PDF extraction can join the next numbered heading to the variety line.
+                variety_text = re.sub(r"\b(COW\s+2)\s+2$", r"\1", variety_text, flags=re.IGNORECASE)
+            parts.append(f"उपयुक्त किस्में: {variety_text}.")
+        if crop.lower() == "wheat" and "suitable districts" in text.lower():
+            parts.append(
+                "ये किस्म और बुवाई-समय की सिफारिशें तमिलनाडु के मैदानी क्षेत्रों, "
+                "पहाड़ियों से लगे मैदानी इलाकों और Theni, Dindigul, Karur, Coimbatore, "
+                "Erode, Salem, Dharmapuri, Vellore, Tiruvannamalai तथा Kancheepuram "
+                "के पहाड़ी क्षेत्रों के लिए हैं।"
+            )
         if not parts:
             season_rows = _extract_all(r"([A-Za-z]+)\s*\(([^)]+)\)\s*All districts\s*(.*?)(?:$)", text)
             if season_rows:
@@ -1301,6 +1322,10 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         return f"{label}: {' '.join(parts) or _translate_terms(_compress_sentences(text))}"
 
     if "FIELD PREPARATION" in heading_key:
+        if (crop.lower() == "wheat"
+                and "plough twice with an iron plough" in text.lower()
+                and "two to three times with cultivator" in text.lower()):
+            return f"{label}: लोहे के हल से 2 बार जुताई करें, फिर कल्टीवेटर से 2-3 बार जुताई करके खेत को भुरभुरा तैयार करें।"
         return f"{label}: 2-3 जुताई करके खेत को भुरभुरा और समतल तैयार करें।"
 
     if "APPLICATION OF FYM OR COMPOST" in heading_key:
@@ -1520,9 +1545,25 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         return f"{label}: {' '.join(parts)}"
 
     if "WEED MANAGEMENT" in heading_key:
+        if crop.lower() == "wheat" and "isoproturon" in text.lower():
+            return (
+                f"{label}: यदि खरपतवारनाशी उपयोग करें, तो बुवाई के 3 दिन बाद (3 DAS) "
+                "PE Isoproturon 500 g/ha का पूर्व-अंकुरण छिड़काव करें और 35 DAS पर "
+                "एक बार हाथ से निराई करें। यदि खरपतवारनाशी उपयोग न करें, तो 20 और "
+                "35 DAS पर दो बार हाथ से निराई करें।"
+            )
         return f"{label}: 3 दिन बाद बुवाई पर प्री-इमर्जेन्स खरपतवारनाशी का छिड़काव करें। उसके बाद 20-35 दिन के बीच 1-2 बार निराई करें।"
 
     if "WATER MANAGEMENT" in heading_key or heading_key == "IRRIGATION":
+        if crop.lower() == "wheat":
+            return (
+                f"{label}: मिट्टी और वर्षा के अनुसार 4-6 सिंचाइयाँ दें। गाइड कम से कम "
+                "5 सिंचाइयाँ इन अवस्थाओं में बताती है: बुवाई के तुरंत बाद; क्राउन रूट "
+                "इनिशिएशन (15-20 DAS); सक्रिय टिलरिंग (35-40 DAS); फूल आने पर "
+                "(50-55 DAS); और दाना भरने पर (70-75 DAS)। क्राउन रूट इनिशिएशन और "
+                "फूल आने की अवस्थाएँ सबसे महत्वपूर्ण हैं। अंकुरण के समय खेत में पानी "
+                "न रुकने दें।"
+            )
         irrig = _extract_first(r"requires\s*([0-9 \-]+)\s*irrigations", text)
         stage_text = _format_water_stages(text)
         stage_ranges = _extract_irrigation_stage_ranges(text)
@@ -1640,6 +1681,35 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
         lines.append("")
     lines.append("अगर आप चाहें, तो मैं इसी फसल के लिए किस्म, खाद, सिंचाई, रोग/कीट या कटाई की और ज्यादा विस्तृत जानकारी भी अलग से बता सकता हूँ।")
     return "\n".join(lines).strip(), sources
+
+
+def build_crop_production_source_chunks(question: str, max_chunks: int = 8) -> list[dict[str, Any]]:
+    """Return verbatim English PDF chunks with their one-based PDF page numbers."""
+    crop = _resolve_crop_name(question)
+    if not crop:
+        return []
+    pages = _load_pages()
+    page_range = _section_page_range(crop)
+    if not pages or page_range is None:
+        return []
+    from app.chunking import split_text
+
+    start_pdf, end_pdf = page_range
+    chunks: list[dict[str, Any]] = []
+    for page_index in range(max(0, start_pdf), min(len(pages), end_pdf + 1)):
+        for text in split_text(pages[page_index], chunk_size=1400, overlap=180):
+            text = text.strip()
+            if len(text) < 80:
+                continue
+            chunks.append({
+                "text": text,
+                "source_file": str(GUIDE_PDF),
+                "page": page_index + 1,
+                "language": "en-IN",
+            })
+            if len(chunks) >= max(1, max_chunks):
+                return chunks
+    return chunks
 
 
 def _detect_followup_section(question: str) -> str | None:
