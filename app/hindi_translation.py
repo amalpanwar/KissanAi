@@ -1,19 +1,13 @@
-"""Final-answer Hindi translation through Sarvam; never changes source evidence."""
+"""Final-answer English-to-Hindi translation with the local IndicTrans2 model."""
 from __future__ import annotations
 
 from collections import Counter
 from functools import lru_cache
-import json
 import os
 import re
 import sys
-import time
-from urllib.request import Request, urlopen
-from urllib.error import HTTPError
-
-ENDPOINT = 'https://api.sarvam.ai/translate'
-MODEL = 'sarvam-translate:v1'
-TRANSLATION_VERSION = 'sarvam-hindi-v3'
+MODEL = 'ai4bharat/indictrans2-en-indic-dist-200M'
+TRANSLATION_VERSION = 'indictrans2-200m-v1'
 
 
 class TranslationValidationError(ValueError):
@@ -108,17 +102,45 @@ def _chunks(text: str, limit: int = 1800) -> list[str]:
     return chunks
 
 
+@lru_cache(maxsize=1)
+def _load_model(hf_token: str):
+    """Load the translation model once per process; inference stays on-host."""
+    import torch
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+    from IndicTransToolkit.processor import IndicProcessor
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    tokenizer = AutoTokenizer.from_pretrained(
+        MODEL, trust_remote_code=True, token=hf_token or None,
+    )
+    model = AutoModelForSeq2SeqLM.from_pretrained(
+        MODEL, trust_remote_code=True, token=hf_token or None,
+    ).to(device)
+    model.eval()
+    return torch, tokenizer, model, IndicProcessor(inference=True), device
+
+
 @lru_cache(maxsize=256)
-def _translate(text: str, api_key: str, timeout: float) -> str:
-    request = Request(ENDPOINT, data=json.dumps({
-        'input': text, 'source_language_code': 'en-IN',
-        'target_language_code': 'hi-IN', 'model': MODEL,
-        'mode': 'formal', 'numerals_format': 'international',
-    }).encode('utf-8'), headers={
-        'Content-Type': 'application/json', 'api-subscription-key': api_key,
-    }, method='POST')
-    with urlopen(request, timeout=timeout) as response:
-        output = json.loads(response.read().decode('utf-8')).get('translated_text')
+def _translate(text: str, hf_token: str = '') -> str:
+    torch, tokenizer, model, processor, device = _load_model(hf_token)
+    prepared = processor.preprocess_batch(
+        [text], src_lang='eng_Latn', tgt_lang='hin_Deva',
+    )
+    inputs = tokenizer(
+        prepared, truncation=True, padding='longest',
+        return_tensors='pt', return_attention_mask=True,
+    ).to(device)
+    with torch.inference_mode():
+        generated = model.generate(
+            **inputs, use_cache=True, min_length=0, max_length=512,
+            num_beams=4, num_return_sequences=1,
+        )
+    decoded = tokenizer.batch_decode(
+        generated, skip_special_tokens=True,
+        clean_up_tokenization_spaces=True,
+    )
+    outputs = processor.postprocess_batch(decoded, lang='hin_Deva')
+    output = outputs[0] if outputs else ''
     if not isinstance(output, str) or not output.strip():
         raise TranslationValidationError('empty_response')
     # Each protected item must occur exactly once and stay in source order.
@@ -133,16 +155,16 @@ def _translate(text: str, api_key: str, timeout: float) -> str:
 
 
 def translate_answer(result: dict) -> dict:
-    """Translate English prose only; fall back atomically on any failure.
+    """Translate English prose locally; fall back atomically on any failure.
 
-    Only final answer fragments leave the app. Questions, identity, evidence,
-    references, and agent messages are not sent to Sarvam. Numeric/formula checks
-    do not establish semantic correctness; translation still needs evaluation.
+    Translation uses the locally loaded IndicTrans2 200M checkpoint. Answer
+    fragments are not sent to a translation API. Numeric/formula checks do not
+    establish semantic correctness; translation still needs evaluation.
     """
     if 'translation' in result:
         return result
     original = str(result.get('answer', ''))
-    info = {'provider': 'sarvam', 'model': MODEL, 'target_language': 'hi-IN',
+    info = {'provider': 'local', 'model': MODEL, 'target_language': 'hi-IN',
             'version': TRANSLATION_VERSION}
     def finish(answer, status, reason=None):
         metadata = {**info, 'status': status}
@@ -159,11 +181,9 @@ def translate_answer(result: dict) -> dict:
     pending = [m for m in segments if re.search(r'[A-Za-z]', TOKEN.sub('', m.group()))]
     if not pending:
         return finish(original, 'not_needed')
-    key = _setting('SARVAM_API_KEY')
-    if not key:
-        return finish(original, 'not_configured')
-    deadline = time.monotonic() + 20
-    calls = 0
+    hf_token = _setting('HF_TOKEN')
+    if not hf_token:
+        return finish(original, 'not_configured', 'HF_TOKEN')
     replacements = []
     try:
         for match in pending:
@@ -174,11 +194,7 @@ def translate_answer(result: dict) -> dict:
             core = segment[len(prefix):len(segment) - len(suffix) if suffix else None]
             translated = []
             for chunk in _chunks(core):
-                calls += 1
-                remaining = deadline - time.monotonic()
-                if calls > 24 or remaining <= 0:
-                    raise TimeoutError('Translation budget exceeded')
-                translated.append(_translate(chunk, key, min(8.0, remaining)))
+                translated.append(_translate(chunk, hf_token))
             replacements.append((match.start(), match.end(), prefix + ' '.join(translated) + suffix))
         output = protected
         for start, end, replacement in reversed(replacements):
@@ -190,6 +206,6 @@ def translate_answer(result: dict) -> dict:
         return finish(output, 'translated')
     except Exception as exc:
         # Never expose provider bodies, API keys, or farmer text in diagnostics.
-        reason = (f'http_{exc.code}' if isinstance(exc, HTTPError) else
-                  str(exc) if isinstance(exc, TranslationValidationError) else type(exc).__name__)
+        reason = (str(exc) if isinstance(exc, TranslationValidationError)
+                  else type(exc).__name__)
         return finish(original, 'fallback', reason)

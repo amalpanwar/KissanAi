@@ -51,8 +51,8 @@ class ProfitabilityRouteTests(unittest.TestCase):
         self.model.assert_not_called()
         self.semantic.assert_not_called()
 
-    def test_sarvam_timeout_keeps_profit_answer(self):
-        with patch('app.hindi_translation._setting', side_effect=lambda n, default='': 'test-key' if n == 'SARVAM_API_KEY' else default), patch('app.hindi_translation.urlopen', side_effect=TimeoutError):
+    def test_local_translation_failure_keeps_profit_answer(self):
+        with patch('app.hindi_translation._setting', side_effect=lambda n, default='': 'test-token' if n == 'HF_TOKEN' else default), patch('app.hindi_translation._translate', side_effect=TimeoutError):
             result = self.ask('konsi fasal jyada labhdayak')
         self.assertEqual(result['agent_status'], 'ok')
         self.assertIn('1) Wheat', result['answer'])
