@@ -1,6 +1,8 @@
 """Autocomplete chat composer; sends one value only when a question is submitted."""
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 import streamlit.components.v1 as components
 
@@ -8,36 +10,82 @@ _composer = components.declare_component("kisaan_chat_composer", path=str(Path(_
 
 SUGGESTIONS = [
     {"question": "आज मेरे क्षेत्र में मौसम कैसा रहेगा?", "keywords": "weather rain forecast temperature mausam mosam barish baarish pani मौसम बारिश वर्षा तापमान"},
-    {"question": "आज गेहूं का मंडी भाव क्या है?", "keywords": "price prices mandi rate bhav bhaav daam market भाव कीमत मंडी दाम"},
-    {"question": "गेहूं की खेती कैसे करें?", "keywords": "grow growing cultivation kheti kaise kese gehu wheat खेती उगाना बुवाई कैसे"},
-    {"question": "गेहूं में दीमक की रोकथाम के लिए कौन सा कीटनाशक उपयोग करें?", "keywords": "pesticide pesticides pest disease spray insecticide keet dimak keetnashak dawa कीटनाशक कीट रोग दवा दीमक"},
 ]
 
 
+def _commodity_aliases():
+    """Read market commodity names and aliases from the repository dictionary."""
+    path = Path(__file__).resolve().parents[1] / "data" / "raw" / "commodity_aliases.json"
+    try:
+        with path.open(encoding="utf-8") as source:
+            data = json.load(source)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _display_commodity(names, fallback):
+    for name in names:
+        value = str(name).strip()
+        if value and re.search(r"[\u0900-\u097f]", value):
+            return value
+    return next((str(name).strip() for name in names if str(name).strip()), fallback)
+
+
+def commodity_price_suggestions():
+    """Offer a mandi-price question for every commodity in the alias dictionary."""
+    intent_terms = "price prices mandi rate bhav bhaav daam market भाव कीमत मंडी दाम"
+    suggestions = []
+    for commodity, aliases in _commodity_aliases().items():
+        names = [commodity, *(aliases if isinstance(aliases, list) else [])]
+        names = list(dict.fromkeys(str(name).strip() for name in names if str(name).strip()))
+        display = _display_commodity(names, commodity)
+        suggestions.append({
+            "question": f"आज {display} का मंडी भाव क्या है?",
+            "keywords": " ".join([*names, intent_terms]),
+        })
+    return suggestions
+
+
 def crop_guide_suggestions():
-    """Offer cultivation prompts for every named crop in the production guide."""
+    """Offer crop-specific cultivation and protection prompts for guide crops."""
     from app.crop_guide import CROP_ALIASES, CROP_NAME_HI
 
     section_names = {
         "Millets", "Small Millets", "Pulses", "Oilseeds", "FIBRE CROPS",
         "Forage Crops", "Green Manure Crops", "SERICULTURE", "AGRO FORESTRY",
     }
+    market_aliases = _commodity_aliases()
+    guide_terms = {
+        "cultivation": "grow growing cultivation farming kheti kaise sowing खेती उगाना बुवाई कैसे",
+        "protection": "pest pests disease diseases protection spray insecticide pesticide keet rog bachav कीट रोग बचाव दवा",
+    }
     suggestions = []
     for crop, aliases in CROP_ALIASES.items():
-        if crop in section_names or crop == "Wheat":
-            continue  # wheat remains in the curated starter list above
+        if crop in section_names:
+            continue
         crop_names = [crop, *(str(alias) for alias in aliases)]
+        normalized = {name.strip().casefold() for name in crop_names if name.strip()}
+        for names in market_aliases.values():
+            if isinstance(names, list) and any(str(name).strip().casefold() in normalized for name in names):
+                crop_names.extend(str(name).strip() for name in names if str(name).strip())
         keywords = " ".join(dict.fromkeys(name.strip() for name in crop_names if name.strip()))
         display_name = CROP_NAME_HI.get(crop, crop)
-        suggestions.append({
-            "question": f"{display_name} की खेती कैसे करें?",
-            "keywords": keywords,
-        })
+        for kind, terms in guide_terms.items():
+            question = (
+                f"{display_name} की खेती कैसे करें?"
+                if kind == "cultivation"
+                else f"{display_name} में कीट और रोग से बचाव कैसे करें?"
+            )
+            suggestions.append({
+                "question": question,
+                "keywords": f"{keywords} {terms}",
+            })
     return suggestions
 
 
+SUGGESTIONS.extend(commodity_price_suggestions())
 SUGGESTIONS.extend(crop_guide_suggestions())
-
 
 def consume_submission(value, state):
     if not isinstance(value, dict):
