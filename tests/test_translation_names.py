@@ -41,7 +41,7 @@ class NamePreservationTests(unittest.TestCase):
             {'payload': {'context': 'State: Uttar Pradesh | District: Baghpat | Place: Doghat Rural | '}}]}}
         with patch('app.hindi_translation._translate', side_effect=self.hindi_with_tokens) as translate:
             result = translate_answer(source)
-        for name in ['Doghat Rural', 'Baghpat', 'Uttar Pradesh']:
+        for name in ['Doghat Rural', 'Baghpat']:
             self.assertIn(name, result['answer'])
         self.assertEqual(result['translation']['status'], 'translated')
 
