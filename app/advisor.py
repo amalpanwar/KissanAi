@@ -17,7 +17,8 @@ from app.retriever import Retriever
 from app.vector_store import NumpyVectorStore
 from app.weather import get_current_weather_hindi, get_daily_weather_forecast_hindi, get_rain_day_forecast_hindi, get_tomorrow_rain_forecast_hindi, get_weekly_weather_forecast_hindi
 from app.upag_apy import load_latest_up_yield_qtl_per_acre
-from app.crop_guide import CROP_ALIASES, build_crop_production_followup, build_crop_production_guide
+from app.crop_guide import (CROP_ALIASES, build_crop_production_followup,
+                          build_crop_production_guide, build_crop_production_source_chunks)
 from app.cacp import get_cacp_cost_for_crop, get_sugarcane_cost_snapshot, get_latest_sugarcane_frp
 from app.msp import get_msp_for_crop
 from app.web_search import is_web_search_configured, web_search
@@ -465,6 +466,16 @@ class RAGAdvisor:
             from app.agent_system import build_coordinator
             context, question = self._split_context_and_question(user_query)
             result = build_coordinator(self).answer(question, context)
+        # Full crop-guide responses are already authored in Hindi from the local
+        # production-guide rules; do not send them through a second translator.
+        if result.get("topic") == "crop_guide" and any(
+                "\u0900" <= char <= "\u097f" for char in str(result.get("answer", ""))):
+            result["translation"] = {
+                "provider": "crop_guide", "model": "deterministic_hindi_guide",
+                "version": "crop-guide-hi-v1", "target_language": "hi-IN",
+                "status": "not_needed", "reason": "answer_already_in_hindi",
+            }
+            return result
         return translate_answer(result)
 
     def _answer_legacy(self, user_query: str) -> dict:
@@ -569,6 +580,7 @@ class RAGAdvisor:
                     "answer": guide_answer,
                     "references": guide_sources,
                     "retrieved": [],
+                    "english_source_chunks": build_crop_production_source_chunks(normalized_question),
                     "topic": "crop_guide",
                 }
         if parsed_intent.subject == "season_crop_list":
@@ -655,6 +667,7 @@ class RAGAdvisor:
                     "answer": guide_answer,
                     "references": guide_sources,
                     "retrieved": [],
+                    "english_source_chunks": build_crop_production_source_chunks(normalized_question),
                     "topic": "crop_guide",
                 }
         if self._is_season_crop_list_intent(normalized_question):
