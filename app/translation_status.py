@@ -5,6 +5,7 @@ def render_translation_status(st, info):
         return
     status = info.get('status')
     captions = {
+        'not_needed': 'फसल-गाइड का उत्तर सीधे हिंदी में तैयार हुआ; अलग अनुवाद की जरूरत नहीं पड़ी।',
         'not_configured': 'हिंदी अनुवाद चालू नहीं है: Sarvam की API कुंजी उपलब्ध नहीं है।',
         'disabled': 'हिंदी अनुवाद बंद है। मूल उत्तर दिखाया गया है।',
         'fallback': 'हिंदी अनुवाद पूरा नहीं हुआ; मूल उत्तर दिखाया गया है।',
