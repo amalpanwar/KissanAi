@@ -20,7 +20,7 @@ NUMBER = r'\d+(?:[.,:/–-]\d+)*'
 PROTECTED = re.compile(
     r'```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
     + NUMBER + r'(?:\s*' + UNIT + r'\b)?(?:\s*' + FORMULA + r')?|'
-    + FORMULA
+    + FORMULA + r'|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
 )
 NON_HINDI = re.compile(r'[^\u0900-\u097f\n]+')
 TOKEN = re.compile(r'ZXQ[A-Z]+QXZ')
@@ -161,13 +161,15 @@ def translate_answer(result: dict) -> dict:
     fragments are not sent to a translation API. Numeric/formula checks do not
     establish semantic correctness; translation still needs evaluation.
     """
-    if 'translation' in result:
+    existing = result.get('translation')
+    if (isinstance(existing, dict) and existing.get('provider') == 'local'
+            and existing.get('status') in {'translated', 'partial', 'not_needed'}):
         return result
     original = str(result.get('answer', ''))
     info = {'provider': 'local', 'model': MODEL, 'target_language': 'hi-IN',
             'version': TRANSLATION_VERSION}
-    def finish(answer, status, reason=None):
-        metadata = {**info, 'status': status}
+    def finish(answer, status, reason=None, **details):
+        metadata = {**info, 'status': status, **details}
         if reason:
             metadata['reason'] = reason
         return {**result, 'answer': answer, 'translation': metadata}
@@ -185,27 +187,35 @@ def translate_answer(result: dict) -> dict:
     if not hf_token:
         return finish(original, 'not_configured', 'HF_TOKEN')
     replacements = []
-    try:
-        for match in pending:
-            segment = match.group()
-            # Keep Markdown list/header markers and surrounding whitespace local.
-            prefix = re.match(r'^[\s#>*+\-]*', segment).group()
-            suffix = re.search(r'\s*$', segment).group()
-            core = segment[len(prefix):len(segment) - len(suffix) if suffix else None]
-            translated = []
-            for chunk in _chunks(core):
-                translated.append(_translate(chunk, hf_token))
-            replacements.append((match.start(), match.end(), prefix + ' '.join(translated) + suffix))
-        output = protected
-        for start, end, replacement in reversed(replacements):
-            output = output[:start] + replacement + output[end:]
-        if Counter(TOKEN.findall(output)) != Counter(values.keys()):
-            raise TranslationValidationError('protected_values_lost')
-        for token, value in values.items():
-            output = output.replace(token, value)
-        return finish(output, 'translated')
-    except Exception as exc:
-        # Never expose provider bodies, API keys, or farmer text in diagnostics.
-        reason = (str(exc) if isinstance(exc, TranslationValidationError)
-                  else type(exc).__name__)
-        return finish(original, 'fallback', reason)
+    failures = []
+    for match in pending:
+        segment = match.group()
+        # Keep Markdown list/header markers and surrounding whitespace local.
+        prefix = re.match(r'^[\\s#>*+\\-]*', segment).group()
+        suffix = re.search(r'\\s*$', segment).group()
+        core = segment[len(prefix):len(segment) - len(suffix) if suffix else None]
+        translated_chunks = []
+        for chunk in _chunks(core):
+            try:
+                translated_chunks.append(_translate(chunk, hf_token))
+            except Exception as exc:
+                translated_chunks.append(chunk)
+                reason = (str(exc) if isinstance(exc, TranslationValidationError)
+                          else type(exc).__name__)
+                failures.append(reason)
+        replacements.append((
+            match.start(), match.end(),
+            prefix + ' '.join(translated_chunks) + suffix,
+        ))
+    output = protected
+    for start, end, text in reversed(replacements):
+        output = output[:start] + text + output[end:]
+    if Counter(TOKEN.findall(output)) != Counter(values.keys()):
+        return finish(original, 'fallback', 'protected_values_lost')
+    for token, value in values.items():
+        output = output.replace(token, value)
+    if failures:
+        return finish(output, 'partial', 'fragment_translation_failed',
+                      translated_fragments=max(0, len(pending) - len(failures)),
+                      failed_fragments=len(failures), failure_reason=failures[0])
+    return finish(output, 'translated', translated_fragments=len(pending))
