@@ -200,14 +200,16 @@ class AdvisorTools:
 
     def agronomy(self, goal, payload):
         question = payload["question"]
-        if not self.advisor._has_profitability_terms(question):
+        if (not self.advisor._has_profitability_terms(question)
+                and not self.advisor._has_crop_guide_terms(question)):
             # Agronomic answers come from retrieved evidence, not crop templates.
             crop = (self.advisor._extract_crop_from_query(question)
                     or self.advisor._extract_preferred_crop_from_context(payload.get("context", "")))
             return AgentResult("", "unavailable", metadata={"topic":"research", "crop":crop,
                                "research_question":question})
-        text = f"{payload['context']} किसान का प्रश्न: {question}" if payload.get("context") else question
+        text = f"{payload['context']} किसान का प्रश्न: {payload['question']}" if payload.get("context") else payload["question"]
         result = self.advisor._answer_legacy(text)
         return AgentResult(result["answer"], status=result.get("status", "ok"), references=result.get("references", []),
                            metadata={"topic": result.get("topic", "rag"),
                                      **({"research_offer": result["research_offer"]} if result.get("research_offer") else {})})
+
