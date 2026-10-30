@@ -46,6 +46,3 @@ data/processed/feedback_learning/
 
 data/processed/agriculture_news_cache.json
 data/processed/agriculture_news_cache.tmp
-
-# Runtime bilingual guide answers (source/response data, never credentials)
-data/processed/guide_response_cache.sqlite3*
