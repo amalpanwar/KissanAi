@@ -3,6 +3,7 @@ import csv
 from functools import lru_cache
 from pathlib import Path
 import re
+import os
 import numpy as np
 from app.query_translation import translate_query
 from app.agent_system import AgentResult
@@ -38,27 +39,35 @@ def prepare_query(advisor, question, context):
         langs=_languages(str(path),stat.st_mtime_ns,stat.st_size)
     except (OSError,AttributeError,csv.Error):
         langs=()  # Web search may still run using the visible question.
-    # Include languages in repository PDFs that have not reached the saved index.
-    try:
-        from app.supplemental_documents import catalog, missing_pdfs
-        with open(advisor.cfg.metadata_path, encoding='utf-8-sig', newline='') as stream:
-            indexed=[row.get('source_file','') for row in csv.DictReader(stream)]
-        supplemental_languages,_=catalog(missing_pdfs(indexed))
-        langs=tuple(sorted(set(langs) | set(supplemental_languages)))
-    except (OSError, AttributeError, csv.Error):
-        pass
     variants={'hi-IN':hindi} if hi['status'] in {'ok','unchanged'} else {}
     statuses={'hi-IN':hi['status']}
-    if 'en-IN' in langs or not langs:
+    if 'en-IN' in langs:
         en=translate_query(hindi,names=names,target='en-IN')
         statuses['en-IN']=en['status']
         if en['status'] in {'ok','unchanged'}:
-            from app.commodity_lookup import expand_english_query
-            variants['en-IN']=expand_english_query(en['text'], question)
+            variants['en-IN']=en['text']
     # English is for the backend, not a replacement of the submitted Hindi text.
     routed=variants.get('en-IN',hindi)
     return routed, {'query_variants':variants,'display_question':hindi,
                     'query_translation':statuses, 'document_languages':list(langs)}
+
+
+def _minimum_score():
+    try:
+        return max(-1.0,min(1.0,float(os.getenv('KISAANAI_SEMANTIC_MIN_SCORE','0.80'))))
+    except ValueError:
+        return 0.80
+
+
+def strongest(records):
+    if not records:
+        return []
+    try:
+        window=max(0.0,float(os.getenv('KISAANAI_SEMANTIC_SCORE_WINDOW','0.04')))
+    except ValueError:
+        window=0.04
+    best=max(row['score'] for row in records)
+    return [row for row in records if row['score'] >= max(_minimum_score(),best-window)]
 
 
 def retrieve_documents(advisor,payload):
@@ -93,20 +102,17 @@ def retrieve_documents(advisor,payload):
             vec=embedder.encode([search])[0]
             eligible=np.array([i for i,value in enumerate(doc_languages) if value==lang])
             scores=vectors[eligible] @ vec
-            order=np.argsort(-scores)[:20]
+            order=np.argsort(-scores)[:5]
             for pos in order:
                 score=float(scores[pos])
-                if not np.isfinite(score):
+                if not np.isfinite(score) or score < _minimum_score():
                     continue
                 row=metadata.iloc[int(eligible[pos])]
                 text=str(row['text']).strip(); source=str(row['source_file']).strip()
                 if not text or text=='nan' or not source or source=='nan':
                     continue
-                records.append({'text':text[:4000],'source_file':source,'score':score,'language':lang,'search_query':search})
+                records.append({'text':text[:4000],'source_file':source,'score':score,'language':lang})
             checks.append({'language':lang,'query':search,'status':'searched','chunks':len(eligible)})
-        from app.supplemental_documents import candidates
-        supplemental, supplemental_check = candidates(advisor,dict(payload,query_variants=variants),metadata['source_file'])
-        records.extend(supplemental)
         records.sort(key=lambda r:r['score'],reverse=True)
         unique=[]; seen=set()
         for row in records:
@@ -114,8 +120,8 @@ def retrieve_documents(advisor,payload):
             if key not in seen:
                 seen.add(key);unique.append(row)
         return AgentResult('', 'partial' if any(c['status']!='searched' for c in checks) else 'ok',
-                           evidence={'records':unique,'queries':checks,'method':'multilingual_embeddings',
-                                     'supplemental_documents':supplemental_check})
+                           evidence={'records':strongest(unique)[:5],'queries':checks,'method':'multilingual_embeddings',
+                                     'minimum_score':_minimum_score()})
     except Exception as exc:
         return AgentResult('', 'unavailable', evidence={'records':[], 'method':'multilingual_embeddings',
                            'reason':'semantic_index_unavailable','error_type':type(exc).__name__})
@@ -134,8 +140,8 @@ def rank_web(advisor, payload, records):
             query=variants.get(lang,payload['question'])
             vectors=advisor.embedder.encode([query]+[row['text'] for row in group])
             for row,score in zip(group,vectors[1:] @ vectors[0]):
-                if np.isfinite(score):
+                if np.isfinite(score) and float(score)>=_minimum_score():
                     out.append(dict(row,score=float(score),language=lang))
-        return sorted(out,key=lambda r:r['score'],reverse=True)
+        return strongest(sorted(out,key=lambda r:r['score'],reverse=True))[:3]
     except Exception:
         return []
