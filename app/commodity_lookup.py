@@ -48,24 +48,6 @@ def catalog_names() -> list[str]:
         return []
 
 
-def expand_english_query(query, original='', *, aliases=None):
-    """Expand English document queries from the shared commodity dictionary."""
-    aliases = load_aliases() if aliases is None else aliases
-    matched = resolve_commodities(query, aliases=aliases) + resolve_commodities(original, aliases=aliases)
-    keys = {normalize(name) for name in matched}
-    terms = []
-    seen = set()
-    for name, values in aliases.items():
-        if normalize(name) not in keys:
-            continue
-        for value in values:
-            key = normalize(value)
-            if value.isascii() and key and key not in seen:
-                seen.add(key)
-                terms.append(value)
-    return query + ('\nCrop synonyms: ' + '; '.join(terms) if terms else '')
-
-
 def resolve_commodities(question: str, names=(), *, aliases=None) -> list[str]:
     """Return all named commodities; longer overlapping phrases win.
 
