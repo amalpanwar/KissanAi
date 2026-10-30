@@ -517,7 +517,8 @@ class RAGAdvisor:
                 source_values = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", evidence))
                 uncited_numbers = re.sub(r"\[PDF page\s+\d+\]", "", candidate, flags=re.I)
                 answer_values = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", uncited_numbers))
-                if (candidate and len(candidate) <= 6000 and cited_pages
+                is_english = not re.search(r"[\u0900-\u097f]", candidate)
+                if (candidate and is_english and len(candidate) <= 6000 and cited_pages
                         and cited_pages.issubset(allowed_pages)
                         and answer_values.issubset(source_values)):
                     answer = candidate
