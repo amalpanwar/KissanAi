@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 
 
 class LocalGenerator:
@@ -9,15 +8,7 @@ class LocalGenerator:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
-        online_value = os.getenv("KISAANAI_HF_ONLINE", "").strip().lower()
-        if not online_value:
-            st = sys.modules.get("streamlit")
-            if st is not None:
-                try:
-                    online_value = str(st.secrets.get("KISAANAI_HF_ONLINE", "")).strip().lower()
-                except Exception:
-                    pass
-        online = online_value in {"1", "true", "yes"}
+        online = os.getenv("KISAANAI_HF_ONLINE", "").strip().lower() in {"1", "true", "yes"}
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=not online)
         device = 0 if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else -1
