@@ -75,7 +75,7 @@ def crop_guide_suggestions():
             question = (
                 f"{display_name} की खेती कैसे करें?"
                 if kind == "cultivation"
-                else f"{display_name} में कीट और रोग से बचाव कैसे करें?"
+                else f"{display_name} में कीटों की रोकथाम के लिए कौन सा कीटनाशक उपयोग करें?"
             )
             suggestions.append({
                 "question": question,
