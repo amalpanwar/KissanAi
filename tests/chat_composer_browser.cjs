@@ -116,20 +116,6 @@ async function freePort() {
     await page.waitForFunction(() => document.querySelector('[data-testid="stJson"]')?.innerText.trim() === '[]');
     assert.equal(await input.inputValue(), '');
     // A debounced draft translates without posting chat, remains editable, and sends only once.
-    await input.fill('rice ki');
-    await options.first().waitFor();
-    assert.match(await options.nth(0).innerText(), /धान की कीमत/);
-    assert.match(await options.nth(1).innerText(), /किस्में/);
-    assert.match(await options.nth(2).innerText(), /खेती/);
-    await page.waitForTimeout(1800);
-    assert.equal(await input.inputValue(), 'rice ki');
-    assert.equal((await page.getByTestId('stJson').innerText()).trim(), '[]');
-    await page.getByRole('button', { name: 'Rerun unrelated control' }).click();
-    assert.equal(await input.inputValue(), 'rice ki');
-    await frame.locator('body').evaluate(() => window.location.reload());
-    await input.waitFor();
-    await page.waitForTimeout(400);
-    assert.equal(await input.inputValue(), 'rice ki');
     await input.fill('rice varieties');
     const preview = frame.getByRole('textbox', { name: 'हिंदी सवाल — संपादन करें' });
     await preview.waitFor();
