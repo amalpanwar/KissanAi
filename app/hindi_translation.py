@@ -175,10 +175,11 @@ def translate_answer(result: dict) -> dict:
         return {**result, 'answer': answer, 'translation': metadata}
     unavailable = 'इस उत्तर का पूरा हिंदी अनुवाद अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।'
     def failed_translation(reason, status='fallback', **details):
-        # The crop guide already has a deterministic Hindi rendering. Keep that
-        # usable answer visible if local HF translation is unavailable.
+        # Preserve the answer generated from retrieved source passages. A static
+        # crop template would not match the farmer's exact question or intent.
         if result.get('topic') in {'crop_guide', 'crop_guide_followup'}:
-            return finish(original, 'deterministic_fallback', reason, **details)
+            return finish(original, 'source_answer_fallback', reason,
+                          answer_language='en-IN', **details)
         return finish(unavailable, status, reason, **details)
     if _setting('KISAANAI_HINDI_TRANSLATION', '1').lower() in {'0', 'false', 'no'}:
         return failed_translation('disabled', 'disabled')
