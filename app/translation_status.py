@@ -9,6 +9,7 @@ def render_translation_status(st, info):
         'not_configured': 'हिंदी अनुवाद चालू नहीं है: Sarvam की API कुंजी उपलब्ध नहीं है।',
         'disabled': 'हिंदी अनुवाद बंद है। मूल उत्तर दिखाया गया है।',
         'fallback': 'हिंदी अनुवाद पूरा नहीं हुआ; मूल उत्तर दिखाया गया है।',
+        'deterministic_fallback': 'हिंदी अनुवाद पूरा नहीं हुआ; फसल-गाइड का मौजूदा उत्तर दिखाया गया है।',
     }
     if status in captions:
         st.caption(captions[status])
