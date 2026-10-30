@@ -14,6 +14,31 @@ SUGGESTIONS = [
 ]
 
 
+def crop_guide_suggestions():
+    """Offer cultivation prompts for every named crop in the production guide."""
+    from app.crop_guide import CROP_ALIASES, CROP_NAME_HI
+
+    section_names = {
+        "Millets", "Small Millets", "Pulses", "Oilseeds", "FIBRE CROPS",
+        "Forage Crops", "Green Manure Crops", "SERICULTURE", "AGRO FORESTRY",
+    }
+    suggestions = []
+    for crop, aliases in CROP_ALIASES.items():
+        if crop in section_names or crop == "Wheat":
+            continue  # wheat remains in the curated starter list above
+        crop_names = [crop, *(str(alias) for alias in aliases)]
+        keywords = " ".join(dict.fromkeys(name.strip() for name in crop_names if name.strip()))
+        display_name = CROP_NAME_HI.get(crop, crop)
+        suggestions.append({
+            "question": f"{display_name} की खेती कैसे करें?",
+            "keywords": keywords,
+        })
+    return suggestions
+
+
+SUGGESTIONS.extend(crop_guide_suggestions())
+
+
 def consume_submission(value, state):
     if not isinstance(value, dict):
         return None

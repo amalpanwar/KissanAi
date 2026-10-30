@@ -96,7 +96,7 @@ CROP_ALIASES = {
     "Sorghum": ["sorghum", "jowar", "ज्वार"],
     "Sweet Sorghum": ["sweet sorghum", "मीठा ज्वार"],
     "Ragi": ["ragi", "finger millet", "रागी", "mandua"],
-    "Cumbu": ["cumbu", "pearl millet", "बाजरा", "bajra"],
+    "Cumbu": ["cumbu", "pearl millet", "pearl millets", "बाजरा", "bajra"],
     "Small Millets": ["small millets", "small millet", "लघु मिलेट्स"],
     "Pulses": ["pulses", "दलहन"],
     "Redgram": ["redgram", "red gram", "अरहर", "arhar", "pigeon pea", "tur", "tuar"],

@@ -21,7 +21,7 @@ BASE_ALIASES = {
     "cotton": ["कपास", "kapas"],
     "jute": ["जूट"],
     "jowar(sorghum)": ["ज्वार", "jowar", "sorghum"],
-    "bajra(pearl millet/cumbu)": ["बाजरा", "bajra", "cumbu", "pearl millet"],
+    "bajra(pearl millet/cumbu)": ["बाजरा", "bajra", "cumbu", "pearl millet", "pearl millets", "Pearl Millets"],
     "ragi(finger millet)": ["रागी", "mandua", "finger millet"],
     "barley(jau)": ["जौ", "jau"],
     "red gram": ["अरहर", "arhar", "tur", "tuar", "pigeon pea"],
