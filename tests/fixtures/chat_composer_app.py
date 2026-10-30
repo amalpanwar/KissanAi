@@ -11,11 +11,11 @@ if st.button('Rerun unrelated control'):
     pass
 place = st.selectbox('Selected village', ['Doghat Rural', 'Another village'])
 sync_chat_location(st.session_state, {'state': 'Uttar Pradesh', 'district': 'Baghpat', 'sub_district': 'Baraut', 'place': place})
-translation_failure = st.checkbox('Simulate translation failure', key='translation_failure')
+translation_failure = st.checkbox('Simulate translation failure')
 response_area = st.container()
-import app.query_translation
-app.query_translation.translate_query = lambda text, names: ({'status':'authentication_failed','text':text} if st.session_state.get('translation_failure') else {'status':'ok','text':'धान की किस्म बताएं'})
-question = render_chat_composer(st)
+from unittest.mock import patch
+with patch('app.query_translation.translate_query', side_effect=lambda text, names: ({'status':'authentication_failed','text':text} if translation_failure else {'status':'ok','text':'धान की किस्म बताएं'})):
+    question = render_chat_composer(st)
 if question:
     st.session_state.setdefault('chat_history', []).append(question)
 with response_area:
