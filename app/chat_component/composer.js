@@ -24,12 +24,12 @@
 
   function matches(query) {
     const words = tokens(query).filter(word => word.length >= 2);
-    if (!words.length) return suggestions;
+    if (!words.length) return [];
     return suggestions.map((item, order) => {
       const keys = tokens(item.keywords);
       const score = words.reduce((sum, word) => sum + (keys.some(key => key === word) ? 3 : keys.some(key => key.startsWith(word)) ? 1 : 0), 0);
       return { item, order, score };
-    }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.order - b.order).map(row => row.item);
+    }).filter(row => row.score > 0).sort((a, b) => b.score - a.score || a.order - b.order).map(row => row.item).slice(0, 8);
   }
 
   function highlight() {
