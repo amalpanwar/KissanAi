@@ -13,7 +13,7 @@ def render_translation_status(st, info, *, probe_key=None):
         'partial': 'उत्तर आंशिक रूप से हिंदी में है; अनुवाद न हुए अंश अंग्रेज़ी में रखे गए हैं।',
     }
     reasons = {
-        'TimeoutError': 'स्थानीय अनुवाद में समय लग गया।',
+        'TimeoutError': 'स्थानीय मॉडल ने समय पर उत्तर नहीं दिया।',
         'request_limit': 'इस उत्तर में अनुवाद के लिए बहुत अधिक अलग-अलग अंश थे।',
         'translation_deadline': 'पूरे उत्तर के अनुवाद की समय सीमा समाप्त हुई।',
         'protected_values_changed': 'अनुवाद में सुरक्षित मात्रा या नाम बदल गए; वह अंश अंग्रेज़ी में रखा गया।',
@@ -23,6 +23,7 @@ def render_translation_status(st, info, *, probe_key=None):
         'hindi_missing': 'अनुवाद में हिंदी वाक्य नहीं मिले; मूल अंश अंग्रेज़ी में रखा गया।',
         'empty_response': 'स्थानीय मॉडल ने खाली उत्तर दिया।',
         'local_model_error': 'स्थानीय अनुवाद मॉडल का उत्तर उपयोग नहीं हो सका।',
+        'http_403': 'अनुवाद सेवा ने पहुँच से इनकार किया।',
         'partial_translation': 'बाकी पाठ-अंश अंग्रेज़ी में रखे गए हैं।',
         'FileNotFoundError': 'स्थानीय अनुवाद मॉडल उपलब्ध नहीं है।',
         'ImportError': 'स्थानीय अनुवाद मॉडल की निर्भरता उपलब्ध नहीं है।',
@@ -38,3 +39,12 @@ def render_translation_status(st, info, *, probe_key=None):
             'remaining_latin_words',
         )
         st.json({key: info[key] for key in safe_fields if key in info})
+        if status in {'fallback', 'partial'} and probe_key is not None:
+            st.caption('यह स्थिर नमूने की सेवा-जाँच है, खेती की सलाह नहीं। नतीजे पाँच मिनट तक दोबारा उपयोग हो सकते हैं।')
+            if st.button('Test Sarvam Hindi services', key='sarvam_probe_' + str(probe_key)) is True:
+                from app.sarvam_diagnostics import run_diagnostics
+                with st.spinner('Sarvam सेवा की जाँच हो रही है…'):
+                    st.session_state['kisaanai_sarvam_probe'] = run_diagnostics()
+            diagnostic = st.session_state.get('kisaanai_sarvam_probe')
+            if isinstance(diagnostic, dict):
+                st.json(diagnostic)
