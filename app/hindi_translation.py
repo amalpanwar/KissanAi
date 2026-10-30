@@ -175,8 +175,9 @@ def translate_answer(result: dict) -> dict:
         return {**result, 'answer': answer, 'translation': metadata}
     if _setting('KISAANAI_HINDI_TRANSLATION', '1').lower() in {'0', 'false', 'no'}:
         return finish(original, 'disabled')
+    unavailable = 'इस उत्तर का पूरा हिंदी अनुवाद अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।'
     if TOKEN.search(original):
-        return finish(original, 'fallback', 'reserved_token_in_source')
+        return finish(unavailable, 'fallback', 'reserved_token_in_source')
     protected, values = _protect(original, _protected_names(result))
     segments = list(NON_HINDI.finditer(protected))
     # Formula-only passages need no model; keep approved scientific notation.
@@ -185,7 +186,7 @@ def translate_answer(result: dict) -> dict:
         return finish(original, 'not_needed')
     hf_token = _setting('HF_TOKEN')
     if not hf_token:
-        return finish(original, 'not_configured', 'HF_TOKEN')
+        return finish(unavailable, 'not_configured', 'HF_TOKEN')
     replacements = []
     failures = []
     for match in pending:
@@ -211,11 +212,12 @@ def translate_answer(result: dict) -> dict:
     for start, end, translated_text in reversed(replacements):
         output = output[:start] + translated_text + output[end:]
     if Counter(TOKEN.findall(output)) != Counter(values.keys()):
-        return finish(original, 'fallback', 'protected_values_lost')
+        return finish(unavailable, 'fallback', 'protected_values_lost')
     for token, value in values.items():
         output = output.replace(token, value)
     if failures:
-        return finish(output, 'partial', 'fragment_translation_failed',
-                      translated_fragments=max(0, len(pending) - len(failures)),
+        # Do not show a mixed-language answer. Keep translation all-or-nothing at
+        # the user-visible answer level while retaining failure details in metadata.
+        return finish(unavailable, 'fallback', 'fragment_translation_failed',
                       failed_fragments=len(failures), failure_reason=failures[0])
     return finish(output, 'translated', translated_fragments=len(pending))
