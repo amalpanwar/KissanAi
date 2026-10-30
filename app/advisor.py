@@ -451,6 +451,77 @@ class RAGAdvisor:
             max_entries=cfg.response_cache_max_entries,
         )
 
+    def _answer_crop_guide_from_sources(self, question: str) -> dict | None:
+        """Generate a query-specific answer from crop-guide passages, then expose source pages."""
+        passages = build_crop_production_source_chunks(question, max_chunks=8)
+        if not passages:
+            return None
+
+        evidence = "\n\n".join(
+            f"[PDF page {item.get('page')}] {str(item.get('text', '')).strip()}"
+            for item in passages
+            if str(item.get("text", "")).strip()
+        )
+        generator = self.generator
+        if generator is None:
+            try:
+                generator = LocalGenerator(self.cfg.generator_model)
+                self.generator = generator
+            except Exception:
+                generator = None
+
+        answer = ""
+        generation_status = "source_excerpt_fallback"
+        if generator is not None:
+            prompt = (
+                "You are KisaanAI, an agricultural assistant. Answer the farmer's question using only the "
+                "retrieved passages from the Crop Production Guide below. The passages are the evidence; "
+                "do not add facts, recommendations, quantities, dates, or crop practices from memory. "
+                "Write a concise, practical answer in English so a separate translation step can translate it. "
+                "Preserve product, chemical, variety, unit, and number spellings exactly as in the evidence. "
+                "Cite each factual bullet with [PDF page N], using only page numbers shown in the evidence. "
+                "If the guide does not answer part of the question, state that limitation. Return only the answer.\n\n"
+                f"Farmer's question: {question}\n\nRetrieved evidence:\n{evidence}\n"
+            )
+            try:
+                candidate = str(generator.generate(prompt) or "").strip()
+                allowed_pages = {str(item.get("page")) for item in passages}
+                cited_pages = set(re.findall(r"\[PDF page\s+(\d+)\]", candidate, re.I))
+                if (candidate and len(candidate) <= 6000 and cited_pages
+                        and cited_pages.issubset(allowed_pages)):
+                    answer = candidate
+                    generation_status = "generated"
+            except Exception:
+                answer = ""
+
+        if not answer:
+            # Keep an answer available when generation is unavailable: quote the
+            # retrieved evidence directly, with its original PDF page citations.
+            answer = "\n\n".join(
+                f"{str(item.get('text', '')).strip()} [PDF page {item.get('page')}]"
+                for item in passages[:5]
+                if str(item.get("text", "")).strip()
+            )
+
+        references = list(dict.fromkeys(
+            str(item.get("source_file"))
+            for item in passages
+            if item.get("source_file")
+        ))
+        return {
+            "answer": answer,
+            "references": references,
+            "retrieved": passages,
+            "english_source_chunks": passages,
+            "topic": "crop_guide",
+            "answer_generation": {
+                "provider": "local",
+                "model": getattr(generator, "model_name", self.cfg.generator_model) if generator else None,
+                "status": generation_status,
+                "evidence_passages": len(passages),
+            },
+        }
+
     def answer(self, user_query: str) -> dict:
         import os
         from app.hindi_translation import translate_answer
@@ -466,16 +537,7 @@ class RAGAdvisor:
             from app.agent_system import build_coordinator
             context, question = self._split_context_and_question(user_query)
             result = build_coordinator(self).answer(question, context)
-        # Full crop-guide responses are already authored in Hindi from the local
-        # production-guide rules; do not send them through a second translator.
-        if result.get("topic") == "crop_guide" and any(
-                "\u0900" <= char <= "\u097f" for char in str(result.get("answer", ""))):
-            result["translation"] = {
-                "provider": "crop_guide", "model": "deterministic_hindi_guide",
-                "version": "crop-guide-hi-v1", "target_language": "hi-IN",
-                "status": "not_needed", "reason": "answer_already_in_hindi",
-            }
-            return result
+        # Final answer translation is applied after intent routing and evidence-grounded generation.
         return translate_answer(result)
 
     def _answer_legacy(self, user_query: str) -> dict:
@@ -562,27 +624,14 @@ class RAGAdvisor:
                     "topic": "crop_guide_followup",
                 }
         if parsed_intent.subject == "crop_guide":
-            try:
-                guide_answer, guide_sources = build_crop_production_guide(normalized_question)
-            except Exception:
-                import logging
-                logging.getLogger(__name__).exception("Failed to read crop production guide")
-                guide_answer, guide_sources = None, []
-            if not guide_answer:
-                return {
-                    "answer": "इस फसल की खेती की स्रोत-आधारित गाइड अभी उपलब्ध नहीं है। "
-                              "कृपया बाद में फिर प्रयास करें।",
-                    "references": [], "retrieved": [], "topic": "crop_guide",
-                    "status": "unavailable",
-                }
-            if guide_answer:
-                return {
-                    "answer": guide_answer,
-                    "references": guide_sources,
-                    "retrieved": [],
-                    "english_source_chunks": build_crop_production_source_chunks(normalized_question),
-                    "topic": "crop_guide",
-                }
+            guide_result = self._answer_crop_guide_from_sources(normalized_question)
+            if guide_result:
+                return guide_result
+            return {
+                "answer": "इस फसल के लिए Crop Production Guide से संबंधित अंश नहीं मिल सके।",
+                "references": [], "retrieved": [], "topic": "crop_guide",
+                "status": "unavailable",
+            }
         if parsed_intent.subject == "season_crop_list":
             season_crop_answer, season_crop_sources = self._answer_season_crop_list_query(
                 context_part,
@@ -661,15 +710,9 @@ class RAGAdvisor:
                 "topic": "crop_profitability_followup",
             }
         if self._is_crop_guide_intent(normalized_question):
-            guide_answer, guide_sources = build_crop_production_guide(normalized_question)
-            if guide_answer:
-                return {
-                    "answer": guide_answer,
-                    "references": guide_sources,
-                    "retrieved": [],
-                    "english_source_chunks": build_crop_production_source_chunks(normalized_question),
-                    "topic": "crop_guide",
-                }
+            guide_result = self._answer_crop_guide_from_sources(normalized_question)
+            if guide_result:
+                return guide_result
         if self._is_season_crop_list_intent(normalized_question):
             season_crop_answer, season_crop_sources = self._answer_season_crop_list_query(
                 context_part,
