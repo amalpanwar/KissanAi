@@ -451,12 +451,8 @@ class RAGAdvisor:
         )
 
     def answer(self, user_query: str) -> dict:
-        from app.guide_response_cache import answer_with_cache
-        return answer_with_cache(self, user_query, self._answer_without_guide_cache)
-
-    def _answer_without_guide_cache(self, user_query: str) -> dict:
         import os
-        from app.guide_response_cache import finalize_response
+        from app.hindi_translation import translate_answer
         from app.agriculture_news import NEWS_INTENT
         context, question = self._split_context_and_question(user_query)
         if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"} and NEWS_INTENT.search(question):
@@ -469,7 +465,7 @@ class RAGAdvisor:
             from app.agent_system import build_coordinator
             context, question = self._split_context_and_question(user_query)
             result = build_coordinator(self).answer(question, context)
-        return finalize_response(result)
+        return translate_answer(result)
 
     def _answer_legacy(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)
@@ -777,17 +773,90 @@ class RAGAdvisor:
         normalized_query: str,
         context_part: str,
     ) -> dict:
-        # General questions must check both sources before declining; this
-        # path does not download an LLM or embedding model during a request.
-        from app.agent_system import MessageBus, ToolAgent
-        from app.research import ResearchAgent, documents, web
-        bus = MessageBus({"research": ResearchAgent(self),
-                          "documents": ToolAgent(lambda g,p: documents(self,p)),
-                          "web_search": ToolAgent(lambda g,p: web(p,self))})
-        result = bus.ask("agronomy", "research", "Find evidence for this question",
-                         {"question": normalized_question, "context": context_part})
-        return {"answer": result.answer, "references": result.references, "retrieved": [],
-                "status": result.status, **result.metadata}
+        plan = self.query_agent.decide(normalized_question, context_part)
+        cached = self.response_cache.get(
+            question=normalized_question,
+            context_part=context_part,
+            route=plan.route,
+            model_name=plan.model_name or "",
+        )
+        if cached:
+            cached.setdefault("topic", "rag")
+            cached["query_plan"] = plan.to_dict()
+            return cached
+
+        try:
+            self._ensure_rag_components(load_generator=False)
+        except Exception:
+            web_result = self._answer_with_web_search(normalized_question, context_part) if plan.allow_web_fallback else None
+            if web_result:
+                web_result["query_plan"] = plan.to_dict()
+                return web_result
+            return {
+                "answer": "अभी यह सवाल local source से नहीं निकल पाया और RAG model उपलब्ध नहीं है। कृपया सवाल में फसल/जिला साफ लिखें या थोड़ी देर बाद फिर प्रयास करें।",
+                "references": [],
+                "retrieved": [],
+                "topic": "rag",
+                "query_plan": plan.to_dict(),
+                "cache_hit": False,
+            }
+
+        if self.embedder is None or self.retriever is None:
+            web_result = self._answer_with_web_search(normalized_question, context_part) if plan.allow_web_fallback else None
+            if web_result:
+                web_result["query_plan"] = plan.to_dict()
+                return web_result
+            return {
+                "answer": "मॉडल अभी उपलब्ध नहीं है। कृपया थोड़ी देर बाद फिर प्रयास करें।",
+                "status": "unavailable",
+                "references": [],
+                "retrieved": [],
+                "topic": "rag",
+                "query_plan": plan.to_dict(),
+                "cache_hit": False,
+            }
+
+        retrieved = self._retrieve_with_hyde_and_rerank(normalized_question, context_part, top_k=plan.top_k)
+        response = ""
+        generator = None
+        if plan.route != "retrieval_only":
+            generator = self._get_generator_for_model(plan.model_name)
+        if generator is not None:
+            prompt = build_prompt(
+                normalized_query,
+                retrieved,
+                query_family=plan.query_family,
+                max_chunks=plan.prompt_context_k,
+            )
+            try:
+                response = generator.generate(prompt)
+            except Exception:
+                response = ""
+        if not response or self._is_low_quality_response(response):
+            if plan.allow_web_fallback:
+                web_result = self._answer_with_web_search(normalized_question, context_part)
+                if web_result:
+                    web_result["query_plan"] = plan.to_dict()
+                    return web_result
+            response = self._fallback_answer(retrieved, normalized_question)
+
+        result = {
+            "answer": response,
+            "references": [r.get("source_file") for r in retrieved],
+            "retrieved": retrieved,
+            "topic": "rag",
+            "query_plan": plan.to_dict(),
+            "cache_hit": False,
+        }
+        self.response_cache.put(
+            question=normalized_question,
+            context_part=context_part,
+            route=plan.route,
+            model_name=plan.model_name or "",
+            result=result,
+            ttl_sec=min(plan.cache_ttl_sec, self.cfg.query_cache_ttl_sec),
+        )
+        return result
 
     def _query_tokens(self, text: str) -> set[str]:
         tokens = re.findall(r"[a-z0-9\u0900-\u097F]+", (text or "").lower())
@@ -2539,9 +2608,7 @@ class RAGAdvisor:
             "Chickpea": ["चना", "chana", "chickpea", "bengal gram", "bengalgram"],
         }
         for crop_name, aliases in crop_aliases.items():
-            # Latin crop names must be whole words: "price" is not "rice".
-            if any(re.search(r"(?<![a-z])" + re.escape(alias.lower()) + r"(?![a-z])", t)
-                   if alias.isascii() else alias.lower() in t for alias in aliases):
+            if any(alias.lower() in t for alias in aliases):
                 return crop_name
         return None
 
