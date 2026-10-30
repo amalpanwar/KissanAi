@@ -175,5 +175,7 @@ class AdvisorTools:
         metadata = {"topic": result.get("topic", "rag")}
         if result.get("english_source_chunks"):
             metadata["english_source_chunks"] = result["english_source_chunks"]
+        if result.get("answer_generation"):
+            metadata["answer_generation"] = result["answer_generation"]
         return AgentResult(result["answer"], status=result.get("status", "ok"), references=result.get("references", []),
                            metadata=metadata)
