@@ -451,12 +451,8 @@ class RAGAdvisor:
         )
 
     def answer(self, user_query: str) -> dict:
-        from app.guide_response_cache import answer_with_cache
-        return answer_with_cache(self, user_query, self._answer_without_guide_cache)
-
-    def _answer_without_guide_cache(self, user_query: str) -> dict:
         import os
-        from app.guide_response_cache import finalize_response
+        from app.hindi_translation import translate_answer
         from app.agriculture_news import NEWS_INTENT
         context, question = self._split_context_and_question(user_query)
         if os.getenv("KISAANAI_AGENTIC", "1").lower() in {"0", "false", "no"} and NEWS_INTENT.search(question):
@@ -469,7 +465,7 @@ class RAGAdvisor:
             from app.agent_system import build_coordinator
             context, question = self._split_context_and_question(user_query)
             result = build_coordinator(self).answer(question, context)
-        return finalize_response(result)
+        return translate_answer(result)
 
     def _answer_legacy(self, user_query: str) -> dict:
         context_part, farmer_question = self._split_context_and_question(user_query)
@@ -781,7 +777,7 @@ class RAGAdvisor:
         # path does not download an LLM or embedding model during a request.
         from app.agent_system import MessageBus, ToolAgent
         from app.research import ResearchAgent, documents, web
-        bus = MessageBus({"research": ResearchAgent(self),
+        bus = MessageBus({"research": ResearchAgent(),
                           "documents": ToolAgent(lambda g,p: documents(self,p)),
                           "web_search": ToolAgent(lambda g,p: web(p,self))})
         result = bus.ask("agronomy", "research", "Find evidence for this question",
