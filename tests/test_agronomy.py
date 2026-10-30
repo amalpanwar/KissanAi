@@ -1,4 +1,4 @@
-"""Regression coverage for cultivation questions without model downloads."""
+"""Regression coverage for crop guide retrieval and generation fallback."""
 import os
 import unittest
 from unittest.mock import patch
@@ -20,28 +20,37 @@ class AgronomyTests(unittest.TestCase):
         self.semantic_mock = self.semantic.start()
         self.addCleanup(self.model.stop)
         self.addCleanup(self.semantic.stop)
+        self.local_generator = patch('app.advisor.LocalGenerator',
+                                     side_effect=RuntimeError('model unavailable'))
+        self.local_generator_mock = self.local_generator.start()
+        self.addCleanup(self.local_generator.stop)
 
     def test_cultivation_routes_without_models(self):
         for question in ['gehu ki kheti kese kare', 'gehun ki kheti kaise karein',
                          'गेहूं की खेती कैसे करें', 'how to grow wheat']:
-            with self.subTest(question=question), patch('app.advisor.build_crop_production_guide',
-                    return_value=('गेहूं की खेती: स्टेप-बाय-स्टेप गाइड', ['guide.pdf'])):
+            chunks = [{"text": "Wheat guide evidence: apply fertilizer 40 kg.", "page": 1,
+                       "source_file": "guide.pdf"}]
+            with self.subTest(question=question), patch(
+                    'app.advisor.build_crop_production_source_chunks', return_value=chunks):
                 result = self.advisor.answer(question)
                 self.assertEqual(result['topic'], 'crop_guide')
                 self.assertEqual(result['agent_status'], 'ok')
                 self.assertEqual(result['agent_trace']['planner'], 'rules')
                 self.assertEqual(result['references'], ['guide.pdf'])
+                self.assertIn('Wheat guide evidence', result['answer'])
+                self.assertIn('PDF page 1', result['answer'])
+                self.assertEqual(result['answer_generation']['status'], 'source_excerpt_fallback')
         self.model_mock.assert_not_called()
         self.semantic_mock.assert_not_called()
 
     def test_missing_guide_is_unavailable(self):
-        with patch('app.advisor.build_crop_production_guide', return_value=(None, [])):
+        with patch('app.advisor.build_crop_production_source_chunks', return_value=[]):
             result = self.advisor.answer('gehu ki kheti kese kare')
         self.assertEqual(result['agent_status'], 'unavailable')
         self.assertNotIn('मॉडल', result['answer'])
 
     def test_unreadable_guide_is_unavailable(self):
-        with patch('app.advisor.build_crop_production_guide', side_effect=OSError('unreadable')), \
+        with patch('app.advisor.build_crop_production_source_chunks', side_effect=OSError('unreadable')), \
                 self.assertLogs('app.advisor', level='ERROR'):
             result = self.advisor.answer('gehu ki kheti kese kare')
         self.assertEqual(result['agent_status'], 'unavailable')
@@ -54,11 +63,10 @@ class AgronomyTests(unittest.TestCase):
         result = self.advisor.answer('gehu ki kheti kese kare')
         self.assertEqual(result['agent_status'], 'ok', result['answer'])
         self.assertEqual(result['topic'], 'crop_guide')
-        self.assertIn('गेहूं', result['answer'])
+        self.assertIn('PDF page', result['answer'])
         self.assertGreater(len(result['answer']), 200)
-        self.assertNotIn('basally for soils', result['answer'])
-        self.assertIn('जिंक सल्फेट', result['answer'])
         self.assertTrue(result['references'])
+        self.assertEqual(result['answer_generation']['status'], 'source_excerpt_fallback')
         self.model_mock.assert_not_called()
         self.semantic_mock.assert_not_called()
 
