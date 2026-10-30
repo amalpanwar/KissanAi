@@ -6,6 +6,8 @@ from app.hindi_translation import translate_answer, _translate, TOKEN, _chunks, 
 
 class TranslationTests(unittest.TestCase):
     def setUp(self):
+        from app.hindi_translation import _setting
+        self.real_setting = _setting
         _translate.cache_clear()
         self.settings = {'HF_TOKEN': 'hf-test-token', 'KISAANAI_HINDI_TRANSLATION': '1'}
         setting = patch('app.hindi_translation._setting', side_effect=lambda key, default='': self.settings.get(key, default))
@@ -73,10 +75,9 @@ class TranslationTests(unittest.TestCase):
         self.assertIn('`abc123`', result['answer'])
 
     def test_streamlit_secret_setting_reads_hf_token(self):
-        from app.hindi_translation import _setting
         st = type('StreamlitStub', (), {'secrets': {'HF_TOKEN': 'from-secrets'}})()
         with patch.dict('os.environ', {'HF_TOKEN': ''}), patch.dict('sys.modules', {'streamlit': st}):
-            self.assertEqual(_setting('HF_TOKEN'), 'from-secrets')
+            self.assertEqual(self.real_setting('HF_TOKEN'), 'from-secrets')
 
     def test_chunk_boundaries(self):
         self.assertTrue(all(len(chunk) <= 1800 for chunk in _chunks('word ' * 1000)))
