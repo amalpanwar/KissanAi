@@ -173,9 +173,9 @@ def translate_answer(result: dict) -> dict:
         if reason:
             metadata['reason'] = reason
         return {**result, 'answer': answer, 'translation': metadata}
-    if _setting('KISAANAI_HINDI_TRANSLATION', '1').lower() in {'0', 'false', 'no'}:
-        return finish(original, 'disabled')
     unavailable = 'इस उत्तर का पूरा हिंदी अनुवाद अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।'
+    if _setting('KISAANAI_HINDI_TRANSLATION', '1').lower() in {'0', 'false', 'no'}:
+        return finish(unavailable, 'disabled')
     if TOKEN.search(original):
         return finish(unavailable, 'fallback', 'reserved_token_in_source')
     protected, values = _protect(original, _protected_names(result))
