@@ -13,16 +13,7 @@ def clean_references(values):
 def render_response_footer(st, item):
     from app.translation_status import render_translation_status
     if item.get('translation'):
-        render_translation_status(st, item['translation'], probe_key=item.get('query_log_id') or id(item))
-    cache_status = (item.get('guide_cache') or {}).get('status')
-    if cache_status == 'hit':
-        st.caption('सहेजा गया हिंदी उत्तर दिखाया गया है; दोबारा अनुवाद नहीं किया गया।')
-    elif cache_status == 'english_hit':
-        st.caption('सहेजा गया अंग्रेज़ी उत्तर इस्तेमाल हुआ; हिंदी अनुवाद फिर माँगा गया।')
-    english = item.get('english_answer')
-    if english:
-        with st.expander('English source-grounded answer'):
-            st.write(english)
+        render_translation_status(st, item['translation'])
     trace = item.get('agent_trace') or {}
     if trace:
         with st.expander('Plan and agent activity'):
@@ -49,18 +40,11 @@ def render_response_footer(st, item):
                     if evidence.get('reason'):
                         st.write('Search outcome: ' + evidence['reason'])
                 elif sender == 'documents':
-                    st.write(f"Documents: {payload.get('status', 'unavailable')}; candidate passages: {len(evidence.get('records', []))}")
-                    if evidence.get('guide_scope'):
-                        st.json({'production_guide': evidence['guide_scope']})
+                    st.write(f"Documents: {payload.get('status', 'unavailable')}; relevant passages: {len(evidence.get('records', []))}")
                     if evidence.get('queries'):
                         st.json(evidence['queries'])
                     if evidence.get('reason'):
                         st.write('Document search outcome: ' + evidence['reason'])
-                elif sender == 'research':
-                    st.write(f"Reranked passages used: {len((payload.get('metadata') or {}).get('retrieved', []))}")
-                    generation = (evidence.get('checks') or {}).get('generation')
-                    if generation:
-                        st.json({'generation': generation})
             st.json(trace.get('decisions', []))
     refs = clean_references(item.get('references', []))
     if refs:
@@ -72,7 +56,3 @@ def render_response_footer(st, item):
                 else:
                     # Plain text protects filenames from Markdown list/escape parsing.
                     st.text(f'{i}. {source}')
-                for entry in item.get('source_pages') or []:
-                    if entry.get('source_file') == source:
-                        pages = ', '.join(str(page) for page in entry.get('pages', []))
-                        st.caption('PDF pages: ' + pages)
