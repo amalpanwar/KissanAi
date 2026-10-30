@@ -28,7 +28,7 @@ class MultilingualPriceTests(unittest.TestCase):
                  patch('app.hindi_translation.translate_answer',side_effect=lambda r:{**r,'answer':'चावल का उपलब्ध भाव: 3100 रुपये प्रति क्विंटल।'}) as output:
                 result=advisor.answer('चावल का मूल्य क्या आप बता सकते हैं?')
             self.assertEqual(result['agent_trace']['plan'],['prices'])
-            self.assertEqual(result['agent_trace']['backend_question'].split('\nCrop synonyms:')[0],'What is the price of rice?')
+            self.assertEqual(result['agent_trace']['backend_question'],'What is the price of rice?')
             self.assertIn('3,100.00',output.call_args.args[0]['answer'])
             self.assertIn('चावल',result['answer'])
             self.assertEqual(result['references'],['https://agmarknet.gov.in/'])
