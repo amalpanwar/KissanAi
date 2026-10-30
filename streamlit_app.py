@@ -3435,6 +3435,8 @@ for item in st.session_state.chat_history:
                 st.write(item["agent_trace"]["goal"])
                 st.write(" → ".join(item["agent_trace"]["plan"]))
                 st.json(item["agent_trace"]["decisions"])
+                if item.get("answer_generation"):
+                    st.json({"answer_generation": item["answer_generation"]})
         if item.get("type") == "market_panel":
             render_market_panel(
                 meta=item.get("market_meta") or {},
@@ -4303,6 +4305,7 @@ if user_query:
                     "agent_trace": (None if intent_price else result.get("agent_trace")),
                     "translation": (None if intent_price else result.get("translation")),
                     "english_source_chunks": ([] if intent_price else result.get("english_source_chunks", [])),
+                    "answer_generation": (None if intent_price else result.get("answer_generation")),
                 }
             )
 
@@ -4321,6 +4324,8 @@ if user_query:
                             st.write(trace["goal"])
                             st.write(" → ".join(trace["plan"]))
                             st.json(trace["decisions"])
+                            if result.get("answer_generation"):
+                                st.json({"answer_generation": result["answer_generation"]})
                     with st.expander("Sources Used"):
                         for src in result.get("references", []):
                             st.write(f"- {src}")

@@ -18,7 +18,7 @@ FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|
 UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C)(?:\s*/\s*(?:ha|hectare|acre|L|litre|liter))?'
 NUMBER = r'\d+(?:[.,:/–-]\d+)*'
 PROTECTED = re.compile(
-    r'```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
+    r'\[PDF page \d+\]|```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
     + NUMBER + r'(?:\s*' + UNIT + r'\b)?(?:\s*' + FORMULA + r')?|'
     + FORMULA + r'|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
 )
@@ -163,7 +163,7 @@ def translate_answer(result: dict) -> dict:
     """
     existing = result.get('translation')
     if (isinstance(existing, dict) and existing.get('provider') == 'local'
-            and existing.get('status') in {'translated', 'partial', 'not_needed'}):
+            and existing.get('status') in {'translated', 'partial', 'not_needed', 'source_answer_fallback'}):
         return result
     original = str(result.get('answer', ''))
     info = {'provider': 'local', 'model': MODEL, 'target_language': 'hi-IN',
@@ -174,10 +174,18 @@ def translate_answer(result: dict) -> dict:
             metadata['reason'] = reason
         return {**result, 'answer': answer, 'translation': metadata}
     unavailable = 'इस उत्तर का पूरा हिंदी अनुवाद अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।'
+    def failed_translation(reason, status='fallback', **details):
+        # Never discard a usable source-grounded answer because translation failed.
+        if original.strip():
+            if result.get('topic') in {'crop_guide', 'crop_guide_followup'}:
+                return finish(original, 'source_answer_fallback', reason,
+                              answer_language='en-IN', **details)
+            return finish(original, status, reason, **details)
+        return finish(unavailable, status, reason, **details)
     if _setting('KISAANAI_HINDI_TRANSLATION', '1').lower() in {'0', 'false', 'no'}:
-        return finish(unavailable, 'disabled')
+        return failed_translation('disabled', 'disabled')
     if TOKEN.search(original):
-        return finish(unavailable, 'fallback', 'reserved_token_in_source')
+        return failed_translation('reserved_token_in_source')
     protected, values = _protect(original, _protected_names(result))
     segments = list(NON_HINDI.finditer(protected))
     # Formula-only passages need no model; keep approved scientific notation.
@@ -186,7 +194,7 @@ def translate_answer(result: dict) -> dict:
         return finish(original, 'not_needed')
     hf_token = _setting('HF_TOKEN')
     if not hf_token:
-        return finish(unavailable, 'not_configured', 'HF_TOKEN')
+        return failed_translation('HF_TOKEN', 'not_configured')
     replacements = []
     failures = []
     for match in pending:
@@ -212,12 +220,13 @@ def translate_answer(result: dict) -> dict:
     for start, end, translated_text in reversed(replacements):
         output = output[:start] + translated_text + output[end:]
     if Counter(TOKEN.findall(output)) != Counter(values.keys()):
-        return finish(unavailable, 'fallback', 'protected_values_lost')
+        return failed_translation('protected_values_lost')
     for token, value in values.items():
         output = output.replace(token, value)
     if failures:
         # Do not show a mixed-language answer. Keep translation all-or-nothing at
         # the user-visible answer level while retaining failure details in metadata.
-        return finish(unavailable, 'fallback', 'fragment_translation_failed',
-                      failed_fragments=len(failures), failure_reason=failures[0])
+        return failed_translation(failures[0],
+                                  failure_scope='fragment',
+                                  failed_fragments=len(failures))
     return finish(output, 'translated', translated_fragments=len(pending))

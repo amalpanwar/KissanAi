@@ -75,7 +75,7 @@ def crop_guide_suggestions():
             question = (
                 f"{display_name} की खेती कैसे करें?"
                 if kind == "cultivation"
-                else f"{display_name} में कीट और रोग से बचाव कैसे करें?"
+                else f"{display_name} में कीटों की रोकथाम के लिए कौन सा कीटनाशक उपयोग करें?"
             )
             suggestions.append({
                 "question": question,
@@ -85,6 +85,10 @@ def crop_guide_suggestions():
 
 
 SUGGESTIONS.extend(commodity_price_suggestions())
+SUGGESTIONS.append({
+    "question": "गेहूं में दीमक की रोकथाम के लिए कौन सा कीटनाशक उपयोग करें?",
+    "keywords": "Wheat wheat gehu gehun गेहूं diimak termite termites pest pesticide insecticide कीटनाशक दीमक",
+})
 SUGGESTIONS.extend(crop_guide_suggestions())
 
 def consume_submission(value, state):
