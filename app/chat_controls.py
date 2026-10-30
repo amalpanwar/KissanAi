@@ -85,6 +85,10 @@ def crop_guide_suggestions():
 
 
 SUGGESTIONS.extend(commodity_price_suggestions())
+SUGGESTIONS.append({
+    "question": "गेहूं में दीमक की रोकथाम के लिए कौन सा कीटनाशक उपयोग करें?",
+    "keywords": "Wheat wheat gehu gehun गेहूं diimak termite termites pest pesticide insecticide कीटनाशक दीमक",
+})
 SUGGESTIONS.extend(crop_guide_suggestions())
 
 def consume_submission(value, state):
