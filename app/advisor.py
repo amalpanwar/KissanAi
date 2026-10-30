@@ -452,16 +452,43 @@ class RAGAdvisor:
         )
 
     def _answer_crop_guide_from_sources(self, question: str) -> dict | None:
-        """Generate a query-specific answer from crop-guide passages, then expose source pages."""
-        passages = build_crop_production_source_chunks(question, max_chunks=8)
-        if not passages:
+        """Retrieve crop-specific guide passages, rerank them, and draft a cited answer."""
+        from app.crop_guide import CROP_ALIASES, _resolve_crop_name
+
+        crop = _resolve_crop_name(question)
+        candidates = build_crop_production_source_chunks(question, max_chunks=80)
+        if not candidates:
             return None
 
+        query_tokens = set(re.findall(r"[a-z\u0900-\u097f]+", question.lower()))
+        if crop:
+            query_tokens.update(re.findall(r"[a-z\u0900-\u097f]+", crop.lower()))
+            for alias in CROP_ALIASES.get(crop, []):
+                query_tokens.update(re.findall(r"[a-z\u0900-\u097f]+", str(alias).lower()))
+
+        # Overview requests need coverage across the cultivation cycle, even when
+        # the farmer's Hindi wording has little lexical overlap with English PDF text.
+        overview_terms = (
+            "climate season variety field preparation plough soil manure compost FYM "
+            "seed sowing planting fertilizer nutrient nitrogen phosphorus potassium "
+            "irrigation water weed pest disease harvest thresh"
+        ).split()
+        ranked = []
+        for order, passage in enumerate(candidates):
+            text = str(passage.get("text", ""))
+            passage_tokens = set(re.findall(r"[a-z\u0900-\u097f]+", text.lower()))
+            overlap = len(query_tokens & passage_tokens)
+            phase_coverage = sum(1 for term in overview_terms if term in passage_tokens)
+            score = overlap * 3.0 + phase_coverage * 0.25
+            ranked.append((score, -order, {**passage, "score": score}))
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        passages = [item[2] for item in ranked[:8]]
         evidence = "\n\n".join(
             f"[PDF page {item.get('page')}] {str(item.get('text', '')).strip()}"
             for item in passages
             if str(item.get("text", "")).strip()
         )
+
         generator = self.generator
         if generator is None:
             try:
@@ -495,8 +522,7 @@ class RAGAdvisor:
                 answer = ""
 
         if not answer:
-            # Keep an answer available when generation is unavailable: quote the
-            # retrieved evidence directly, with its original PDF page citations.
+            # Keep the response grounded if answer generation is unavailable.
             answer = "\n\n".join(
                 f"{str(item.get('text', '')).strip()} [PDF page {item.get('page')}]"
                 for item in passages[:5]
