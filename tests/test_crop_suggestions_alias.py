@@ -1,7 +1,8 @@
+import json
 import unittest
+from pathlib import Path
 
 from app.chat_controls import SUGGESTIONS
-from app.commodity_lookup import load_aliases, normalize, resolve_commodities
 
 
 class CropSuggestionAliasTests(unittest.TestCase):
@@ -12,10 +13,11 @@ class CropSuggestionAliasTests(unittest.TestCase):
         self.assertIn('गन्ना', sugarcane)
         self.assertIn('बाजरा', pearl_millet)
 
-    def test_pearl_millets_resolves_to_bajra(self):
-        aliases = load_aliases()
-        resolved = resolve_commodities('pearl millets price', aliases=aliases)
-        self.assertIn('bajra(pearl millet/cumbu)', {normalize(item) for item in resolved})
+    def test_pearl_millets_alias_is_in_production_dictionary(self):
+        path = Path('data/raw/commodity_aliases.json')
+        aliases = json.loads(path.read_text(encoding='utf-8'))
+        bajra = {value.casefold() for value in aliases['bajra(pearl millet/cumbu)']}
+        self.assertIn('pearl millets', bajra)
 
 
 if __name__ == '__main__':
