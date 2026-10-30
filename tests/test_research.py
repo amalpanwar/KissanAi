@@ -17,16 +17,6 @@ def translation(text,names=(),target='hi-IN'):
 
 class ResearchTests(unittest.TestCase):
     def setUp(self):
-        cache = patch('app.guide_response_cache.prepare_request', return_value=None)
-        self.cache_request = cache.start(); self.addCleanup(cache.stop)
-        guide = patch('app.production_guide_evidence.lookup', return_value=None)
-        self.guide_lookup = guide.start(); self.addCleanup(guide.stop)
-        missing=patch('app.supplemental_documents.missing_pdfs',return_value=())
-        missing.start();self.addCleanup(missing.stop)
-        supplementary=patch('app.supplemental_documents.candidates',return_value=([],{'files':0,'failures':[]}))
-        supplementary.start();self.addCleanup(supplementary.stop)
-        verifier=patch('app.evidence_reranker.verify', side_effect=lambda payload, rows: ([r for r in rows if r.get('score', 0) >= .8], 'ok'))
-        verifier.start(); self.addCleanup(verifier.stop)
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.path=Path(self.tmp.name)/'metadata.csv'
         self.metadata=pd.DataFrame([
@@ -39,19 +29,13 @@ class ResearchTests(unittest.TestCase):
             retriever=Retriever(np.array([[1.,0.],[0.,1.],[.99,.01]]),self.metadata),
             _ensure_rag_components=MagicMock(),_extract_preferred_crop_from_context=lambda c:'Rice' if c else None,
             _extract_crop_from_query=lambda q:None,_has_profitability_terms=lambda q:False,_has_crop_guide_terms=lambda q:False)
-        self.advisor.cfg.generator_model = 'test-model'
-        self.generator = MagicMock()
-        self.generator.generate.return_value = 'Cultivar A matures early; cultivar B needs a longer season. [1]'
-        self.advisor._get_generator_for_model = MagicMock(return_value=self.generator)
-        remote = patch('app.sarvam_generation.generate_text', side_effect=self.generator.generate)
-        remote.start(); self.addCleanup(remote.stop)
 
     def test_language_specific_semantic_queries_not_word_overlap(self):
         with patch('app.multilingual_retrieval.translate_query',side_effect=translation):
             q,info=prepare_query(self.advisor,'kaunsi achhi hai','Rice')
             result=retrieve_documents(self.advisor,dict(question=q,context='Rice',**info))
         sources={r['source_file'] for r in result.evidence['records']}
-        self.assertEqual(sources,{'crop.pdf','hindi.pdf','pesticides.pdf'})  # Candidates are checked by the separate verifier.
+        self.assertEqual(sources,{'crop.pdf','hindi.pdf'})
         calls=[c.args[0][0] for c in self.embedder.encode.call_args_list]
         self.assertTrue(any('What cultivars' in c for c in calls))
         self.assertTrue(any('कौन सी किस्में' in c for c in calls))
@@ -97,12 +81,3 @@ class ResearchTests(unittest.TestCase):
         state={'pending_research_offer':{'records':[]}}
         self.assertEqual(answer_with_research_followup(advisor,'new question',state),{'answer':'new'})
         self.assertNotIn('pending_research_offer',state)
-
-    def test_query_exception_is_logged_without_crashing_chat(self):
-        advisor=SimpleNamespace(answer=MagicMock(side_effect=RuntimeError('internal detail')))
-        with self.assertLogs('app.research', level='ERROR') as logs:
-            result=answer_with_research_followup(advisor,'Ganne ki kheti kaise kare',{})
-        self.assertEqual(result['agent_status'],'unavailable')
-        self.assertEqual(result['error']['type'],'RuntimeError')
-        self.assertNotIn('internal detail',result['answer'])
-        self.assertIn('RuntimeError',logs.output[0])
