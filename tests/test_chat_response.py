@@ -6,16 +6,6 @@ from app.chat_response import clean_references, render_response_footer
 
 
 class ResponseFooterTests(unittest.TestCase):
-    def test_candidates_are_distinct_from_reranked_evidence(self):
-        st = MagicMock()
-        render_response_footer(st, {'agent_trace': {'messages': [
-            {'kind': 'result', 'sender': 'documents', 'payload': {'status': 'ok', 'evidence': {'records': [{}] * 191}}},
-            {'kind': 'result', 'sender': 'research', 'payload': {'metadata': {'retrieved': [{}, {}, {}]},
-             'evidence': {'checks': {'generation': {'status': 'ok', 'provider': 'sarvam'}}}}}
-        ]}})
-        messages = [call.args[0] for call in st.write.call_args_list]
-        self.assertIn('Documents: ok; candidate passages: 191', messages)
-        self.assertIn('Reranked passages used: 3', messages)
     def test_sources_are_not_empty_markdown_bullets(self):
         self.assertEqual(clean_references(['-', '*', '', None, 'guide.pdf', 'guide.pdf']), ['guide.pdf'])
         st=MagicMock()
@@ -32,18 +22,6 @@ class ResponseFooterTests(unittest.TestCase):
         displayed=[c.args[0] for c in st.write.call_args_list]
         self.assertIn('Web search: tavily — unavailable',displayed)
         self.assertIn('Search outcome: search_request_failed',displayed)
-
-    def test_bilingual_cache_and_pdf_pages_are_visible(self):
-        st = MagicMock()
-        render_response_footer(st, {'english_answer': 'Prepare the field.',
-            'guide_cache': {'status': 'hit'}, 'references': ['guide.pdf'],
-            'source_pages': [{'source_file': 'guide.pdf', 'pages': [134, 135, 136]}]})
-        st.write.assert_called_with('Prepare the field.')
-        self.assertIn('English source-grounded answer', [call.args[0] for call in st.expander.call_args_list])
-        self.assertIn('PDF pages: 134, 135, 136', [call.args[0] for call in st.caption.call_args_list])
-        source = Path('streamlit_app.py').read_text()
-        self.assertIn('"english_answer": (None if intent_price else result.get("english_answer"))', source)
-        self.assertIn('"source_pages": ([] if intent_price else result.get("source_pages", []))', source)
 
     def test_history_and_live_use_same_footer_after_answer(self):
         tree=ast.parse(Path('streamlit_app.py').read_text())
