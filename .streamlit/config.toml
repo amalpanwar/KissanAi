@@ -1,9 +1,5 @@
 [server]
 headless = true
-# Production reloads through deployment; avoid inspecting torch.classes.
-fileWatcherType = "none"
-# Retain an existing session through brief WebSocket disconnects (seconds).
-disconnectedSessionTTL = 600
 port = 8501
 enableCORS = false
 enableXsrfProtection = false
