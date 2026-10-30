@@ -155,7 +155,7 @@ def _translate(text: str, hf_token: str = '') -> str:
 
 
 def translate_answer(result: dict) -> dict:
-    """Translate English prose locally; fall back atomically on any failure.
+    """Translate English prose locally and retain independently translated fragments.
 
     Translation uses the locally loaded IndicTrans2 200M checkpoint. Answer
     fragments are not sent to a translation API. Numeric/formula checks do not
@@ -192,7 +192,7 @@ def translate_answer(result: dict) -> dict:
         segment = match.group()
         # Keep Markdown list/header markers and surrounding whitespace local.
         prefix = re.match(r'^[\s#>*+\-]*', segment).group()
-        suffix = re.search(r'\s*, segment).group()
+        suffix = re.search(r'\s*$', segment).group()
         core = segment[len(prefix):len(segment) - len(suffix) if suffix else None]
         translated_chunks = []
         for chunk in _chunks(core):
@@ -208,34 +208,8 @@ def translate_answer(result: dict) -> dict:
             prefix + ' '.join(translated_chunks) + suffix,
         ))
     output = protected
-    for start, end, text in reversed(replacements):
-        output = output[:start] + text + output[end:]
-    if Counter(TOKEN.findall(output)) != Counter(values.keys()):
-        return finish(original, 'fallback', 'protected_values_lost')
-    for token, value in values.items():
-        output = output.replace(token, value)
-    if failures:
-        return finish(output, 'partial', 'fragment_translation_failed',
-                      translated_fragments=max(0, len(pending) - len(failures)),
-                      failed_fragments=len(failures), failure_reason=failures[0])
-    return finish(output, 'translated', translated_fragments=len(pending)), segment).group()
-        core = segment[len(prefix):len(segment) - len(suffix) if suffix else None]
-        translated_chunks = []
-        for chunk in _chunks(core):
-            try:
-                translated_chunks.append(_translate(chunk, hf_token))
-            except Exception as exc:
-                translated_chunks.append(chunk)
-                reason = (str(exc) if isinstance(exc, TranslationValidationError)
-                          else type(exc).__name__)
-                failures.append(reason)
-        replacements.append((
-            match.start(), match.end(),
-            prefix + ' '.join(translated_chunks) + suffix,
-        ))
-    output = protected
-    for start, end, text in reversed(replacements):
-        output = output[:start] + text + output[end:]
+    for start, end, translated_text in reversed(replacements):
+        output = output[:start] + translated_text + output[end:]
     if Counter(TOKEN.findall(output)) != Counter(values.keys()):
         return finish(original, 'fallback', 'protected_values_lost')
     for token, value in values.items():
