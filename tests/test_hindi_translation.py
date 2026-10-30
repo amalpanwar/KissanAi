@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from app.hindi_translation import translate_answer, _translate, TOKEN, _chunks
+from app.hindi_translation import translate_answer, _translate, TOKEN, _chunks, TranslationValidationError
 
 
 class TranslationTests(unittest.TestCase):
@@ -40,8 +40,8 @@ class TranslationTests(unittest.TestCase):
 
     def test_bad_model_output_falls_back_without_losing_answer(self):
         source = {'answer': 'Apply 40 kg and 20 kg fertiliser.'}
-        for output in ['80 किग्रा डालें', 'Apply fertiliser', '']:
-            with self.subTest(output=output), patch('app.hindi_translation._translate', return_value=output):
+        for reason in ['protected_values_changed', 'untranslated_text_or_new_numbers', 'empty_response']:
+            with self.subTest(reason=reason), patch('app.hindi_translation._translate', side_effect=TranslationValidationError(reason)):
                 result = translate_answer(source)
                 self.assertEqual(result['answer'], source['answer'])
                 self.assertEqual(result['translation']['status'], 'fallback')
