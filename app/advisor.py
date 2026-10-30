@@ -456,7 +456,16 @@ class RAGAdvisor:
         from app.crop_guide import CROP_ALIASES, _resolve_crop_name
 
         crop = _resolve_crop_name(question)
-        candidates = build_crop_production_source_chunks(question, max_chunks=80)
+        try:
+            candidates = build_crop_production_source_chunks(question, max_chunks=80)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Failed to read crop production guide passages")
+            return {
+                "answer": "इस फसल के लिए Crop Production Guide के अंश अभी उपलब्ध नहीं हैं। कृपया बाद में फिर प्रयास करें।",
+                "references": [], "retrieved": [], "topic": "crop_guide",
+                "status": "unavailable",
+            }
         if not candidates:
             return None
 
