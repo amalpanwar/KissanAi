@@ -453,7 +453,7 @@ class RAGAdvisor:
 
     def _answer_crop_guide_from_sources(self, question: str) -> dict | None:
         """Retrieve crop-specific guide passages, rerank them, and draft a cited answer."""
-        from app.crop_guide import CROP_ALIASES, _resolve_crop_name
+        from app.crop_guide import CROP_ALIASES, _crop_guide_query_intents, _resolve_crop_name
 
         crop = _resolve_crop_name(question)
         try:
@@ -511,6 +511,9 @@ class RAGAdvisor:
 
         answer = ""
         generation_status = "source_excerpt_fallback"
+        generation_reason = "generator_unavailable" if generator is None else "no_candidate"
+        query_intents = _crop_guide_query_intents(question)
+        broad_overview = not query_intents
         if generator is not None:
             prompt = (
                 "You are KisaanAI, an agricultural assistant. Answer the farmer's question using only the "
@@ -530,19 +533,45 @@ class RAGAdvisor:
                 uncited_numbers = re.sub(r"\[PDF page\s+\d+\]", "", candidate, flags=re.I)
                 answer_values = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", uncited_numbers))
                 is_english = not re.search(r"[\u0900-\u097f]", candidate)
+                citation_count = len(re.findall(r"\[PDF page\s+\d+\]", candidate, re.I))
+                word_count = len(re.findall(r"\b[\w'-]+\b", candidate))
+                complete_enough = (
+                    citation_count >= 4 and word_count >= 70 and len(cited_pages) >= 2
+                    if broad_overview else word_count >= 20 and citation_count >= 1
+                )
                 if (candidate and is_english and len(candidate) <= 6000 and cited_pages
                         and cited_pages.issubset(allowed_pages)
-                        and answer_values.issubset(source_values)):
+                        and answer_values.issubset(source_values) and complete_enough):
                     answer = candidate
                     generation_status = "generated"
-            except Exception:
+                    generation_reason = None
+                elif candidate:
+                    generation_reason = "insufficient_cited_coverage"
+            except Exception as exc:
                 answer = ""
+                generation_reason = type(exc).__name__
 
         if not answer:
             # Keep the response grounded if answer generation is unavailable.
+            # Broad questions use one passage per guide topic first, avoiding a
+            # fallback made of several near-duplicate lines from one section.
+            fallback_passages = []
+            if broad_overview:
+                seen_topics = set()
+                for item in passages:
+                    topic = str(item.get("topic", "other"))
+                    if topic not in seen_topics:
+                        fallback_passages.append(item)
+                        seen_topics.add(topic)
+                    if len(fallback_passages) >= 5:
+                        break
+            fallback_passages.extend(
+                item for item in passages
+                if item not in fallback_passages
+            )
             answer = "\n\n".join(
                 f"{str(item.get('text', '')).strip()} [PDF page {item.get('page')}]"
-                for item in passages[:5]
+                for item in fallback_passages[:5]
                 if str(item.get("text", "")).strip()
             )
 
@@ -561,6 +590,8 @@ class RAGAdvisor:
                 "provider": "local",
                 "model": getattr(generator, "model_name", self.cfg.generator_model) if generator else None,
                 "status": generation_status,
+                "reason": generation_reason,
+                "broad_overview": broad_overview,
                 "evidence_passages": len(passages),
             },
         }
