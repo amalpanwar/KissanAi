@@ -1,7 +1,7 @@
 import re
 import unittest
 from unittest.mock import patch, MagicMock
-from app.crop_guide import _summarize_block, _build_guide_points_for_crop
+from app.crop_guide import (\n    _summarize_block, _build_guide_points_for_crop, _extract_blocks,\n    build_crop_production_source_chunks,\n)
 from app.translation_status import render_translation_status
 
 SOURCE = ('If soil test is not available follow blanket recommendation of 80:40:40 NPK kg/ha. '
@@ -31,6 +31,32 @@ class CropHindiTests(unittest.TestCase):
              patch('app.crop_guide._append_review_queue'):
             _, entries, _ = _build_guide_points_for_crop('Wheat')
         self.assertEqual(entries[0]['phase'], 'sowing')
+
+    def test_inline_pdf_headings_are_split_into_separate_passages(self):
+        text = (
+            "123 5CROP MANAGEMENT 1. FIELD PREPARATION Plough twice with an iron plough. "
+            "2. APPLICATION OF FYM OR COMPOST Spread 12.5 t/ha of FYM and incorporate it."
+        )
+        blocks = _extract_blocks(text)
+        self.assertTrue(any("FIELD PREPARATION" in heading and "Plough twice" in body
+                            for heading, body in blocks))
+        self.assertTrue(any("APPLICATION OF FYM OR COMPOST" in heading and "12.5 t/ha" in body
+                            for heading, body in blocks))
+
+    def test_retrieval_filters_passages_by_question_intent(self):
+        page = (
+            "1. APPLICATION OF FERTILIZERS Apply 80:40:40 NPK kg/ha before sowing "
+            "and incorporate fertilizer in the sowing line. "
+            "2. WATER MANAGEMENT The crop requires irrigation at the important stages "
+            "depending on soil moisture and rainfall."
+        )
+        with patch('app.crop_guide._resolve_crop_name', return_value='Wheat'), \
+             patch('app.crop_guide._load_pages', return_value=[page]), \
+             patch('app.crop_guide._section_page_range', return_value=(0, 0)):
+            passages = build_crop_production_source_chunks('wheat fertilizer recommendation', max_chunks=8)
+        self.assertTrue(passages)
+        self.assertTrue(all(item['topic'] == 'nutrition' for item in passages))
+        self.assertTrue(any('80:40:40' in item['text'] for item in passages))
 
     def test_fallback_reason_survives_history_roundtrip(self):
         import json
