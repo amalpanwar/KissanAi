@@ -1718,12 +1718,12 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         heading = str(passage.get("heading", "")).strip()
         body = source
         if heading:
-            body = re.sub(r"^" + re.escape(heading) + r"\\s*:?\\s*", "", body, count=1, flags=re.IGNORECASE)
+            body = re.sub(r"^" + re.escape(heading) + r"\s*:?\s*", "", body, count=1, flags=re.IGNORECASE)
         body = body.strip()
         phase = _assign_phase(heading) or "early_growth"
         deterministic = _summarize_block(crop, heading, body) if heading and body else ""
 
-        source_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", body))
+        source_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", body))
         rendered_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", deterministic))
         source_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", body)}
         rendered_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", deterministic)}
@@ -1761,7 +1761,7 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
     if not lines:
         return "", {"deterministic_passages": 0, "translation_passages": 0}
 
-    return "\\n".join(lines).strip(), {
+    return "\n".join(lines).strip(), {
         "deterministic_passages": deterministic_count,
         "translation_passages": len(translated),
     }
