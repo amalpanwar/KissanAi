@@ -488,7 +488,10 @@ class RAGAdvisor:
             passage_tokens = set(re.findall(r"[a-z\u0900-\u097f]+", text.lower()))
             overlap = len(query_tokens & passage_tokens)
             phase_coverage = sum(1 for term in overview_terms if term in passage_tokens)
-            score = overlap * 3.0 + phase_coverage * 0.25
+            intent_score = float(passage.get("score", 0.0) or 0.0)
+            score = intent_score * 2.0 + overlap * 0.75 + phase_coverage * 0.15
+            if passage.get("ocr_noise"):
+                score -= 5.0
             ranked.append((score, -order, {**passage, "score": score}))
         ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
         passages = [item[2] for item in ranked[:8]]

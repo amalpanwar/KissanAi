@@ -10,9 +10,10 @@ def render_translation_status(st, info):
         'disabled': 'हिंदी अनुवाद बंद है। मूल उत्तर दिखाया गया है।',
         'fallback': 'हिंदी अनुवाद पूरा नहीं हुआ; मूल उत्तर दिखाया गया है।',
         'source_answer_fallback': 'हिंदी अनुवाद पूरा नहीं हुआ; स्रोत-अंशों पर आधारित मूल उत्तर दिखाया गया है।',
+        'partial': 'कुछ अंशों का हिंदी अनुवाद नहीं हुआ; वे अंश मूल भाषा में दिखाए गए हैं।',
     }
     if status in captions:
         st.caption(captions[status])
     with st.expander('हिंदी अनुवाद की स्थिति'):
         # Show only non-sensitive, stable fields, never service bodies or credentials.
-        st.json({k: info[k] for k in ('provider', 'model', 'version', 'status', 'reason', 'failed_fragments', 'failure_reason') if k in info})
+        st.json({k: info[k] for k in ('provider', 'model', 'version', 'status', 'reason', 'failed_fragments', 'failure_reason', 'untranslated_fragments') if k in info})

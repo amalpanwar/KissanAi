@@ -1,7 +1,6 @@
 """Final-answer English-to-Hindi translation with the local IndicTrans2 model."""
 from __future__ import annotations
 
-from collections import Counter
 from functools import lru_cache
 import os
 import re
@@ -14,12 +13,12 @@ class TranslationValidationError(ValueError):
     pass
 
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
-FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
-UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C)(?:\s*/\s*(?:ha|hectare|acre|L|litre|liter))?'
+FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P\s*[2₂]\s*O\s*[5₅]|K\s*[2₂]\s*O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
+UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C|quintals?)(?:\s*/\s*(?:kg|g|mg|ml|mL|L|litres?|liters?|ha|hectare|acre))?'
 NUMBER = r'\d+(?:[.,:/–-]\d+)*'
 PROTECTED = re.compile(
     r'\[PDF page \d+\]|```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
-    + NUMBER + r'(?:\s*' + UNIT + r'\b)?(?:\s*' + FORMULA + r')?|'
+    + NUMBER + r'(?:\s*' + UNIT + r'(?![A-Za-z]))?(?:\s*' + FORMULA + r')?(?:\s*' + UNIT + r'(?![A-Za-z]))?|'
     + FORMULA + r'|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
 )
 NON_HINDI = re.compile(r'[^\u0900-\u097f\n]+')
@@ -102,6 +101,12 @@ def _chunks(text: str, limit: int = 1800) -> list[str]:
     return chunks
 
 
+def _protected_pattern(names: list[str] | None = None) -> re.Pattern:
+    """Keep technical entities and structure out of the MT model input."""
+    name_patterns = [r'(?<!\w)' + re.escape(name) + r'(?!\w)'
+                     for name in (names or []) if name]
+    structural = r'(?m:^[ \t]*(?:#{1,6}[ \t]*|[-+*][ \t]+|\d+[.)][ \t]+))|\n+|\[(?:PDF\s+)?page\s+\d+\]|\[\d+\]'
+    return re.compile('|'.join(name_patterns + [PROTECTED.pattern, structural]), re.IGNORECASE)
 @lru_cache(maxsize=1)
 def _load_model(hf_token: str):
     """Load the translation model once per process; inference stays on-host."""
@@ -155,11 +160,10 @@ def _translate(text: str, hf_token: str = '') -> str:
 
 
 def translate_answer(result: dict) -> dict:
-    """Translate English prose locally and retain independently translated fragments.
+    """Translate prose while keeping values, names, citations, and formatting external.
 
-    Translation uses the locally loaded IndicTrans2 200M checkpoint. Answer
-    fragments are not sent to a translation API. Numeric/formula checks do not
-    establish semantic correctness; translation still needs evaluation.
+    Failures are isolated per prose fragment. Successfully translated text remains
+    Hindi; an untranslated fragment stays visible and is disclosed in metadata.
     """
     existing = result.get('translation')
     if (isinstance(existing, dict) and existing.get('provider') == 'local'
@@ -175,7 +179,6 @@ def translate_answer(result: dict) -> dict:
         return {**result, 'answer': answer, 'translation': metadata}
     unavailable = 'इस उत्तर का पूरा हिंदी अनुवाद अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।'
     def failed_translation(reason, status='fallback', **details):
-        # Never discard a usable source-grounded answer because translation failed.
         if original.strip():
             if result.get('topic') in {'crop_guide', 'crop_guide_followup'}:
                 return finish(original, 'source_answer_fallback', reason,
@@ -186,47 +189,69 @@ def translate_answer(result: dict) -> dict:
         return failed_translation('disabled', 'disabled')
     if TOKEN.search(original):
         return failed_translation('reserved_token_in_source')
-    protected, values = _protect(original, _protected_names(result))
-    segments = list(NON_HINDI.finditer(protected))
-    # Formula-only passages need no model; keep approved scientific notation.
-    pending = [m for m in segments if re.search(r'[A-Za-z]', TOKEN.sub('', m.group()))]
+
+    pattern = _protected_pattern(_protected_names(result))
+    spans = list(pattern.finditer(original))
+    prose = []
+    cursor = 0
+    for match in spans:
+        if match.start() > cursor:
+            prose.append((cursor, match.start(), original[cursor:match.start()]))
+        cursor = match.end()
+    if cursor < len(original):
+        prose.append((cursor, len(original), original[cursor:]))
+    pending = [(start, end, fragment) for start, end, fragment in prose
+               if re.search(r'[A-Za-z]', fragment)]
     if not pending:
         return finish(original, 'not_needed')
+
     hf_token = _setting('HF_TOKEN')
     if not hf_token:
         return failed_translation('HF_TOKEN', 'not_configured')
-    replacements = []
-    failures = []
-    for match in pending:
-        segment = match.group()
-        # Keep Markdown list/header markers and surrounding whitespace local.
-        prefix = re.match(r'^[\s#>*+\-]*', segment).group()
-        suffix = re.search(r'\s*$', segment).group()
-        core = segment[len(prefix):len(segment) - len(suffix) if suffix else None]
+
+    output_parts = []
+    failed_fragments = []
+    translated_count = 0
+    cursor = 0
+    for start, end, fragment in pending:
+        output_parts.append(original[cursor:start])
+        leading = fragment[:len(fragment) - len(fragment.lstrip())]
+        trailing = fragment[len(fragment.rstrip()):]
+        core = fragment[len(leading):len(fragment) - len(trailing) if trailing else None]
         translated_chunks = []
         for chunk in _chunks(core):
+            if not re.search(r'[A-Za-z]', chunk):
+                translated_chunks.append(chunk)
+                continue
             try:
                 translated_chunks.append(_translate(chunk, hf_token))
+                translated_count += 1
             except Exception as exc:
                 translated_chunks.append(chunk)
                 reason = (str(exc) if isinstance(exc, TranslationValidationError)
                           else type(exc).__name__)
-                failures.append(reason)
-        replacements.append((
-            match.start(), match.end(),
-            prefix + ' '.join(translated_chunks) + suffix,
-        ))
-    output = protected
-    for start, end, translated_text in reversed(replacements):
-        output = output[:start] + translated_text + output[end:]
-    if Counter(TOKEN.findall(output)) != Counter(values.keys()):
-        return failed_translation('protected_values_lost')
-    for token, value in values.items():
-        output = output.replace(token, value)
-    if failures:
-        # Do not show a mixed-language answer. Keep translation all-or-nothing at
-        # the user-visible answer level while retaining failure details in metadata.
-        return failed_translation(failures[0],
-                                  failure_scope='fragment',
-                                  failed_fragments=len(failures))
-    return finish(output, 'translated', translated_fragments=len(pending))
+                failed_fragments.append({'text': chunk, 'reason': reason})
+        output_parts.append(leading + ' '.join(translated_chunks) + trailing)
+        cursor = end
+    output_parts.append(original[cursor:])
+    output = ''.join(output_parts)
+    if failed_fragments:
+        status = 'partial' if translated_count else (
+            'source_answer_fallback' if result.get('topic') in {'crop_guide', 'crop_guide_followup'} else 'fallback'
+        )
+        metadata = {
+            **info, 'status': status,
+            'reason': failed_fragments[0]['reason'],
+            'failure_reason': failed_fragments[0]['reason'],
+            'failed_fragments': len(failed_fragments),
+            'untranslated_fragments': [
+                {'text': item['text'][:500], 'reason': item['reason']}
+                for item in failed_fragments[:10]
+            ],
+        }
+        if status == 'source_answer_fallback':
+            metadata['answer_language'] = 'en-IN'
+        elif status == 'partial':
+            metadata['answer_language'] = 'mixed'
+        return {**result, 'answer': output, 'translation': metadata}
+    return finish(output, 'translated', translated_fragments=translated_count)
