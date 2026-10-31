@@ -18,7 +18,7 @@ UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|he
 NUMBER = r'\d+(?:[.,:/–-]\d+)*'
 PROTECTED = re.compile(
     r'\[PDF page \d+\]|```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
-    + NUMBER + r'(?:\s*' + UNIT + r'\b)?(?:\s*' + FORMULA + r')?|'
+    + NUMBER + r'(?:\s*' + UNIT + r'(?![A-Za-z]))?(?:\s*' + FORMULA + r')?(?:\s*' + UNIT + r'(?![A-Za-z]))?|'
     + FORMULA + r'|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
 )
 NON_HINDI = re.compile(r'[^\u0900-\u097f\n]+')
