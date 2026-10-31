@@ -218,21 +218,20 @@ def translate_answer(result: dict) -> dict:
         leading = fragment[:len(fragment) - len(fragment.lstrip())]
         trailing = fragment[len(fragment.rstrip()):]
         core = fragment[len(leading):len(fragment) - len(trailing) if trailing else None]
-        translated_parts = [leading]
+        translated_chunks = []
         for chunk in _chunks(core):
             if not re.search(r'[A-Za-z]', chunk):
-                translated_parts.append(chunk)
+                translated_chunks.append(chunk)
                 continue
             try:
-                translated_parts.append(_translate(chunk, hf_token))
+                translated_chunks.append(_translate(chunk, hf_token))
                 translated_count += 1
             except Exception as exc:
                 translated_parts.append(chunk)
                 reason = (str(exc) if isinstance(exc, TranslationValidationError)
                           else type(exc).__name__)
                 failed_fragments.append({'text': chunk, 'reason': reason})
-        translated_parts.append(trailing)
-        output_parts.append(''.join(translated_parts))
+        output_parts.append(leading + ' '.join(translated_chunks) + trailing)
         cursor = end
     output_parts.append(original[cursor:])
     output = ''.join(output_parts)
