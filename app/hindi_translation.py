@@ -13,8 +13,8 @@ class TranslationValidationError(ValueError):
     pass
 
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
-FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P2O5|K2O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
-UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C)(?:\s*/\s*(?:ha|hectare|acre|L|litre|liter))?'
+FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P\s*[2₂]\s*O\s*[5₅]|K\s*[2₂]\s*O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
+UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C|quintals?)(?:\s*/\s*(?:kg|g|mg|ml|mL|L|litres?|liters?|ha|hectare|acre))?'
 NUMBER = r'\d+(?:[.,:/–-]\d+)*'
 PROTECTED = re.compile(
     r'\[PDF page \d+\]|```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
