@@ -453,7 +453,8 @@ class RAGAdvisor:
 
     def _answer_crop_guide_from_sources(self, question: str) -> dict | None:
         """Retrieve crop-specific guide passages, rerank them, and draft a cited answer."""
-        from app.crop_guide import CROP_ALIASES, _crop_guide_query_intents, _resolve_crop_name
+        from app.crop_guide import (CROP_ALIASES, _crop_guide_query_intents, _resolve_crop_name,
+                                build_hybrid_crop_guide_answer)
 
         crop = _resolve_crop_name(question)
         try:
@@ -495,6 +496,28 @@ class RAGAdvisor:
             ranked.append((score, -order, {**passage, "score": score}))
         ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
         passages = [item[2] for item in ranked[:8]]
+        if crop:
+            hybrid_answer, hybrid_stats = build_hybrid_crop_guide_answer(crop, passages)
+            if hybrid_answer:
+                references = list(dict.fromkeys(
+                    str(item.get("source_file"))
+                    for item in passages
+                    if item.get("source_file")
+                ))
+                return {
+                    "answer": hybrid_answer,
+                    "references": references,
+                    "retrieved": passages,
+                    "english_source_chunks": passages,
+                    "topic": "crop_guide",
+                    "answer_generation": {
+                        "provider": "crop_guide_hybrid",
+                        "model": "deterministic_hindi+IndicTrans2",
+                        "status": "hybrid" if hybrid_stats["translation_passages"] else "deterministic",
+                        **hybrid_stats,
+                        "evidence_passages": len(passages),
+                    },
+                }
         evidence = "\n\n".join(
             f"[PDF page {item.get('page')}] {str(item.get('text', '')).strip()}"
             for item in passages
