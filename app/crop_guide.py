@@ -544,9 +544,29 @@ def _should_skip_heading(crop: str, heading: str) -> bool:
 
 
 def _extract_blocks(section_text: str) -> list[tuple[str, str]]:
+    """Split PDF text at numbered guide headings, including inline OCR layouts."""
     if not section_text:
         return []
-    lines = [ln.strip() for ln in section_text.splitlines()]
+    lines = []
+    for raw_line in section_text.splitlines():
+        line = " ".join(raw_line.split())
+        if not line:
+            continue
+        # PDF text extraction can collapse page labels and several headings onto
+        # one line, e.g. "123 5CROP MANAGEMENT 1. FIELD PREPARATION Plough...".
+        line = re.sub(r"^\d{1,4}\s+(?=\d?[A-Z])", "", line)
+        line = re.sub(r"^\d(?=[A-Z]{3,}\b)", "", line)
+        pieces = re.split(r"(?<=\S)\s+(?=\d{1,2}\.\s+[A-Z])", line)
+        for piece in pieces:
+            piece = piece.strip()
+            heading_body = re.match(
+                r"^(\d{1,2}\.\s+[A-Z][A-Z /()\-]{2,}?)(?=\s+[A-Z][a-z])",
+                piece,
+            )
+            if heading_body:
+                lines.extend([heading_body.group(1).strip(), piece[heading_body.end():].strip()])
+            else:
+                lines.append(piece)
     blocks: list[tuple[str, list[str]]] = []
     current_heading = ""
     current_lines: list[str] = []
@@ -571,7 +591,7 @@ def _extract_blocks(section_text: str) -> list[tuple[str, str]]:
             current_lines.append(s)
     if current_heading and current_lines:
         blocks.append((current_heading, current_lines))
-    return [(h, " ".join(ls)) for h, ls in blocks]
+    return [(heading, " ".join(body)) for heading, body in blocks]
 
 
 def _assign_phase(heading: str) -> str | None:
@@ -1683,8 +1703,53 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
     return "\n".join(lines).strip(), sources
 
 
+_CROP_GUIDE_INTENTS = {
+    "climate": "climate weather temperature rainfall जलवायु मौसम तापमान वर्षा",
+    "variety": "variety varieties cultivar seed rate season किस्म किस्में बीज दर मौसम",
+    "preparation": "field preparation land preparation soil plough खेत तैयारी मिट्टी जुताई",
+    "nutrition": "fertilizer fertiliser nutrient manure compost fym खाद उर्वरक पोषक",
+    "seed": "seed treatment fungicide बीज उपचार",
+    "sowing": "sowing sow planting spacing depth बुवाई बोआई रोपाई दूरी गहराई",
+    "water": "water irrigation सिंचाई पानी",
+    "weed": "weed weeding खरपतवार निराई",
+    "protection": "pest disease protection insecticide pesticide रोग कीट सुरक्षा कीटनाशक",
+    "harvest": "harvest harvesting thresh कटाई मड़ाई",
+}
+
+
+def _crop_guide_topic(heading: str) -> str:
+    key = _heading_key(heading)
+    if any(term in key for term in ("CLIMATE", "WEATHER")):
+        return "climate"
+    if any(term in key for term in ("SEASON", "VARIET", "SEED RATE")):
+        return "variety"
+    if any(term in key for term in ("FIELD PREPARATION", "LAND PREPARATION", "SOIL PREPARATION")):
+        return "preparation"
+    if any(term in key for term in ("FERTIL", "NUTRIENT", "MANURE", "COMPOST", "FYM", "MICRONUTRIENT", "TOP DRESSING")):
+        return "nutrition"
+    if "SEED TREATMENT" in key:
+        return "seed"
+    if any(term in key for term in ("SOWING", "PLANTING", "TRANSPLANT", "SPACING", "FORMING BED", "RIDGE", "FURROW")):
+        return "sowing"
+    if any(term in key for term in ("WATER", "IRRIGATION")):
+        return "water"
+    if "WEED" in key:
+        return "weed"
+    if any(term in key for term in ("PEST", "DISEASE", "CROP PROTECTION", "PLANT PROTECTION")):
+        return "protection"
+    if any(term in key for term in ("HARVEST", "THRESH")):
+        return "harvest"
+    return "other"
+
+
+def _crop_guide_query_intents(question: str) -> set[str]:
+    q = str(question or "").lower()
+    return {topic for topic, terms in _CROP_GUIDE_INTENTS.items()
+            if any(term in q for term in terms.split())}
+
+
 def build_crop_production_source_chunks(question: str, max_chunks: int = 8) -> list[dict[str, Any]]:
-    """Return verbatim English PDF chunks with their one-based PDF page numbers."""
+    """Split the crop's PDF section by guide heading and rank chunks by query intent."""
     crop = _resolve_crop_name(question)
     if not crop:
         return []
@@ -1695,21 +1760,86 @@ def build_crop_production_source_chunks(question: str, max_chunks: int = 8) -> l
     from app.chunking import split_text
 
     start_pdf, end_pdf = page_range
-    chunks: list[dict[str, Any]] = []
+    intents = _crop_guide_query_intents(question)
+    candidates: list[dict[str, Any]] = []
     for page_index in range(max(0, start_pdf), min(len(pages), end_pdf + 1)):
-        for text in split_text(pages[page_index], chunk_size=1400, overlap=180):
-            text = text.strip()
-            if len(text) < 80:
+        page_text = pages[page_index]
+        blocks = _extract_blocks(page_text)
+        page_candidates = []
+        for heading, body in blocks:
+            if _should_stop_at_heading(crop, heading):
                 continue
-            chunks.append({
-                "text": text,
-                "source_file": str(GUIDE_PDF),
-                "page": page_index + 1,
-                "language": "en-IN",
-            })
-            if len(chunks) >= max(1, max_chunks):
-                return chunks
-    return chunks
+            if _should_skip_heading(crop, heading) or not _assign_phase(heading):
+                continue
+            topic = _crop_guide_topic(heading)
+            if intents and topic not in intents:
+                continue
+            body = body.strip()
+            if len(body) < 45:
+                continue
+            # A heading is the retrieval boundary. Only split exceptionally long
+            # sections further, keeping the heading attached to each passage.
+            for part in split_text(body, chunk_size=1250, overlap=100):
+                text = f"{heading}: {part.strip()}".strip()
+                if len(text) < 80:
+                    continue
+                score = 8.0 if topic in intents else {
+                    "climate": 4.5, "variety": 5.0, "preparation": 6.0,
+                    "nutrition": 5.5, "seed": 4.5, "sowing": 6.0,
+                    "water": 5.0, "weed": 4.0, "protection": 3.5,
+                    "harvest": 4.0, "other": 0.0,
+                }.get(topic, 0.0)
+                query_tokens = set(re.findall(r"[a-z0-9\u0900-\u097f]+", question.lower()))
+                text_tokens = set(re.findall(r"[a-z0-9]+", text.lower()))
+                score += 0.25 * len(query_tokens & text_tokens)
+                noisy = _looks_like_noisy_ocr(text)
+                if noisy:
+                    score -= 8.0
+                if any(marker in text.upper() for marker in ("READY RECKONER", "STCR-IPNS", "INITIAL SOIL TEST VALUES")):
+                    score -= 2.0 if topic in intents else 5.0
+                numeric_tokens = len(re.findall(r"\b\d+(?:\.\d+)?\b", text))
+                if len(text) > 450 and numeric_tokens / max(1, len(text.split())) > 0.22:
+                    score -= 2.5 if topic in intents else 4.0
+                page_candidates.append({
+                    "text": text, "heading": heading, "topic": topic,
+                    "score": score, "ocr_noise": noisy,
+                    "source_file": str(GUIDE_PDF), "page": page_index + 1,
+                    "language": "en-IN",
+                })
+        # If the PDF page has no recognized heading, retain it only as a weak
+        # fallback candidate; heading-recognized pages always rank ahead.
+        if not page_candidates and not intents:
+            for text in split_text(page_text, chunk_size=1250, overlap=100):
+                text = text.strip()
+                if len(text) >= 120:
+                    page_candidates.append({
+                        "text": text, "heading": "", "topic": "other",
+                        "score": -3.0, "ocr_noise": _looks_like_noisy_ocr(text),
+                        "source_file": str(GUIDE_PDF), "page": page_index + 1,
+                        "language": "en-IN",
+                    })
+        candidates.extend(page_candidates)
+
+    if not candidates:
+        return []
+    candidates.sort(key=lambda passage: float(passage.get("score", 0)), reverse=True)
+    if not intents:
+        # For broad cultivation questions, cover the full crop cycle before
+        # taking a second passage from any one section.
+        selected = []
+        counts: dict[str, int] = {}
+        for passage in candidates:
+            topic = passage.get("topic", "other")
+            if counts.get(topic, 0) >= 2:
+                continue
+            selected.append(passage)
+            counts[topic] = counts.get(topic, 0) + 1
+            if len(selected) >= max(1, max_chunks):
+                break
+        candidates = selected
+    else:
+        candidates = candidates[:max(1, max_chunks)]
+    return candidates
 
 
 def _detect_followup_section(question: str) -> str | None:
