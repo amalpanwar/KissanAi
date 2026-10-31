@@ -20,7 +20,7 @@ class TranslationTests(unittest.TestCase):
         return (' '.join(tokens) + ' ' if tokens else '') + 'हिंदी में अनुवादित वाक्य।'
 
     def test_english_fragments_use_local_model_and_preserve_source_metadata(self):
-        original = {'answer': 'Apply 37.5 kg ZnSO 4 basally before sowing.',
+        original = {'answer': 'Apply 37.5 kg ZnSO 4 basally before sowing [PDF page 135].',
                     'references': ['Crop Production Guide, page 135'],
                     'agent_trace': {'goal': 'private farmer context'}}
         with patch('app.hindi_translation._translate', side_effect=self.translated_fragment) as translate:
@@ -32,7 +32,18 @@ class TranslationTests(unittest.TestCase):
         self.assertNotIn('Apply', result['answer'])
         self.assertEqual(result['references'], original['references'])
         self.assertEqual(result['agent_trace'], original['agent_trace'])
-        self.assertEqual(translate.call_count, 1)
+        self.assertEqual(translate.call_count, 2)
+
+    def test_partial_translation_keeps_success_and_reports_untranslated_fragment(self):
+        source = {'answer': 'Prepare the field.\nApply Carbendazim.', 'topic': 'crop_guide'}
+        with patch('app.hindi_translation._translate',
+                   side_effect=['खेत तैयार करें।', TranslationValidationError('hindi_missing')]) as translate:
+            result = translate_answer(source)
+        self.assertEqual(result['translation']['status'], 'partial')
+        self.assertIn('खेत तैयार करें।', result['answer'])
+        self.assertIn('Apply Carbendazim.', result['answer'])
+        self.assertIn('Apply', result['translation']['untranslated_fragments'][0]['text'])
+        self.assertEqual(translate.call_count, 2)
 
     def test_hindi_and_formula_only_skip_model(self):
         with patch('app.hindi_translation._translate') as translate:
