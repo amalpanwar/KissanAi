@@ -241,6 +241,7 @@ def translate_answer(result: dict) -> dict:
         )
         metadata = {
             **info, 'status': status,
+            'reason': failed_fragments[0]['reason'],
             'failure_reason': failed_fragments[0]['reason'],
             'failed_fragments': len(failed_fragments),
             'untranslated_fragments': [
