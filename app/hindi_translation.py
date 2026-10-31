@@ -100,6 +100,28 @@ def _chunks(text: str, limit: int = 1800) -> list[str]:
         chunks.append(text)
     return chunks
 
+def _sentence_chunks(text: str, limit: int = 700) -> list[str]:
+    """Keep IndicTrans inputs short enough to isolate a bad sentence or placeholder."""
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9])', text.strip())
+    chunks = []
+    current = ""
+    for sentence in sentences:
+        if len(sentence) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_chunks(sentence, limit))
+        elif not current:
+            current = sentence
+        elif len(current) + len(sentence) + 1 <= limit:
+            current = f"{current} {sentence}"
+        else:
+            chunks.append(current)
+            current = sentence
+    if current:
+        chunks.append(current)
+    return chunks
+
 
 def _protected_pattern(names: list[str] | None = None) -> re.Pattern:
     """Keep technical entities and structure out of the MT model input."""
@@ -219,7 +241,7 @@ def translate_answer(result: dict) -> dict:
         trailing = fragment[len(fragment.rstrip()):]
         core = fragment[len(leading):len(fragment) - len(trailing) if trailing else None]
         translated_chunks = []
-        for chunk in _chunks(core):
+        for chunk in _sentence_chunks(core):
             if not re.search(r'[A-Za-z]', chunk):
                 translated_chunks.append(chunk)
                 continue
