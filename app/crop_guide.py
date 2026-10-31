@@ -1724,12 +1724,13 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         deterministic = _summarize_block(crop, heading, body) if heading and body else ""
 
         source_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", body))
-        rendered_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", deterministic))
+        rendered_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", deterministic))
         source_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", body)}
         rendered_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", deterministic)}
         deterministic_is_grounded = (
             bool(deterministic)
             and not _looks_like_noisy_ocr(body)
+            and not _is_english_heavy(deterministic, crop)
             and rendered_numbers.issubset(source_numbers)
             and rendered_words.issubset(source_words)
         )
@@ -1750,7 +1751,7 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         seen.add(key)
         grouped.setdefault(phase, []).append(line)
 
-    lines = []
+    lines = [f"{_crop_display_label(crop)} की खेती: स्टेप-बाय-स्टेप गाइड", ""]
     for phase in phase_order:
         items = grouped.get(phase) or []
         if not items:
