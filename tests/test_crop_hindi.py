@@ -1,7 +1,10 @@
 import re
 import unittest
 from unittest.mock import patch, MagicMock
-from app.crop_guide import (\n    _summarize_block, _build_guide_points_for_crop, _extract_blocks,\n    build_crop_production_source_chunks,\n)
+from app.crop_guide import (
+    _summarize_block, _build_guide_points_for_crop, _extract_blocks,
+    build_crop_production_source_chunks,
+)
 from app.translation_status import render_translation_status
 
 SOURCE = ('If soil test is not available follow blanket recommendation of 80:40:40 NPK kg/ha. '
