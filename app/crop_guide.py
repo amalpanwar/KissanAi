@@ -1779,7 +1779,7 @@ def build_crop_production_source_chunks(question: str, max_chunks: int = 8) -> l
                 continue
             # A heading is the retrieval boundary. Only split exceptionally long
             # sections further, keeping the heading attached to each passage.
-            for part in split_text(body, chunk_size=1250, overlap=100):
+            for part in split_text(body, chunk_size=1250, overlap=0):
                 text = f"{heading}: {part.strip()}".strip()
                 if len(text) < 80:
                     continue
@@ -1809,7 +1809,7 @@ def build_crop_production_source_chunks(question: str, max_chunks: int = 8) -> l
         # If the PDF page has no recognized heading, retain it only as a weak
         # fallback candidate; heading-recognized pages always rank ahead.
         if not page_candidates and not intents:
-            for text in split_text(page_text, chunk_size=1250, overlap=100):
+            for text in split_text(page_text, chunk_size=1250, overlap=0):
                 text = text.strip()
                 if len(text) >= 120:
                     page_candidates.append({
