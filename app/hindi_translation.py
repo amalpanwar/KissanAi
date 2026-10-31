@@ -227,7 +227,7 @@ def translate_answer(result: dict) -> dict:
                 translated_chunks.append(_translate(chunk, hf_token))
                 translated_count += 1
             except Exception as exc:
-                translated_parts.append(chunk)
+                translated_chunks.append(chunk)
                 reason = (str(exc) if isinstance(exc, TranslationValidationError)
                           else type(exc).__name__)
                 failed_fragments.append({'text': chunk, 'reason': reason})
