@@ -32,6 +32,8 @@ class TranslationTests(unittest.TestCase):
         self.assertNotIn('Apply', result['answer'])
         self.assertEqual(result['references'], original['references'])
         self.assertEqual(result['agent_trace'], original['agent_trace'])
+        for call in translate.call_args_list:
+            self.assertNotRegex(call.args[0], r'37\.5|ZnSO|PDF page')
         self.assertEqual(translate.call_count, 2)
 
     def test_partial_translation_keeps_success_and_reports_untranslated_fragment(self):
