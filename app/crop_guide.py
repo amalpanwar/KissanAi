@@ -1703,6 +1703,70 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
     return "\n".join(lines).strip(), sources
 
 
+def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) -> tuple[str, dict[str, int]]:
+    """Render each retrieved guide passage deterministically when grounded; leave the rest for MT."""
+    phase_order = ["before_sowing", "sowing", "early_growth", "mid_growth", "harvest"]
+    grouped: dict[str, list[str]] = {phase: [] for phase in phase_order}
+    translated = []
+    deterministic_count = 0
+    seen: set[str] = set()
+
+    for passage in passages:
+        source = str(passage.get("text", "")).strip()
+        if not source:
+            continue
+        heading = str(passage.get("heading", "")).strip()
+        body = source
+        if heading:
+            body = re.sub(r"^" + re.escape(heading) + r"\\s*:?\\s*", "", body, count=1, flags=re.IGNORECASE)
+        body = body.strip()
+        phase = _assign_phase(heading) or "early_growth"
+        deterministic = _summarize_block(crop, heading, body) if heading and body else ""
+
+        source_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", body))
+        rendered_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", deterministic))
+        source_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", body)}
+        rendered_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", deterministic)}
+        deterministic_is_grounded = (
+            bool(deterministic)
+            and not _looks_like_noisy_ocr(body)
+            and rendered_numbers.issubset(source_numbers)
+            and rendered_words.issubset(source_words)
+        )
+
+        if deterministic_is_grounded:
+            text = deterministic
+            deterministic_count += 1
+        else:
+            label = _heading_label_hi(heading) if heading else "फसल-गाइड"
+            text = f"{label}: {body}" if heading else body
+            translated.append(text)
+
+        citation = f"[PDF page {passage.get('page')}]" if passage.get("page") else ""
+        line = f"- {text} {citation}".strip()
+        key = _normalize_line_key(line)
+        if key in seen:
+            continue
+        seen.add(key)
+        grouped.setdefault(phase, []).append(line)
+
+    lines = []
+    for phase in phase_order:
+        items = grouped.get(phase) or []
+        if not items:
+            continue
+        lines.append(PHASE_LABELS_HI[phase] + ":")
+        lines.extend(items)
+        lines.append("")
+    if not lines:
+        return "", {"deterministic_passages": 0, "translation_passages": 0}
+
+    return "\\n".join(lines).strip(), {
+        "deterministic_passages": deterministic_count,
+        "translation_passages": len(translated),
+    }
+
+
 _CROP_GUIDE_INTENTS = {
     "climate": "climate weather temperature rainfall जलवायु मौसम तापमान वर्षा",
     "variety": "variety varieties cultivar seed rate season किस्म किस्में बीज दर मौसम",
