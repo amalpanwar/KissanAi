@@ -102,7 +102,7 @@ def _chunks(text: str, limit: int = 1800) -> list[str]:
 
 def _sentence_chunks(text: str, limit: int = 700) -> list[str]:
     """Keep IndicTrans inputs short enough to isolate a bad sentence or placeholder."""
-    sentences = re.split(r'(?<=[.!?])\\s+(?=[A-Z0-9])', text.strip())
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9])', text.strip())
     chunks = []
     current = ""
     for sentence in sentences:
