@@ -453,8 +453,8 @@ class RAGAdvisor:
 
     def _answer_crop_guide_from_sources(self, question: str) -> dict | None:
         """Retrieve crop-specific guide passages, rerank them, and draft a cited answer."""
-        from app.crop_guide import (CROP_ALIASES, _crop_guide_query_intents, _resolve_crop_name,
-                                build_hybrid_crop_guide_answer)
+        from app.crop_guide import (CROP_ALIASES, _crop_guide_query_intents, _is_broad_cultivation_query,
+                                _resolve_crop_name, build_hybrid_crop_guide_answer)
 
         crop = _resolve_crop_name(question)
         try:
@@ -496,7 +496,7 @@ class RAGAdvisor:
             ranked.append((score, -order, {**passage, "score": score}))
         ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
         passages = [item[2] for item in ranked[:8]]
-        broad_overview = not _crop_guide_query_intents(question)
+        broad_overview = _is_broad_cultivation_query(question) or not _crop_guide_query_intents(question)
         if crop:
             hybrid_answer, hybrid_stats = build_hybrid_crop_guide_answer(crop, passages)
             if broad_overview and len(re.findall(r"(?m)^- ", hybrid_answer)) < 3:
