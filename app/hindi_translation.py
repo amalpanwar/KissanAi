@@ -328,9 +328,9 @@ def translate_answer(result: dict) -> dict:
                     )
                     providers_used.add('local')
                 except Exception as exc:
-                    reason = _failure_reason(exc, 'indictrans2')
+                    reason = _failure_reason(exc, 'local')
                     errors.append(reason)
-                    provider_failures.append({'provider': 'indictrans2', 'reason': reason})
+                    provider_failures.append({'provider': 'local', 'reason': reason})
             if translated is None:
                 translated_chunks.append(chunk)
                 failed_fragments.append({
