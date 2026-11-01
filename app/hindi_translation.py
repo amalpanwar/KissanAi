@@ -15,13 +15,16 @@ class TranslationValidationError(ValueError):
     pass
 
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
-FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P\s*[2₂]\s*O\s*[5₅]|K\s*[2₂]\s*O|NPK|NAA|FYM|SSP|DAP|DAS|IST|UTC|GMT|Zn|S|N|P|K)\b'
-UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C|quintals?)(?:\s*/\s*(?:kg|g|mg|ml|mL|L|litres?|liters?|ha|hectare|acre))?'
+FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P\s*[2₂]\s*O\s*[5₅]|K\s*[2₂]\s*O|NPK|NAA|FYM|SSP|DAP|DAS|IST|UTC|GMT|PIB|NSKE|H\.R\.Brix|EC|SC|GR|CG|WP|WG|SL|SP|Zn|S|N|P|K)\b'
+UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%(?:SC|EC|GR|CG|WP|WG|SL|SP)?|°C|quintals?)(?:\s*/\s*(?:kg|g|mg|ml|mL|L|litres?|liters?|ha|hectare|acre))?'
 NUMBER = r'\d+(?:[.,:/–-]\d+)*'
+SCIENTIFIC_NUMBER = r'\b\d+(?:\.\d+)?\s*[x×]\s*10(?:\s*\^\s*\d+|\d+)\b'
+TECHNICAL_NAME = r'(?i:\b(?:Atrazine|Oxyfluorfen|Oxyflurofen|Glyphosate|Sodium\s+metasilicate|Gluconacetobacter\s+diazotrophicus|Lindane|Chlorantraniliprole|Fipronil|Quinalphos|Phosalone|Carbofuran|Sturmiopsis\s+inferens|Chilo\s+infuscatellus|Trichogramma\s+chilonis|Scirpophaga\s+excerptalis|Isotima\s+javensis|TNAU\s+Biofert-I|Biofert-I)\b)'
 PROTECTED = re.compile(
     r'\[PDF page \d+\]|```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
+    + SCIENTIFIC_NUMBER + r'|'
     + NUMBER + r'(?:\s*' + UNIT + r'(?![A-Za-z]))?(?:\s*' + FORMULA + r')?(?:\s*' + UNIT + r'(?![A-Za-z]))?|'
-    + FORMULA + r'|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
+    + FORMULA + r'|' + TECHNICAL_NAME + r'|(?i:\\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\\.)|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
 )
 NON_HINDI = re.compile(r'[^\u0900-\u097f\n]+')
 TOKEN = re.compile(r'ZXQ[A-Z]+QXZ')
@@ -301,46 +304,59 @@ def translate_answer(result: dict) -> dict:
     provider_failures = []
     translated_count = 0
     cursor = 0
+    local_import_failed = False
     for start, end, fragment in pending:
         output_parts.append(original[cursor:start])
-        leading = fragment[:len(fragment) - len(fragment.lstrip())]
-        trailing = fragment[len(fragment.rstrip()):]
-        core = fragment[len(leading):len(fragment) - len(trailing) if trailing else None]
-        translated_chunks = []
-        for chunk in _sentence_chunks(core):
-            if not re.search(r'[A-Za-z]', chunk):
-                translated_chunks.append(chunk)
+        run_cursor = 0
+        # A deterministic Hindi label can share a text node with an English
+        # PDF sentence. Send only non-Hindi prose runs to MT, never the Hindi
+        # label or the protected values between them.
+        for run_match in NON_HINDI.finditer(fragment):
+            run = run_match.group()
+            if not re.search(r'[A-Za-z]', run):
                 continue
-            translated = None
-            errors = []
-            if sarvam_key:
-                try:
-                    translated = _translate_sarvam(chunk, sarvam_key)
-                    providers_used.add('sarvam')
-                except Exception as exc:
-                    reason = _failure_reason(exc, 'sarvam')
-                    errors.append(reason)
-                    provider_failures.append({'provider': 'sarvam', 'reason': reason})
-            if translated is None and hf_token:
-                try:
-                    translated = _validate_translation_output(
-                        chunk, _translate(chunk, hf_token),
-                    )
-                    providers_used.add('local')
-                except Exception as exc:
-                    reason = _failure_reason(exc, 'local')
-                    errors.append(reason)
-                    provider_failures.append({'provider': 'local', 'reason': reason})
-            if translated is None:
-                translated_chunks.append(chunk)
-                failed_fragments.append({
-                    'text': chunk,
-                    'reason': errors[-1] if errors else 'no_translation_provider_configured',
-                })
-            else:
-                translated_chunks.append(translated)
-                translated_count += 1
-        output_parts.append(leading + ' '.join(translated_chunks) + trailing)
+            output_parts.append(fragment[run_cursor:run_match.start()])
+            leading = run[:len(run) - len(run.lstrip())]
+            trailing = run[len(run.rstrip()):]
+            core = run[len(leading):len(run) - len(trailing) if trailing else None]
+            translated_chunks = []
+            for chunk in _sentence_chunks(core):
+                if not re.search(r'[A-Za-z]', chunk):
+                    translated_chunks.append(chunk)
+                    continue
+                translated = None
+                errors = []
+                if sarvam_key:
+                    try:
+                        translated = _translate_sarvam(chunk, sarvam_key)
+                        providers_used.add('sarvam')
+                    except Exception as exc:
+                        reason = _failure_reason(exc, 'sarvam')
+                        errors.append(reason)
+                        provider_failures.append({'provider': 'sarvam', 'reason': reason})
+                if translated is None and hf_token and not local_import_failed:
+                    try:
+                        translated = _validate_translation_output(
+                            chunk, _translate(chunk, hf_token),
+                        )
+                        providers_used.add('local')
+                    except Exception as exc:
+                        reason = _failure_reason(exc, 'local')
+                        errors.append(reason)
+                        provider_failures.append({'provider': 'local', 'reason': reason})
+                        local_import_failed = isinstance(exc, ImportError)
+                if translated is None:
+                    translated_chunks.append(chunk)
+                    failed_fragments.append({
+                        'text': chunk,
+                        'reason': errors[-1] if errors else 'no_translation_provider_configured',
+                    })
+                else:
+                    translated_chunks.append(translated)
+                    translated_count += 1
+            output_parts.append(leading + ' '.join(translated_chunks) + trailing)
+            run_cursor = run_match.end()
+        output_parts.append(fragment[run_cursor:])
         cursor = end
     output_parts.append(original[cursor:])
     output = ''.join(output_parts)
