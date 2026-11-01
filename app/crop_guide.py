@@ -1721,13 +1721,42 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
     return "\n".join(lines).strip(), sources
 
 
+def _technical_recommendation_rows(text: str) -> list[str]:
+    """Split PDF input instructions into readable rows without rewriting values."""
+    normalized = " ".join(str(text or "").split())
+    parts = re.split(
+        r"\\s*(?:<\\s*|(?i:\\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\\.\\s+)|\\s*;\\s*)",
+        normalized,
+    )
+    parts = [part.strip(" ;,:-") for part in parts if len(part.strip(" ;,:-")) >= 12]
+    return parts or ([normalized] if normalized else [])
+
+
+def _technical_category(heading: str) -> str:
+    key = _heading_key(heading)
+    if any(term in key for term in ("FERTIL", "NUTRIENT", "MANURE", "COMPOST", "FYM", "BIOFERT", "MICRONUTRIENT", "TOP DRESSING")):
+        return "उर्वरक/जैव उर्वरक"
+    if any(term in key for term in ("WEED", "PEST", "CROP PROTECTION", "PLANT PROTECTION", "SEED TREATMENT", "FUNGICIDE", "INSECTICIDE", "SPRAY")):
+        return "रसायन/फसल सुरक्षा"
+    if any(term in key for term in ("PRE-HARVEST", "RIPENER")):
+        return "पकाव से पहले का उपचार"
+    return "तकनीकी सिफारिश"
+
+
 def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) -> tuple[str, dict[str, int]]:
-    """Render each retrieved guide passage deterministically when grounded; leave the rest for MT."""
+    """Render growing steps as Hindi bullets and technical input passages as a cited table."""
     phase_order = ["before_sowing", "sowing", "early_growth", "mid_growth", "harvest"]
     grouped: dict[str, list[str]] = {phase: [] for phase in phase_order}
-    translated = []
+    technical_rows: list[tuple[str, str, str]] = []
     deterministic_count = 0
+    translation_count = 0
     seen: set[str] = set()
+    technical_heading = re.compile(
+        r"FERTIL|NUTRIENT|MANURE|COMPOST|FYM|BIOFERT|MICRONUTRIENT|TOP DRESSING|"
+        r"WEED MANAGEMENT|PEST|CROP PROTECTION|PLANT PROTECTION|SEED TREATMENT|"
+        r"FUNGICIDE|INSECTICIDE|PRE-HARVEST|RIPENER|CHEMICAL",
+        re.I,
+    )
 
     for passage in passages:
         source = str(passage.get("text", "")).strip()
@@ -1736,13 +1765,31 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         heading = str(passage.get("heading", "")).strip()
         body = source
         if heading:
-            body = re.sub(r"^" + re.escape(heading) + r"\s*:?\s*", "", body, count=1, flags=re.IGNORECASE)
+            body = re.sub(r"^" + re.escape(heading) + r"\\s*:?\\s*", "", body, count=1, flags=re.IGNORECASE)
         body = body.strip()
+        page = str(passage.get("page") or "")
+        citation = f"[PDF page {page}]" if page else ""
+        key_heading = _heading_key(heading)
+
+        if heading and technical_heading.search(key_heading):
+            # Keep the PDF wording and every named input/dose. Translate the
+            # prose after rendering it as separate, cited table rows.
+            label = _heading_label_hi(heading)
+            category = _technical_category(heading)
+            row_text = f"{label}: {body}" if body else label
+            for recommendation in _technical_recommendation_rows(row_text):
+                row_key = _normalize_line_key(f"{category}|{recommendation}|{citation}")
+                if row_key in seen:
+                    continue
+                seen.add(row_key)
+                technical_rows.append((category, recommendation, citation))
+            translation_count += 1
+            continue
+
         phase = _assign_phase(heading) or "early_growth"
         deterministic = _summarize_block(crop, heading, body) if heading and body else ""
-
-        source_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", body))
-        rendered_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", deterministic))
+        source_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", body))
+        rendered_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", deterministic))
         source_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", body)}
         rendered_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", deterministic)}
         deterministic_is_grounded = (
@@ -1759,9 +1806,8 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         else:
             label = _heading_label_hi(heading) if heading else "फसल-गाइड"
             text = f"{label}: {body}" if heading else body
-            translated.append(text)
+            translation_count += 1
 
-        citation = f"[PDF page {passage.get('page')}]" if passage.get("page") else ""
         line = f"- {text} {citation}".strip()
         key = _normalize_line_key(line)
         if key in seen:
@@ -1777,12 +1823,22 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         lines.append(PHASE_LABELS_HI[phase] + ":")
         lines.extend(items)
         lines.append("")
-    if not lines:
+    if technical_rows:
+        lines.extend([
+            "उर्वरक, जैव उर्वरक और रसायन — स्रोत के अनुसार",
+            "",
+            "| उपयोग | नाम, मात्रा और तरीका | स्रोत |",
+            "|---|---|---|",
+        ])
+        for category, recommendation, citation in technical_rows:
+            safe_recommendation = recommendation.replace("|", "\\\\|")
+            lines.append(f"| {category} | {safe_recommendation} | {citation} |")
+    if not any(grouped.values()) and not technical_rows:
         return "", {"deterministic_passages": 0, "translation_passages": 0}
 
-    return "\n".join(lines).strip(), {
+    return "\\n".join(lines).strip(), {
         "deterministic_passages": deterministic_count,
-        "translation_passages": len(translated),
+        "translation_passages": translation_count,
     }
 
 
