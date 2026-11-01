@@ -239,6 +239,12 @@ def _translate_sarvam(text: str, api_key: str) -> str:
 def _failure_reason(exc: Exception, provider: str) -> str:
     if isinstance(exc, TranslationValidationError):
         return str(exc)
+    if provider == 'local' and isinstance(exc, ImportError):
+        # ImportError.name identifies the missing module without exposing secrets.
+        return f"local_import_error:{getattr(exc, 'name', None) or 'unknown_module'}"
+    status = getattr(getattr(exc, 'response', None), 'status_code', None)
+    if provider == 'local' and status:
+        return f"local_model_http_{status}"
     return type(exc).__name__ if provider == 'local' else f"{provider}_{type(exc).__name__}"
 
 
