@@ -231,7 +231,7 @@ def _translate_sarvam(text: str, api_key: str) -> str:
 def _failure_reason(exc: Exception, provider: str) -> str:
     if isinstance(exc, TranslationValidationError):
         return str(exc)
-    return f"{provider}_{type(exc).__name__}"
+    return type(exc).__name__ if provider == 'local' else f"{provider}_{type(exc).__name__}"
 
 
 def translate_answer(result: dict) -> dict:
@@ -326,7 +326,7 @@ def translate_answer(result: dict) -> dict:
                     translated = _validate_translation_output(
                         chunk, _translate(chunk, hf_token),
                     )
-                    providers_used.add('indictrans2')
+                    providers_used.add('local')
                 except Exception as exc:
                     reason = _failure_reason(exc, 'indictrans2')
                     errors.append(reason)
@@ -348,7 +348,7 @@ def translate_answer(result: dict) -> dict:
     provider_label = 'hybrid' if len(used) > 1 else (used[0] if used else 'none')
     model_label = {
         'sarvam': 'sarvam-translate:v1',
-        'indictrans2': MODEL,
+        'local': MODEL,
         'hybrid': 'sarvam-translate:v1 + ' + MODEL,
     }.get(provider_label, info['model'])
     info.update({'provider': provider_label, 'model': model_label})
