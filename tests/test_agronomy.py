@@ -39,7 +39,7 @@ class AgronomyTests(unittest.TestCase):
                 self.assertEqual(result['references'], ['guide.pdf'])
                 self.assertIn('Wheat guide evidence', result['answer'])
                 self.assertIn('PDF page 1', result['answer'])
-                self.assertEqual(result['answer_generation']['status'], 'source_excerpt_fallback')
+                self.assertEqual(result['answer_generation']['status'], 'hybrid')
         self.model_mock.assert_not_called()
         self.semantic_mock.assert_not_called()
 
@@ -66,7 +66,7 @@ class AgronomyTests(unittest.TestCase):
         self.assertIn('PDF page', result['answer'])
         self.assertGreater(len(result['answer']), 200)
         self.assertTrue(result['references'])
-        self.assertEqual(result['answer_generation']['status'], 'source_excerpt_fallback')
+        self.assertEqual(result['answer_generation']['status'], 'hybrid')
         self.model_mock.assert_not_called()
         self.semantic_mock.assert_not_called()
 
