@@ -513,7 +513,7 @@ class RAGAdvisor:
                     "answer_generation": {
                         "provider": "crop_guide_hybrid",
                         "model": "deterministic_hindi+IndicTrans2",
-                        "status": "hybrid" if hybrid_stats["translation_passages"] else "deterministic",
+                        "status": "hybrid",
                         **hybrid_stats,
                         "evidence_passages": len(passages),
                     },
