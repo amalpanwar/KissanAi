@@ -559,12 +559,17 @@ def _extract_blocks(section_text: str) -> list[tuple[str, str]]:
         pieces = re.split(r"(?<=\S)\s+(?=\d{1,2}\.\s+[A-Z])", line)
         for piece in pieces:
             piece = piece.strip()
+            # Guide PDFs often put a colon between the numbered heading and
+            # its sentence (for example, "2. APPLICATION OF FYM: Apply ...").
+            # Include that colon in the boundary so later sections do not get
+            # absorbed into the preceding heading's body.
             heading_body = re.match(
-                r"^(\d{1,2}\.\s+[A-Z][A-Z /()\-]{2,}?)(?=\s+[A-Z][a-z])",
+                r"^(\d{1,2}\.\s+[A-Z][A-Z /()\-]{2,}?):?\s+(?=[A-Z][a-z])",
                 piece,
             )
             if heading_body:
-                lines.extend([heading_body.group(1).strip(), piece[heading_body.end():].strip()])
+                heading = heading_body.group(1).strip().rstrip(":")
+                lines.extend([heading, piece[heading_body.end():].strip()])
             else:
                 lines.append(piece)
     blocks: list[tuple[str, list[str]]] = []
@@ -1689,7 +1694,6 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
     phase_points, _entries, sources = _build_guide_points_for_crop(crop)
     if not phase_points:
         return None, []
-    crop_label = _crop_display_label(crop)
     lines = [f"{CROP_NAME_HI.get(crop, crop)} की खेती: स्टेप-बाय-स्टेप गाइड", ""]
     for phase in ["before_sowing", "sowing", "early_growth", "mid_growth", "harvest"]:
         pts = phase_points.get(phase) or []
