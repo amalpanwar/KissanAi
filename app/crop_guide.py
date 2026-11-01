@@ -532,9 +532,9 @@ def _is_mismatched_crop_block(crop: str, heading: str, body: str) -> bool:
     # This combination is the pearl-millet/small-millet shoot-fly seed-sowing
     # passage that can bleed onto the final sugarcane page in the PDF.
     return bool(
-        re.search(r"\\bshoot\\s*fly\\b", text, re.I)
-        and re.search(r"\\bseedlings?\\b", text, re.I)
-        and re.search(r"\\b2\\s*cm\\b", text, re.I)
+        re.search(r"\bshoot\s*fly\b", text, re.I)
+        and re.search(r"\bseedlings?\b", text, re.I)
+        and re.search(r"\b2\s*cm\b", text, re.I)
     )
 
 
