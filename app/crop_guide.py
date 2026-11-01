@@ -1811,6 +1811,20 @@ def _crop_guide_topic(heading: str) -> str:
     return "other"
 
 
+def _is_broad_cultivation_query(question: str) -> bool:
+    """Recognize open-ended crop-growing questions across Hindi and Hinglish."""
+    q = str(question or "").lower()
+    patterns = (
+        r"\\bhow\\s+to\\s+(?:grow|cultivate|farm)\\b",
+        r"\\bhow\\s+to\\s+do\\s+[a-z ]+\\s+farming\\b",
+        r"\\b(?:cultivation|farming)\\s+(?:of|for)\\b",
+        r"\\bkheti.{0,24}\\b(?:kaise|kaisa|kis\\s+tarah|karne\\s+ka\\s+tarika)\\b",
+        r"(?:खेती|कृषि).{0,24}(?:कैसे|विधि|तरीका|करें|करे)",
+        r"(?:कैसे|विधि|तरीका).{0,24}(?:उगाएं|उगाये|उगाना|खेती)",
+    )
+    return any(re.search(pattern, q) for pattern in patterns)
+
+
 def _crop_guide_query_intents(question: str) -> set[str]:
     q = str(question or "").lower()
     return {topic for topic, terms in _CROP_GUIDE_INTENTS.items()
@@ -1829,7 +1843,8 @@ def build_crop_production_source_chunks(question: str, max_chunks: int = 8) -> l
     from app.chunking import split_text
 
     start_pdf, end_pdf = page_range
-    intents = _crop_guide_query_intents(question)
+    broad_overview = _is_broad_cultivation_query(question)
+    intents = set() if broad_overview else _crop_guide_query_intents(question)
     candidates: list[dict[str, Any]] = []
     for page_index in range(max(0, start_pdf), min(len(pages), end_pdf + 1)):
         page_text = pages[page_index]
