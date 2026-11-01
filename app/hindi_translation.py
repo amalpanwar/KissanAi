@@ -1,10 +1,12 @@
-"""Final-answer English-to-Hindi translation with the local IndicTrans2 model."""
+"""Hybrid English-to-Hindi translation with Sarvam API and local IndicTrans2 fallback."""
 from __future__ import annotations
 
 from functools import lru_cache
+import json
 import os
 import re
 import sys
+from urllib.request import Request, urlopen
 MODEL = 'ai4bharat/indictrans2-en-indic-dist-200M'
 TRANSLATION_VERSION = 'indictrans2-200m-v1'
 
@@ -181,25 +183,87 @@ def _translate(text: str, hf_token: str = '') -> str:
     return output.strip()
 
 
-def translate_answer(result: dict) -> dict:
-    """Translate prose while keeping values, names, citations, and formatting external.
+def _validate_translation_output(source: str, output: str) -> str:
+    if not isinstance(output, str) or not output.strip():
+        raise TranslationValidationError('empty_response')
+    if TOKEN.findall(output) != TOKEN.findall(source):
+        raise TranslationValidationError('protected_values_changed')
+    residual = TOKEN.sub('', output)
+    if re.search(r'\\d', residual) or re.search(r'[A-Za-z]', residual):
+        raise TranslationValidationError('untranslated_text_or_new_numbers')
+    if not re.search(r'[\\u0900-\\u097f]', residual):
+        raise TranslationValidationError('hindi_missing')
+    return output.strip()
 
-    Failures are isolated per prose fragment. Successfully translated text remains
-    Hindi; an untranslated fragment stays visible and is disclosed in metadata.
+
+@lru_cache(maxsize=512)
+def _translate_sarvam(text: str, api_key: str) -> str:
+    """Translate one short prose fragment through Sarvam's hosted text API."""
+    if len(text) > 2000:
+        raise TranslationValidationError('sarvam_input_too_long')
+    payload = {
+        "input": text,
+        "source_language_code": "en-IN",
+        "target_language_code": "hi-IN",
+        "model": "sarvam-translate:v1",
+        "mode": "formal",
+        "numerals_format": "international",
+    }
+    request = Request(
+        "https://api.sarvam.ai/translate",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"api-subscription-key": api_key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        if code:
+            raise TranslationValidationError(f"sarvam_http_{code}") from None
+        if isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.lower():
+            raise TranslationValidationError('sarvam_timeout') from None
+        raise TranslationValidationError('sarvam_request_failed') from None
+    return _validate_translation_output(text, str(data.get("translated_text", "")))
+
+
+def _failure_reason(exc: Exception, provider: str) -> str:
+    if isinstance(exc, TranslationValidationError):
+        return str(exc)
+    return f"{provider}_{type(exc).__name__}"
+
+
+def translate_answer(result: dict) -> dict:
+    """Translate only unresolved English prose; preserve deterministic Hindi and source details.
+
+    Sarvam's hosted API is tried first for each short prose fragment. If it fails
+    validation or is unavailable, the local IndicTrans2 model is tried for that
+    same fragment. Values, technical names, citations, and formatting stay out
+    of both translation requests.
     """
     existing = result.get('translation')
-    if (isinstance(existing, dict) and existing.get('provider') == 'local'
-            and existing.get('status') in {'translated', 'partial', 'not_needed', 'source_answer_fallback'}):
+    if (isinstance(existing, dict) and existing.get('status') in {
+            'translated', 'partial', 'not_needed', 'source_answer_fallback'}):
         return result
     original = str(result.get('answer', ''))
-    info = {'provider': 'local', 'model': MODEL, 'target_language': 'hi-IN',
-            'version': TRANSLATION_VERSION}
+    sarvam_key = _setting('SARVAM_API_KEY')
+    hf_token = _setting('HF_TOKEN')
+    info = {
+        'provider': 'hybrid',
+        'model': 'sarvam-translate:v1 -> ' + MODEL,
+        'target_language': 'hi-IN',
+        'version': 'sarvam-indictrans2-fallback-v1',
+    }
+
     def finish(answer, status, reason=None, **details):
         metadata = {**info, 'status': status, **details}
         if reason:
             metadata['reason'] = reason
         return {**result, 'answer': answer, 'translation': metadata}
-    unavailable = 'इस उत्तर का पूरा हिंदी अनुवाद अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें।'
+
+    unavailable = 'इस उत्तर का पूरा हिंदी अनुवाद अभी उपलब्ध नहीं है। कृपया फिर प्रयास करें.'
+
     def failed_translation(reason, status='fallback', **details):
         if original.strip():
             if result.get('topic') in {'crop_guide', 'crop_guide_followup'}:
@@ -207,10 +271,13 @@ def translate_answer(result: dict) -> dict:
                               answer_language='en-IN', **details)
             return finish(original, status, reason, **details)
         return finish(unavailable, status, reason, **details)
+
     if _setting('KISAANAI_HINDI_TRANSLATION', '1').lower() in {'0', 'false', 'no'}:
         return failed_translation('disabled', 'disabled')
     if TOKEN.search(original):
         return failed_translation('reserved_token_in_source')
+    if not sarvam_key and not hf_token:
+        return failed_translation('no_translation_provider_configured', 'not_configured')
 
     pattern = _protected_pattern(_protected_names(result))
     spans = list(pattern.finditer(original))
@@ -225,14 +292,13 @@ def translate_answer(result: dict) -> dict:
     pending = [(start, end, fragment) for start, end, fragment in prose
                if re.search(r'[A-Za-z]', fragment)]
     if not pending:
-        return finish(original, 'not_needed')
-
-    hf_token = _setting('HF_TOKEN')
-    if not hf_token:
-        return failed_translation('HF_TOKEN', 'not_configured')
+        return finish(original, 'not_needed', provider='deterministic',
+                      model=None, providers_used=[])
 
     output_parts = []
     failed_fragments = []
+    providers_used = set()
+    provider_failures = []
     translated_count = 0
     cursor = 0
     for start, end, fragment in pending:
@@ -245,18 +311,48 @@ def translate_answer(result: dict) -> dict:
             if not re.search(r'[A-Za-z]', chunk):
                 translated_chunks.append(chunk)
                 continue
-            try:
-                translated_chunks.append(_translate(chunk, hf_token))
-                translated_count += 1
-            except Exception as exc:
+            translated = None
+            errors = []
+            if sarvam_key:
+                try:
+                    translated = _translate_sarvam(chunk, sarvam_key)
+                    providers_used.add('sarvam')
+                except Exception as exc:
+                    reason = _failure_reason(exc, 'sarvam')
+                    errors.append(reason)
+                    provider_failures.append({'provider': 'sarvam', 'reason': reason})
+            if translated is None and hf_token:
+                try:
+                    translated = _validate_translation_output(
+                        chunk, _translate(chunk, hf_token),
+                    )
+                    providers_used.add('indictrans2')
+                except Exception as exc:
+                    reason = _failure_reason(exc, 'indictrans2')
+                    errors.append(reason)
+                    provider_failures.append({'provider': 'indictrans2', 'reason': reason})
+            if translated is None:
                 translated_chunks.append(chunk)
-                reason = (str(exc) if isinstance(exc, TranslationValidationError)
-                          else type(exc).__name__)
-                failed_fragments.append({'text': chunk, 'reason': reason})
+                failed_fragments.append({
+                    'text': chunk,
+                    'reason': errors[-1] if errors else 'no_translation_provider_configured',
+                })
+            else:
+                translated_chunks.append(translated)
+                translated_count += 1
         output_parts.append(leading + ' '.join(translated_chunks) + trailing)
         cursor = end
     output_parts.append(original[cursor:])
     output = ''.join(output_parts)
+    used = sorted(providers_used)
+    provider_label = 'hybrid' if len(used) > 1 else (used[0] if used else 'none')
+    model_label = {
+        'sarvam': 'sarvam-translate:v1',
+        'indictrans2': MODEL,
+        'hybrid': 'sarvam-translate:v1 + ' + MODEL,
+    }.get(provider_label, info['model'])
+    info.update({'provider': provider_label, 'model': model_label})
+
     if failed_fragments:
         status = 'partial' if translated_count else (
             'source_answer_fallback' if result.get('topic') in {'crop_guide', 'crop_guide_followup'} else 'fallback'
@@ -266,6 +362,8 @@ def translate_answer(result: dict) -> dict:
             'reason': failed_fragments[0]['reason'],
             'failure_reason': failed_fragments[0]['reason'],
             'failed_fragments': len(failed_fragments),
+            'providers_used': used,
+            'provider_failures': provider_failures[:10],
             'untranslated_fragments': [
                 {'text': item['text'][:500], 'reason': item['reason']}
                 for item in failed_fragments[:10]
@@ -276,4 +374,5 @@ def translate_answer(result: dict) -> dict:
         elif status == 'partial':
             metadata['answer_language'] = 'mixed'
         return {**result, 'answer': output, 'translation': metadata}
-    return finish(output, 'translated', translated_fragments=translated_count)
+    return finish(output, 'translated', translated_fragments=translated_count,
+                  providers_used=used, provider_failures=provider_failures[:10])
