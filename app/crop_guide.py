@@ -524,6 +524,20 @@ def _should_stop_at_heading(crop: str, heading: str) -> bool:
     return any(marker in h for marker in stop_markers)
 
 
+def _is_mismatched_crop_block(crop: str, heading: str, body: str) -> bool:
+    """Reject obvious neighbouring-crop OCR bleed at a guide-section boundary."""
+    if _norm(crop) != _norm("Sugarcane"):
+        return False
+    text = f"{heading} {body}"
+    # This combination is the pearl-millet/small-millet shoot-fly seed-sowing
+    # passage that can bleed onto the final sugarcane page in the PDF.
+    return bool(
+        re.search(r"\\bshoot\\s*fly\\b", text, re.I)
+        and re.search(r"\\bseedlings?\\b", text, re.I)
+        and re.search(r"\\b2\\s*cm\\b", text, re.I)
+    )
+
+
 def _should_skip_heading(crop: str, heading: str) -> bool:
     h = _heading_key(heading)
     skip_markers = [
@@ -1108,7 +1122,7 @@ def _build_guide_points_for_crop(crop: str) -> tuple[dict[str, list[str]] | None
     for heading, body in blocks:
         if _should_stop_at_heading(crop, heading):
             break
-        if _should_skip_heading(crop, heading):
+        if _should_skip_heading(crop, heading) or _is_mismatched_crop_block(crop, heading, body):
             continue
         phase = _assign_phase(heading)
         # Wheat's basal fertilizer paragraph describes sowing-time inputs.
@@ -1853,7 +1867,9 @@ def build_crop_production_source_chunks(question: str, max_chunks: int = 8) -> l
         for heading, body in blocks:
             if _should_stop_at_heading(crop, heading):
                 continue
-            if _should_skip_heading(crop, heading) or not _assign_phase(heading):
+            if (_should_skip_heading(crop, heading)
+                    or _is_mismatched_crop_block(crop, heading, body)
+                    or not _assign_phase(heading)):
                 continue
             topic = _crop_guide_topic(heading)
             if intents and topic not in intents:
