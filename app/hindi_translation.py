@@ -15,7 +15,7 @@ class TranslationValidationError(ValueError):
     pass
 
 # Preserve structured links, code, quantities, units and formulae as indivisible tokens.
-FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P\s*[2₂]\s*O\s*[5₅]|K\s*[2₂]\s*O|NPK|NAA|FYM|SSP|DAP|DAS|Zn|S|N|P|K)\b'
+FORMULA = r'\b(?:ZnSO\s*4|MnSO\s*4|FeSO\s*4|P\s*[2₂]\s*O\s*[5₅]|K\s*[2₂]\s*O|NPK|NAA|FYM|SSP|DAP|DAS|IST|UTC|GMT|Zn|S|N|P|K)\b'
 UNIT = r'(?:kg|g|mg|ml|mL|L|litres?|liters?|tonnes?|tons?|t|cm|mm|m|ha|acres?|hectares?|ppm|%|°C|quintals?)(?:\s*/\s*(?:kg|g|mg|ml|mL|L|litres?|liters?|ha|hectare|acre))?'
 NUMBER = r'\d+(?:[.,:/–-]\d+)*'
 PROTECTED = re.compile(

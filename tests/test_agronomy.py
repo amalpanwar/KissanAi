@@ -37,7 +37,7 @@ class AgronomyTests(unittest.TestCase):
                 self.assertEqual(result['agent_status'], 'ok')
                 self.assertEqual(result['agent_trace']['planner'], 'rules')
                 self.assertEqual(result['references'], ['guide.pdf'])
-                self.assertIn('Wheat guide evidence', result['answer'])
+                self.assertIn('गेहूं की खेती', result['answer'])
                 self.assertIn('PDF page 1', result['answer'])
                 self.assertEqual(result['answer_generation']['status'], 'hybrid')
         self.model_mock.assert_not_called()

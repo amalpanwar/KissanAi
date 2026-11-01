@@ -496,8 +496,33 @@ class RAGAdvisor:
             ranked.append((score, -order, {**passage, "score": score}))
         ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
         passages = [item[2] for item in ranked[:8]]
+        broad_overview = not _crop_guide_query_intents(question)
         if crop:
             hybrid_answer, hybrid_stats = build_hybrid_crop_guide_answer(crop, passages)
+            if broad_overview and len(re.findall(r"(?m)^- ", hybrid_answer)) < 3:
+                # If OCR heading parsing collapses the section into one passage,
+                # use the complete validated deterministic guide for an overview.
+                complete_guide, guide_sources = build_crop_production_guide(question)
+                if complete_guide and len(re.findall(r"(?m)^- ", complete_guide)) >= 3:
+                    from app.crop_guide import _section_page_range
+                    page_range = _section_page_range(crop)
+                    page_citations = ""
+                    if page_range:
+                        page_citations = " " + " ".join(
+                            f"[PDF page {page_index + 1}]"
+                            for page_index in range(page_range[0], page_range[1] + 1)
+                        )
+                    hybrid_answer = (
+                        complete_guide
+                        + "\\n\\nस्रोत: Crop Production Guide का "
+                        + str(crop)
+                        + " खंड."
+                        + page_citations
+                    )
+                    hybrid_stats = {
+                        "deterministic_passages": len(re.findall(r"(?m)^- ", complete_guide)),
+                        "translation_passages": 0,
+                    }
             if hybrid_answer:
                 references = list(dict.fromkeys(
                     str(item.get("source_file"))
