@@ -1815,10 +1815,10 @@ def _is_broad_cultivation_query(question: str) -> bool:
     """Recognize open-ended crop-growing questions across Hindi and Hinglish."""
     q = str(question or "").lower()
     patterns = (
-        r"\\bhow\\s+to\\s+(?:grow|cultivate|farm)\\b",
-        r"\\bhow\\s+to\\s+do\\s+[a-z ]+\\s+farming\\b",
-        r"\\b(?:cultivation|farming)\\s+(?:of|for)\\b",
-        r"\\bkheti.{0,24}\\b(?:kaise|kaisa|kis\\s+tarah|karne\\s+ka\\s+tarika)\\b",
+        r"\bhow\s+to\s+(?:grow|cultivate|farm)\b",
+        r"\bhow\s+to\s+do\s+[a-z ]+\s+farming\b",
+        r"\b(?:cultivation|farming)\s+(?:of|for)\b",
+        r"\bkheti.{0,24}\b(?:kaise|kaisa|kis\s+tarah|karne\s+ka\s+tarika)\b",
         r"(?:खेती|कृषि).{0,24}(?:कैसे|विधि|तरीका|करें|करे)",
         r"(?:कैसे|विधि|तरीका).{0,24}(?:उगाएं|उगाये|उगाना|खेती)",
     )
