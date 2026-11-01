@@ -1690,7 +1690,7 @@ def build_crop_production_guide(question: str) -> tuple[str | None, list[str]]:
     if not phase_points:
         return None, []
     crop_label = _crop_display_label(crop)
-    lines = [f"{crop_label} की खेती: स्टेप-बाय-स्टेप गाइड", ""]
+    lines = [f"{CROP_NAME_HI.get(crop, crop)} की खेती: स्टेप-बाय-स्टेप गाइड", ""]
     for phase in ["before_sowing", "sowing", "early_growth", "mid_growth", "harvest"]:
         pts = phase_points.get(phase) or []
         if not pts:
@@ -1751,7 +1751,7 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         seen.add(key)
         grouped.setdefault(phase, []).append(line)
 
-    lines = [f"{_crop_display_label(crop)} की खेती: स्टेप-बाय-स्टेप गाइड", ""]
+    lines = [f"{CROP_NAME_HI.get(crop, crop)} की खेती: स्टेप-बाय-स्टेप गाइड", ""]
     for phase in phase_order:
         items = grouped.get(phase) or []
         if not items:
