@@ -499,6 +499,7 @@ class RAGAdvisor:
         broad_overview = _is_broad_cultivation_query(question) or not _crop_guide_query_intents(question)
         if crop:
             hybrid_answer, hybrid_stats = build_hybrid_crop_guide_answer(crop, passages)
+            overview_fallback_used = False
             if broad_overview and len(re.findall(r"(?m)^- ", hybrid_answer)) < 3:
                 # If OCR heading parsing collapses the section into one passage,
                 # use the complete validated deterministic guide for an overview.
@@ -523,6 +524,7 @@ class RAGAdvisor:
                         "deterministic_passages": len(re.findall(r"(?m)^- ", complete_guide)),
                         "translation_passages": 0,
                     }
+                    overview_fallback_used = True
             if hybrid_answer:
                 references = list(dict.fromkeys(
                     str(item.get("source_file"))
@@ -540,6 +542,8 @@ class RAGAdvisor:
                         "model": "deterministic_hindi+IndicTrans2",
                         "status": "hybrid",
                         **hybrid_stats,
+                        "overview_query": broad_overview,
+                        "overview_fallback_used": overview_fallback_used,
                         "evidence_passages": len(passages),
                     },
                 }
