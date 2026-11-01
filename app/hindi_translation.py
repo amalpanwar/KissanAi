@@ -189,9 +189,9 @@ def _validate_translation_output(source: str, output: str) -> str:
     if TOKEN.findall(output) != TOKEN.findall(source):
         raise TranslationValidationError('protected_values_changed')
     residual = TOKEN.sub('', output)
-    if re.search(r'\\d', residual) or re.search(r'[A-Za-z]', residual):
+    if re.search(r'\d', residual) or re.search(r'[A-Za-z]', residual):
         raise TranslationValidationError('untranslated_text_or_new_numbers')
-    if not re.search(r'[\\u0900-\\u097f]', residual):
+    if not re.search(r'[\u0900-\u097f]', residual):
         raise TranslationValidationError('hindi_missing')
     return output.strip()
 
