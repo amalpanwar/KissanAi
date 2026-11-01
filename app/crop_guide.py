@@ -564,7 +564,7 @@ def _extract_blocks(section_text: str) -> list[tuple[str, str]]:
             # Include that colon in the boundary so later sections do not get
             # absorbed into the preceding heading's body.
             heading_body = re.match(
-                r"^(\d{1,2}\.\s+[A-Z][A-Z /()\-]{2,}?):?\s+(?=[A-Z][a-z])",
+                r"^(\d{1,2}\.\s+[A-Z][A-Z /()&,.\-]{2,}?)(?::\s+|\s+(?=[A-Z][a-z]|\d))",
                 piece,
             )
             if heading_body:
