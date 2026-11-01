@@ -139,7 +139,12 @@ def _load_model(hf_token: str):
     """Load the translation model once per process; inference stays on-host."""
     import torch
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    from IndicTransToolkit.processor import IndicProcessor
+    try:
+        # Current IndicTransToolkit releases export the processor at package root.
+        from IndicTransToolkit import IndicProcessor
+    except ImportError:
+        # Retain compatibility with older toolkit installations.
+        from IndicTransToolkit.processor import IndicProcessor
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer = AutoTokenizer.from_pretrained(
@@ -234,6 +239,12 @@ def _translate_sarvam(text: str, api_key: str) -> str:
 def _failure_reason(exc: Exception, provider: str) -> str:
     if isinstance(exc, TranslationValidationError):
         return str(exc)
+    if provider == 'local' and isinstance(exc, ImportError):
+        # ImportError.name identifies the missing module without exposing secrets.
+        return f"local_import_error:{getattr(exc, 'name', None) or 'unknown_module'}"
+    status = getattr(getattr(exc, 'response', None), 'status_code', None)
+    if provider == 'local' and status:
+        return f"local_model_http_{status}"
     return type(exc).__name__ if provider == 'local' else f"{provider}_{type(exc).__name__}"
 
 
