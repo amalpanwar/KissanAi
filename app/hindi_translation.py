@@ -24,7 +24,7 @@ PROTECTED = re.compile(
     r'\[PDF page \d+\]|```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
     + SCIENTIFIC_NUMBER + r'|'
     + NUMBER + r'(?:\s*' + UNIT + r'(?![A-Za-z]))?(?:\s*' + FORMULA + r')?(?:\s*' + UNIT + r'(?![A-Za-z]))?|'
-    + FORMULA + r'|' + TECHNICAL_NAME + r'|(?i:\\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\\.)|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
+    + FORMULA + r'|' + TECHNICAL_NAME + r'|(?i:\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\.)|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
 )
 NON_HINDI = re.compile(r'[^\u0900-\u097f\n]+')
 TOKEN = re.compile(r'ZXQ[A-Z]+QXZ')
@@ -334,6 +334,8 @@ def translate_answer(result: dict) -> dict:
                         reason = _failure_reason(exc, 'sarvam')
                         errors.append(reason)
                         provider_failures.append({'provider': 'sarvam', 'reason': reason})
+                if translated is None and hf_token and local_import_failed:
+                    errors.append('local_dependencies_unavailable')
                 if translated is None and hf_token and not local_import_failed:
                     try:
                         translated = _validate_translation_output(
