@@ -1725,7 +1725,7 @@ def _technical_recommendation_rows(text: str) -> list[str]:
     """Split PDF input instructions into readable rows without rewriting values."""
     normalized = " ".join(str(text or "").split())
     parts = re.split(
-        r"\\s*(?:<\\s*|(?i:\\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\\.\\s+)|\\s*;\\s*)",
+        r"\s*(?:<\s*|(?i:\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\.\s+)|\s*;\s*)",
         normalized,
     )
     parts = [part.strip(" ;,:-") for part in parts if len(part.strip(" ;,:-")) >= 12]
@@ -1765,7 +1765,7 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         heading = str(passage.get("heading", "")).strip()
         body = source
         if heading:
-            body = re.sub(r"^" + re.escape(heading) + r"\\s*:?\\s*", "", body, count=1, flags=re.IGNORECASE)
+            body = re.sub(r"^" + re.escape(heading) + r"\s*:?\s*", "", body, count=1, flags=re.IGNORECASE)
         body = body.strip()
         page = str(passage.get("page") or "")
         citation = f"[PDF page {page}]" if page else ""
@@ -1788,8 +1788,8 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
 
         phase = _assign_phase(heading) or "early_growth"
         deterministic = _summarize_block(crop, heading, body) if heading and body else ""
-        source_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", body))
-        rendered_numbers = set(re.findall(r"\\d+(?:[.,:/–-]\\d+)*", deterministic))
+        source_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", body))
+        rendered_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", deterministic))
         source_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", body)}
         rendered_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", deterministic)}
         deterministic_is_grounded = (
@@ -1831,12 +1831,12 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
             "|---|---|---|",
         ])
         for category, recommendation, citation in technical_rows:
-            safe_recommendation = recommendation.replace("|", "\\\\|")
+            safe_recommendation = recommendation.replace("|", "\\|")
             lines.append(f"| {category} | {safe_recommendation} | {citation} |")
     if not any(grouped.values()) and not technical_rows:
         return "", {"deterministic_passages": 0, "translation_passages": 0}
 
-    return "\\n".join(lines).strip(), {
+    return "\n".join(lines).strip(), {
         "deterministic_passages": deterministic_count,
         "translation_passages": translation_count,
     }
