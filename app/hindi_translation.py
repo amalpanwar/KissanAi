@@ -139,7 +139,12 @@ def _load_model(hf_token: str):
     """Load the translation model once per process; inference stays on-host."""
     import torch
     from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    from IndicTransToolkit.processor import IndicProcessor
+    try:
+        # Current IndicTransToolkit releases export the processor at package root.
+        from IndicTransToolkit import IndicProcessor
+    except ImportError:
+        # Retain compatibility with older toolkit installations.
+        from IndicTransToolkit.processor import IndicProcessor
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     tokenizer = AutoTokenizer.from_pretrained(
