@@ -358,7 +358,9 @@ def translate_answer(result: dict) -> dict:
                         provider_failures.append({'provider': 'local', 'reason': reason})
                         local_import_failed = isinstance(exc, ImportError)
                 if translated is None:
-                    translated_chunks.append(f"⟦हिंदी अनुवाद उपलब्ध नहीं: {chunk}⟧")
+                    # Preserve the original answer text; failed_fragments records
+                    # the exact sentence and reason for the translation status panel.
+                    translated_chunks.append(chunk)
                     failed_fragments.append({
                         'text': chunk,
                         'reason': errors[-1] if errors else 'no_translation_provider_configured',
