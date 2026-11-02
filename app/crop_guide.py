@@ -1800,14 +1800,18 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
             and rendered_words.issubset(source_words)
         )
 
+        label = _heading_label_hi(heading) if heading else "फसल-गाइड"
         if deterministic_is_grounded:
             text = deterministic
             deterministic_count += 1
         else:
-            label = _heading_label_hi(heading) if heading else "फसल-गाइड"
-            text = f"{label}: {body}" if heading else body
+            text = body
             translation_count += 1
 
+        # Always separate the Hindi heading from its sentence. Without this,
+        # deterministic summaries can render as "खेत की तैयारीलोहे...".
+        if heading and text and not text.startswith(label):
+            text = f"{label}: {text}"
         line = f"- {text} {citation}".strip()
         key = _normalize_line_key(line)
         if key in seen:
