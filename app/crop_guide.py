@@ -387,9 +387,10 @@ def _norm(text: str) -> str:
 def _load_pages() -> list[str]:
     if not GUIDE_PDF.exists():
         return []
-    # Live app queries should avoid the heavier Docling path to keep Streamlit
-    # responsive. We still use Docling in offline ingestion/build scripts.
-    return read_pdf_pages(GUIDE_PDF, prefer_docling=False)
+    # Prefer Docling when its runtime is explicitly enabled. Its Markdown
+    # export retains table rows/columns for season, irrigation, and input tables;
+    # otherwise the extractor transparently falls back to pypdf.
+    return read_pdf_pages(GUIDE_PDF, prefer_docling=True)
 
 
 @lru_cache(maxsize=1)
