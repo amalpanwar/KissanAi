@@ -24,7 +24,7 @@ PROTECTED = re.compile(
     r'\[PDF page \d+\]|```[\s\S]*?```|`[^`\n]+`|\[[^\]\n]*\]\([^)]+\)|https?://[^\s<>\)]+|\*\*|__|\||'
     + SCIENTIFIC_NUMBER + r'|'
     + NUMBER + r'(?:\s*' + UNIT + r'(?![A-Za-z]))?(?:\s*' + FORMULA + r')?(?:\s*' + UNIT + r'(?![A-Za-z]))?|'
-    + FORMULA + r'|' + TECHNICAL_NAME + r'|(?i:\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\.)|(?i:\b(?:Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
+    + FORMULA + r'|' + TECHNICAL_NAME + r'|(?i:\b(?:i|ii|iii|iv|v|vi|vii|viii|ix|x)\.)|(?i:\b(?:TNAU\s+Samba\s+Wheat\s+COW\s*2|TNAU\s+Samba\s+Wheat\s+COW2|Carbendazim|Thiram|Thir\s+am|Carboxin|Phorate|Carbofuran|Endosulfan|Methyl\s+de\s+meton|Dimethoat|Isoproturon|Azospirillum|Phosphobacteria|Azophos|TNAU|PE|COW\s*\(W\)\s*\d+|CO\s*\d+|Samba\s+Wheat|Pennisetum\s+glaucum)\b)'
 )
 NON_HINDI = re.compile(r'[^\u0900-\u097f\n]+')
 TOKEN = re.compile(r'ZXQ[A-Z]+QXZ')
@@ -358,7 +358,7 @@ def translate_answer(result: dict) -> dict:
                         provider_failures.append({'provider': 'local', 'reason': reason})
                         local_import_failed = isinstance(exc, ImportError)
                 if translated is None:
-                    translated_chunks.append(chunk)
+                    translated_chunks.append(f"⟦हिंदी अनुवाद उपलब्ध नहीं: {chunk}⟧")
                     failed_fragments.append({
                         'text': chunk,
                         'reason': errors[-1] if errors else 'no_translation_provider_configured',
