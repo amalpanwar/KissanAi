@@ -132,7 +132,7 @@ def _protected_pattern(names: list[str] | None = None) -> re.Pattern:
     """Keep technical entities and structure out of the MT model input."""
     name_patterns = [r'(?<!\w)' + re.escape(name) + r'(?!\w)'
                      for name in (names or []) if name]
-    structural = r'(?m:^[ \t]*(?:#{1,6}[ \t]*|[-+*][ \t]+|\d+[.)][ \t]+))|\n+|\[(?:PDF\s+)?page\s+\d+\]|\[\d+\]'
+    structural = r'(?m:^[ \t]*(?:#{1,6}[ \t]*|[-+*][ \t]+|\d+[.)][ \t]+))|\n+|:|\[(?:PDF\s+)?page\s+\d+\]|\[\d+\]'
     return re.compile('|'.join(name_patterns + [PROTECTED.pattern, structural]), re.IGNORECASE)
 @lru_cache(maxsize=1)
 def _load_model(hf_token: str):

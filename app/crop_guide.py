@@ -1795,7 +1795,6 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         rendered_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", deterministic)}
         deterministic_is_grounded = (
             bool(deterministic)
-            and not _looks_like_noisy_ocr(body)
             and not _is_english_heavy(deterministic, crop)
             and rendered_numbers.issubset(source_numbers)
             and rendered_words.issubset(source_words)
