@@ -1793,9 +1793,20 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         rendered_numbers = set(re.findall(r"\d+(?:[.,:/–-]\d+)*", deterministic))
         source_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", body)}
         rendered_words = {word.casefold() for word in re.findall(r"[A-Za-z][A-Za-z0-9/().-]*", deterministic)}
+        # The wheat season summary deliberately retains official variety and
+        # district names in Latin script. Do not replace that concise Hindi
+        # summary with the full OCR-flattened morphology table just because
+        # those proper names make it appear English-heavy.
+        wheat_curated_heading = (
+            crop.lower() == "wheat"
+            and any(term in _heading_key(heading) for term in (
+                "SEASON AND VARIETY", "SEASON AND VARIETIES",
+                "DISTRICT/SEASON VARIETIES", "WATER MANAGEMENT",
+            ))
+        )
         deterministic_is_grounded = (
             bool(deterministic)
-            and not _is_english_heavy(deterministic, crop)
+            and (wheat_curated_heading or not _is_english_heavy(deterministic, crop))
             and rendered_numbers.issubset(source_numbers)
             and rendered_words.issubset(source_words)
         )
