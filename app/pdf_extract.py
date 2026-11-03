@@ -41,8 +41,9 @@ def _docling_converter():
         return None
     try:
         pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_ocr = False
-        pipeline_options.force_backend_text = True
+        use_ocr = os.getenv("KISAANAI_DOCLING_OCR", "").strip().lower() in {"1", "true", "yes"}
+        pipeline_options.do_ocr = use_ocr
+        pipeline_options.force_backend_text = not use_ocr
         pipeline_options.do_table_structure = True
         pipeline_options.do_code_enrichment = False
         pipeline_options.do_formula_enrichment = False
