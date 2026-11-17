@@ -437,6 +437,7 @@ Tomato,Uttar Pradesh,Bulandshahar
 Wheat,Uttar Pradesh,Bulandshahar
 Arhar(Tur/Red Gram)(Whole),Uttar Pradesh,Chandauli
 Onion,Uttar Pradesh,Chandauli
+Paddy,Uttar Pradesh,Chandauli
 Paddy(Common),Uttar Pradesh,Chandauli
 Red gram/Arhar/Tur(whole),Uttar Pradesh,Chandauli
 Wheat,Uttar Pradesh,Chandauli
@@ -807,7 +808,9 @@ Bengal Gram(Gram)(Whole),Uttar Pradesh,Hardoi
 Cotton,Uttar Pradesh,Hardoi
 Green Gram(Moong)(Whole),Uttar Pradesh,Hardoi
 Groundnut,Uttar Pradesh,Hardoi
+Jowar,Uttar Pradesh,Hardoi
 Jowar(Sorghum),Uttar Pradesh,Hardoi
+Jute,Uttar Pradesh,Hardoi
 Maize,Uttar Pradesh,Hardoi
 Moong,Uttar Pradesh,Hardoi
 Mustard,Uttar Pradesh,Hardoi
@@ -1062,6 +1065,7 @@ Jowar(Sorghum),Uttar Pradesh,Mahoba
 Lentil(Masur)(Whole),Uttar Pradesh,Mahoba
 Moong,Uttar Pradesh,Mahoba
 Mustard,Uttar Pradesh,Mahoba
+Paddy,Uttar Pradesh,Mahoba
 Sesamum,Uttar Pradesh,Mahoba
 "Sesamum(Sesame,Gingelly,Til)",Uttar Pradesh,Mahoba
 Tur,Uttar Pradesh,Mahoba
@@ -1535,6 +1539,7 @@ Wheat,Uttar Pradesh,Sant Kabir Nagar
 Arhar(Tur/Red Gram)(Whole),Uttar Pradesh,Shahjahanpur
 Bajra,Uttar Pradesh,Shahjahanpur
 Bajra(Pearl Millet/Cumbu),Uttar Pradesh,Shahjahanpur
+Cotton,Uttar Pradesh,Shahjahanpur
 Green Gram(Moong)(Whole),Uttar Pradesh,Shahjahanpur
 Groundnut,Uttar Pradesh,Shahjahanpur
 Maize,Uttar Pradesh,Shahjahanpur
