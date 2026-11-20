@@ -1322,6 +1322,22 @@ def _summarize_block(crop: str, heading: str, body: str) -> str:
         return f"{label}: {' '.join(parts) or _translate_terms(_compress_sentences(text))}"
 
     if "SEASON AND VARIETY" in heading_key or "SEASON AND VARIETIES" in heading_key or "DISTRICT/SEASON VARIETIES" in heading_key:
+        if crop.lower() == "wheat":
+            variety = _extract_first(
+                r"Variety\s*:\s*(.*?)(?:\s+\d+\.\s+Morphological|\s+Morphological|$)",
+                text,
+            )
+            variety = re.sub(r"\s+2\.$", "", variety or "").strip()
+            variety = re.sub(r"\s+", " ", variety)
+            variety = re.sub(r"\bCOW\s+2\b", "COW 2", variety, flags=re.IGNORECASE)
+            variety_line = f"उपलब्ध किस्में: {variety}।" if variety else (
+                "उपलब्ध किस्म का नाम स्रोत में स्पष्ट नहीं है।"
+            )
+            return (
+                f"{label}: बुवाई 15 अक्टूबर से नवंबर के पहले सप्ताह तक करें और "
+                f"नवंबर के पहले पखवाड़े तक पूरी करें। {variety_line} "
+                "ये मार्गदर्शन फसल उत्पादन गाइड के तमिलनाडु खंड से है।"
+            )
         if re.search(r"Zone\s+District/Season\s+Month", text, flags=re.IGNORECASE):
             return f"{label}: उपयुक्त किस्म और बुवाई का समय अपने क्षेत्र, पानी की उपलब्धता और मौसम के अनुसार चुनें।"
         sow = _extract_first(r"Ideal sowing time is\s*(.*?)(?:\.|Variety)", text)
@@ -1806,7 +1822,14 @@ def build_hybrid_crop_guide_answer(crop: str, passages: list[dict[str, Any]]) ->
         )
         deterministic_is_grounded = (
             bool(deterministic)
-            and (wheat_curated_heading or not _is_english_heavy(deterministic, crop))
+            and (
+                not _is_english_heavy(deterministic, crop)
+                or (
+                    wheat_curated_heading
+                    and bool(re.search(r"[\u0900-\u097f]{12,}", deterministic))
+                    and len(re.findall(r"\b[A-Za-z]{2,}\b", deterministic)) <= 12
+                )
+            )
             and rendered_numbers.issubset(source_numbers)
             and rendered_words.issubset(source_words)
         )
