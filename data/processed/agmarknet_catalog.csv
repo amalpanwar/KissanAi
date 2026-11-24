@@ -447,6 +447,7 @@ Arhar(Tur/Red Gram)(Whole),Uttar Pradesh,Chandauli
 Onion,Uttar Pradesh,Chandauli
 Paddy,Uttar Pradesh,Chandauli
 Paddy(Common),Uttar Pradesh,Chandauli
+Potato,Uttar Pradesh,Chandauli
 Red gram/Arhar/Tur(whole),Uttar Pradesh,Chandauli
 Tomato,Uttar Pradesh,Chandauli
 Wheat,Uttar Pradesh,Chandauli
@@ -882,11 +883,13 @@ Bajra(Pearl Millet/Cumbu),Uttar Pradesh,Jaunpur
 Green Gram(Moong)(Whole),Uttar Pradesh,Jaunpur
 Groundnut,Uttar Pradesh,Jaunpur
 Maize,Uttar Pradesh,Jaunpur
+Moong,Uttar Pradesh,Jaunpur
 Mustard,Uttar Pradesh,Jaunpur
 Onion,Uttar Pradesh,Jaunpur
 Paddy,Uttar Pradesh,Jaunpur
 Paddy(Common),Uttar Pradesh,Jaunpur
 Potato,Uttar Pradesh,Jaunpur
+Ragi,Uttar Pradesh,Jaunpur
 "Sesamum(Sesame,Gingelly,Til)",Uttar Pradesh,Jaunpur
 Tomato,Uttar Pradesh,Jaunpur
 Wheat,Uttar Pradesh,Jaunpur
@@ -1528,6 +1531,7 @@ Bajra(Pearl Millet/Cumbu),Uttar Pradesh,Sambhal
 Barley(Jau),Uttar Pradesh,Sambhal
 Bengal Gram(Gram)(Whole),Uttar Pradesh,Sambhal
 Black Gram(Urd Beans)(Whole),Uttar Pradesh,Sambhal
+Cotton,Uttar Pradesh,Sambhal
 Green Gram(Moong)(Whole),Uttar Pradesh,Sambhal
 Groundnut,Uttar Pradesh,Sambhal
 Jowar(Sorghum),Uttar Pradesh,Sambhal
